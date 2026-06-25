@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173"  # comma-separated list
     SESSION_COOKIE_SECURE: bool = False  # True в проде с HTTPS
 
+    # Общий секрет приёма вебхуков Яндекс-Формы (заголовок X-Intake-Token).
+    # None → эндпоинт приёма отключён (отдаёт INTAKE_DISABLED).
+    YANDEX_INTAKE_TOKEN: str | None = None
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
