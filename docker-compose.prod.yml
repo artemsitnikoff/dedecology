@@ -1,11 +1,13 @@
-# Production compose. На VPS:
-#   docker compose -f docker-compose.prod.yml up -d db          # сначала БД
+# Production compose. На VPS (по шагам — см. DEPLOY.md):
+#   docker compose -f docker-compose.prod.yml up -d --build db
 #   docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
 #   docker compose -f docker-compose.prod.yml run --rm backend python -m app.seed
-#   docker compose -f docker-compose.prod.yml up -d              # поднять всё
+#   docker compose -f docker-compose.prod.yml up -d --build      # поднять всё
 #
-# Порты бек/фронт привязаны к 127.0.0.1 — наружу выходит через общий nginx на VPS.
-# Postgres наружу НЕ публикуется — доступ только внутри compose-сети.
+# Заход по IP на http://<SERVER_IP>:8888 (пока нет домена). ТОЛЬКО порт 8888 открыт наружу:
+# nginx фронта проксирует /api/ → backend:8000 внутри compose-сети (тот же origin, без CORS).
+# backend и postgres наружу НЕ публикуются. Завтра при домене+HTTPS — общий nginx/Caddy на 80/443
+# перед этим контейнером + SESSION_COOKIE_SECURE=True.
 
 services:
   db:
@@ -34,8 +36,8 @@ services:
       - backend_storage:/app/storage
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/dedecolog
-    ports:
-      - "127.0.0.1:8000:8000"
+    # Наружу НЕ публикуем: доступен по имени `backend:8000` внутри compose-сети (через nginx-прокси
+    # фронта). Для отладки на самом сервере можно временно добавить: ports: ["127.0.0.1:8000:8000"].
     # Production: без --reload, 2 worker'а. При мало RAM можно --workers 1.
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
 
@@ -45,8 +47,11 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}
     restart: unless-stopped
+    depends_on:
+      - backend
+    # Единственный открытый наружу порт — приложение на http://<SERVER_IP>:8888.
     ports:
-      - "127.0.0.1:8080:80"
+      - "8888:80"
 
 volumes:
   dedecolog_pgdata:

@@ -110,13 +110,19 @@ npm run dev            # дев-сервер :5173 (нужен бэк на VITE_
 ```
 
 ## 8. Деплой
-- **Dev:** `cp .env.example .env && docker compose up --build`. Бек :8000, фронт :8080, postgres :5432.
-  Бек на старте: `alembic upgrade head && python -m app.seed && uvicorn … --reload`.
-- **Prod:** `docker-compose.prod.yml` — без `--reload`, `--workers 2`, порты на 127.0.0.1 (наружу
-  через общий nginx VPS), postgres не публикуется, `restart: unless-stopped`.
-- **Замечание о среде:** локального бэк-рантайма (Docker/Postgres) в этой машине нет — сквозной
-  смоук-тест (логин→таблица→статусы→.xlsx) ещё НЕ прогонялся вживую; «компилируется/тесты/сборка
-  зелёные» ≠ «прогнан end-to-end». Прогнать на машине с Docker/Postgres.
+Пошаговая инструкция для сервера — **`DEPLOY.md`**.
+- **Prod по IP (сейчас, без домена):** `docker-compose.prod.yml` — наружу открыт ТОЛЬКО фронт на
+  **`<SERVER_IP>:8888`**; nginx фронта проксирует `/api/` → `backend:8000` (тот же origin, без CORS,
+  `VITE_API_BASE_URL=/api/v1`); backend и postgres наружу не публикуются. По HTTP/IP обязательно
+  `SESSION_COOKIE_SECURE=False`. Завтра домен+HTTPS → Caddy/nginx на 80/443 + `SECURE=True`.
+- **CI/CD (как у glafira):** `.github/workflows/deploy.yml` — push в `main` → SSH на VPS → `git pull
+  --ff-only` → пересборка изменившейся части → `up -d` → `alembic upgrade head` если менялись миграции.
+  Секреты репозитория: `SSH_HOST`/`SSH_USER`/`SSH_PRIVATE_KEY`. Первый деплой (clone + .env + seed) —
+  вручную. ⚠️ `.github/workflows/*` пушится только токеном со scope `workflow`.
+- **Dev:** `cp .env.example .env && docker compose up --build` (фронт :8080, бек :8000, postgres :5432).
+- **Замечание о среде разработки:** локального Docker/Postgres в этой машине нет — сквозной смоук-тест
+  (логин→таблица→статусы→.xlsx) ещё НЕ прогонялся вживую; «компилируется/тесты/сборка зелёные» ≠
+  «прогнан end-to-end». Первый запуск — на сервере по `DEPLOY.md`.
 
 ## 9. Правило №1: НЕТ фейковых заглушек
 Контрол либо работает по-настоящему, либо честно отключён/подписан. Запрещено: `console.log`/
