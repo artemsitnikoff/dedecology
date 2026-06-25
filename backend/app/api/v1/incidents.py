@@ -16,6 +16,8 @@ from ...deps import get_current_user
 from ...models import User
 from ...schemas.base import Paginated
 from ...schemas.incident import (
+    BulkDelete,
+    BulkDeleteResult,
     BulkStatusResult,
     BulkStatusUpdate,
     ExportSelection,
@@ -145,6 +147,20 @@ async def bulk_status(
     )
     await session.commit()
     return BulkStatusResult(updated=updated)
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResult)
+async def bulk_delete(
+    payload: BulkDelete,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Массовое удаление инцидентов (hard delete + audit на каждый)."""
+    deleted = await incident_service.bulk_delete(
+        session, payload.ids, current_user.id
+    )
+    await session.commit()
+    return BulkDeleteResult(deleted=deleted)
 
 
 @router.get("/{incident_id}", response_model=IncidentDetail)

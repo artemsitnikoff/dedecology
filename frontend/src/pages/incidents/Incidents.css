@@ -381,6 +381,38 @@
   height: 16px;
   background: var(--ark-blue-100);
 }
+.de-inc-bulk-confirm {
+  font-size: var(--fs-13);
+  color: var(--ark-red-600);
+  font-weight: 600;
+}
+
+/* красная кнопка-триггер «Удалить» — тонкий outline */
+.de-inc-btn-danger-outline {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--ark-red-100);
+  background: var(--bg-1);
+  color: var(--ark-red-600);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+/* основная опасная кнопка «Да, удалить» — сплошная заливка */
+.de-inc-btn-danger {
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 7px;
+  border: 0;
+  background: var(--ark-red-500);
+  color: var(--ark-white);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.de-inc-btn-danger:hover:not(:disabled) {
+  filter: none;
+  background: var(--ark-red-600);
+}
 
 /* ---------- Контент / таблица ---------- */
 .de-inc-content {

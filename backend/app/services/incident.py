@@ -280,3 +280,43 @@ async def bulk_status(
 
     await session.flush()
     return updated
+
+
+async def bulk_delete(
+    session: AsyncSession,
+    ids: list[UUID],
+    actor_user_id: UUID,
+) -> int:
+    """Массовое удаление (POST /bulk-delete). Hard delete + audit на каждый.
+
+    No-op-safe: id, которых нет в БД, просто пропускаются. Возвращает число
+    реально удалённых строк.
+    """
+    if not ids:
+        return 0
+
+    result = await session.execute(select(Incident).where(Incident.id.in_(ids)))
+    incidents = result.scalars().all()
+
+    count = 0
+    for incident in incidents:
+        await audit(
+            session,
+            action="delete",
+            entity_type="incident",
+            entity_id=incident.id,
+            before={
+                "status": incident.status,
+                "source": incident.source,
+                "fio": incident.fio,
+                "region": incident.region,
+                "city": incident.city,
+                "street": incident.street,
+            },
+            actor_user_id=actor_user_id,
+        )
+        await session.delete(incident)
+        count += 1
+
+    await session.flush()
+    return count

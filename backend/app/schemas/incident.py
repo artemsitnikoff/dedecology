@@ -64,6 +64,14 @@ class BulkStatusResult(BaseModel):
     updated: int
 
 
+class BulkDelete(BaseModel):
+    ids: list[UUID]
+
+
+class BulkDeleteResult(BaseModel):
+    deleted: int
+
+
 class FunnelCounts(BaseModel):
     all: int
     new: int

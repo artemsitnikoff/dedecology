@@ -4,7 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { useIncidents } from '@/api/hooks/useIncidents';
 import type { IncidentFilters, SortKey, SortOrder } from '@/api/hooks/useIncidents';
 import { useFunnelCounts } from '@/api/hooks/useFunnelCounts';
-import { exportAll, exportSelected, useBulkStatus } from '@/api/mutations/incidents';
+import { exportAll, exportSelected, useBulkStatus, useBulkDelete } from '@/api/mutations/incidents';
 import type { Source, Status } from '@/api/aliases';
 import { Funnel } from './Funnel';
 import { FilterBar } from './FilterBar';
@@ -158,12 +158,14 @@ export function IncidentsPage() {
   // (один queryKey → дедуп). all = grand total по всем обращениям.
   const grandTotalQuery = useFunnelCounts({});
   const bulkStatus = useBulkStatus();
+  const bulkDelete = useBulkDelete();
 
   const rows = incidentsQuery.data?.items ?? [];
   const total = incidentsQuery.data?.total ?? 0;
 
   // ----- Локальный UI-стейт -----
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [lb, setLb] = useState<{ id: string; idx: number } | null>(null);
 
@@ -172,6 +174,7 @@ export function IncidentsPage() {
   selectedRef.current = selected;
 
   const toggleSelect = useCallback((id: string) => {
+    setConfirmingDelete(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -182,11 +185,18 @@ export function IncidentsPage() {
 
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const toggleAll = useCallback(() => {
+    setConfirmingDelete(false);
     setSelected((prev) => {
       const everySelected = rows.length > 0 && rows.every((r) => prev.has(r.id));
       return everySelected ? new Set<string>() : new Set(rows.map((r) => r.id));
     });
   }, [rows]);
+
+  /** Снять всё выделение и сбросить состояние подтверждения удаления. */
+  const clearSelection = useCallback(() => {
+    setSelected(new Set());
+    setConfirmingDelete(false);
+  }, []);
 
   const openDetail = useCallback((id: string) => setDetailId(id), []);
   const openPhoto = useCallback((id: string) => setLb({ id, idx: 0 }), []);
@@ -233,9 +243,23 @@ export function IncidentsPage() {
     if (ids.length === 0) return;
     bulkStatus.mutate(
       { ids, status: 'exported' },
-      { onSuccess: () => setSelected(new Set()) }
+      { onSuccess: () => clearSelection() }
     );
-  }, [bulkStatus]);
+  }, [bulkStatus, clearSelection]);
+
+  /** Подтверждённое удаление: после успеха чистим выделение и закрываем drawer/lightbox удалённых. */
+  const handleConfirmDelete = useCallback(() => {
+    const ids = Array.from(selectedRef.current);
+    if (ids.length === 0) return;
+    bulkDelete.mutate(ids, {
+      onSuccess: () => {
+        const deletedSet = new Set(ids);
+        setDetailId((cur) => (cur && deletedSet.has(cur) ? null : cur));
+        setLb((cur) => (cur && deletedSet.has(cur.id) ? null : cur));
+        clearSelection();
+      },
+    });
+  }, [bulkDelete, clearSelection]);
 
   return (
     <div className="de-inc-wrap">
@@ -289,30 +313,66 @@ export function IncidentsPage() {
         <div className="de-inc-bulkbar">
           <span className="de-inc-bulk-count">Выбрано: {selected.size}</span>
           <div className="de-inc-bulk-sep" />
-          <button
-            type="button"
-            className="de-inc-btn de-inc-btn-success"
-            onClick={handleExportSelected}
-          >
-            <Icon name="download" size={14} />
-            Выгрузить в Excel
-          </button>
-          <button
-            type="button"
-            className="de-inc-btn de-inc-btn-bulk-outline"
-            onClick={handleMarkExported}
-            disabled={bulkStatus.isPending}
-          >
-            Пометить «Выгружен»
-          </button>
-          <div className="de-inc-spacer" />
-          <button
-            type="button"
-            className="de-inc-btn de-inc-btn-ghost"
-            onClick={() => setSelected(new Set())}
-          >
-            Снять выделение
-          </button>
+          {confirmingDelete ? (
+            <>
+              <span className="de-inc-bulk-confirm">
+                Удалить {selected.size}{' '}
+                {selected.size === 1 ? 'обращение' : 'обращений'}? Действие необратимо.
+              </span>
+              <div className="de-inc-spacer" />
+              <button
+                type="button"
+                className="de-inc-btn de-inc-btn-danger"
+                onClick={handleConfirmDelete}
+                disabled={bulkDelete.isPending}
+              >
+                {bulkDelete.isPending ? 'Удаление…' : 'Да, удалить'}
+              </button>
+              <button
+                type="button"
+                className="de-inc-btn de-inc-btn-ghost"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={bulkDelete.isPending}
+              >
+                Отмена
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="de-inc-btn de-inc-btn-success"
+                onClick={handleExportSelected}
+              >
+                <Icon name="download" size={14} />
+                Выгрузить в Excel
+              </button>
+              <button
+                type="button"
+                className="de-inc-btn de-inc-btn-bulk-outline"
+                onClick={handleMarkExported}
+                disabled={bulkStatus.isPending}
+              >
+                Пометить «Выгружен»
+              </button>
+              <button
+                type="button"
+                className="de-inc-btn de-inc-btn-danger-outline"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Icon name="trash" size={14} />
+                Удалить
+              </button>
+              <div className="de-inc-spacer" />
+              <button
+                type="button"
+                className="de-inc-btn de-inc-btn-ghost"
+                onClick={clearSelection}
+              >
+                Снять выделение
+              </button>
+            </>
+          )}
         </div>
       )}
 

@@ -95,3 +95,18 @@ export function useBulkStatus() {
     },
   });
 }
+
+/** POST /incidents/bulk-delete — массовое удаление по списку id (необратимо). */
+export function useBulkDelete() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await api.post<{ deleted: number }>('/incidents/bulk-delete', { ids });
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['incidents'] });
+      qc.invalidateQueries({ queryKey: ['incidents', 'funnel'] });
+    },
+  });
+}

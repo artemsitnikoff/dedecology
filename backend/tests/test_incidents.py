@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.errors import NotFoundError
 from app.schemas.base import Paginated
 from app.schemas.incident import FunnelCounts, IncidentDetail, IncidentListItem
 
@@ -170,3 +171,54 @@ async def test_bulk_status(client):
         )
     assert resp.status_code == 200
     assert resp.json() == {"updated": 2}
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete(client):
+    """Удаление 2 реальных инцидентов → {"deleted": 2}; затем GET /{id} → 404."""
+    ids = [uuid4(), uuid4()]
+
+    # Сервис «удаляет» обе реальные строки.
+    fake_delete = AsyncMock(return_value=len(ids))
+    with patch(
+        "app.api.v1.incidents.incident_service.bulk_delete",
+        new=fake_delete,
+    ):
+        resp = await client.post(
+            "/api/v1/incidents/bulk-delete",
+            json={"ids": [str(i) for i in ids]},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 2}
+    # Роутер передал именно эти id в сервис.
+    called_ids = fake_delete.call_args.args[1]
+    assert [str(i) for i in called_ids] == [str(i) for i in ids]
+
+    # Удалённые инциденты больше не находятся: GET /{id} → 404.
+    with patch(
+        "app.api.v1.incidents.incident_service.get_incident",
+        new=AsyncMock(side_effect=NotFoundError("Инцидент")),
+    ):
+        gone = await client.get(f"/api/v1/incidents/{ids[0]}")
+    assert gone.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_skips_nonexistent(client):
+    """Несуществующий UUID в запросе не учитывается: deleted = число реальных строк."""
+    real_ids = [uuid4(), uuid4()]
+    missing_id = uuid4()
+
+    # Сервис no-op-safe: считает только реально удалённые (real_ids), missing пропущен.
+    fake_delete = AsyncMock(return_value=len(real_ids))
+    with patch(
+        "app.api.v1.incidents.incident_service.bulk_delete",
+        new=fake_delete,
+    ):
+        resp = await client.post(
+            "/api/v1/incidents/bulk-delete",
+            json={"ids": [str(i) for i in (*real_ids, missing_id)]},
+        )
+    assert resp.status_code == 200
+    # deleted отражает только реальные строки, несуществующий id не посчитан.
+    assert resp.json() == {"deleted": 2}
