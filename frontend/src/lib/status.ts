@@ -64,7 +64,7 @@ export const SOURCE: Record<Source, SourceMeta> = {
     fg: 'var(--ark-violet-500)',
   },
   form: {
-    label: 'Яндекс форма',
+    label: 'Форма',
     bg: 'var(--ark-yellow-100)',
     fg: 'var(--ark-yellow-600)',
   },

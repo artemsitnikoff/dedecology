@@ -1,0 +1,276 @@
+/* Публичная форма обращения ТКО — standalone, центрированная карточка на мягком
+   фоне. Адаптация дизайна публичного опроса Глафиры под бренд ДедЭколог
+   (эко-зелёный). Scoped к .de-rf-*. Цвета — только через --ark-* / семантику. */
+
+.de-rf-bg {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-12) var(--space-4) var(--space-16);
+  box-sizing: border-box;
+  background: linear-gradient(160deg, var(--brand-bg) 0%, var(--ark-green-100) 100%);
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+}
+
+.de-rf-card {
+  width: 100%;
+  max-width: 560px;
+  background: var(--ark-white);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.de-rf-brandbar {
+  height: 6px;
+  background: linear-gradient(90deg, var(--de-brand), var(--de-brand-light));
+}
+
+/* --- Шапка --- */
+.de-rf-header {
+  padding: var(--space-6) var(--space-6) var(--space-2);
+}
+.de-rf-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.de-rf-brand-emoji {
+  font-size: var(--fs-24);
+  line-height: 1;
+}
+.de-rf-brand-name {
+  font-size: var(--fs-16);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--brand-fg);
+}
+.de-rf-title {
+  font-size: var(--fs-24);
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 var(--space-2);
+  color: var(--fg-1);
+}
+.de-rf-sub {
+  font-size: var(--fs-14);
+  line-height: 1.5;
+  color: var(--fg-2);
+  margin: 0;
+}
+
+/* --- Поля --- */
+.de-rf-fields {
+  padding: var(--space-4) var(--space-6) var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.de-rf-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.de-rf-field-addr {
+  position: relative;
+}
+.de-rf-label {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--fg-2);
+}
+.de-rf-req {
+  color: var(--risk-high, var(--ark-red-500));
+}
+
+.de-rf-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--border-1);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  color: var(--fg-1);
+  background: var(--bg-2);
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.de-rf-input::placeholder {
+  color: var(--fg-3);
+}
+.de-rf-input:focus {
+  outline: none;
+  border-color: var(--de-brand);
+  background: var(--ark-white);
+}
+.de-rf-mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+}
+
+/* --- Выпадающий список подсказок --- */
+.de-rf-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: var(--space-1);
+  background: var(--ark-white);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-dropdown);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.de-rf-suggest {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  color: var(--fg-1);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.de-rf-suggest:last-child {
+  border-bottom: none;
+}
+.de-rf-suggest:hover {
+  background: var(--brand-bg);
+}
+.de-rf-dropdown-empty {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--fs-13);
+  color: var(--fg-3);
+}
+
+/* --- Чипы (баки) --- */
+.de-rf-chips {
+  display: flex;
+  gap: var(--space-2);
+}
+.de-rf-chip {
+  flex: 1;
+  height: 44px;
+  background: var(--bg-2);
+  border: 1.5px solid var(--border-1);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.de-rf-chip:hover {
+  border-color: var(--ark-gray-400);
+}
+.de-rf-chip.active {
+  border-color: var(--de-brand);
+  background: var(--brand-bg);
+  color: var(--brand-fg);
+}
+
+/* --- Фото --- */
+.de-rf-file {
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+}
+.de-rf-thumbs {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.de-rf-thumb {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-1);
+}
+.de-rf-inline-err {
+  font-size: var(--fs-13);
+  color: var(--error-fg);
+}
+
+/* --- Ханипот: визуально скрыт, но доступен ботам --- */
+.de-rf-hp {
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --- Низ / ошибки / кнопка --- */
+.de-rf-error {
+  margin: var(--space-4) var(--space-6) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: var(--radius-md);
+  color: var(--error-fg);
+  font-size: var(--fs-13);
+}
+.de-rf-submit {
+  display: block;
+  width: calc(100% - var(--space-6) * 2);
+  margin: var(--space-6) var(--space-6) var(--space-2);
+  height: 50px;
+  background: var(--de-brand);
+  color: var(--ark-white);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-16);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.de-rf-submit:hover:not(:disabled) {
+  background: var(--brand-accent-strong);
+}
+.de-rf-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.de-rf-foot {
+  text-align: center;
+  padding: var(--space-2) 0 var(--space-6);
+  font-size: var(--fs-12);
+  color: var(--fg-4);
+}
+
+/* --- Спасибо --- */
+.de-rf-thanks {
+  padding: var(--space-16) var(--space-8);
+  text-align: center;
+}
+.de-rf-thanks-emoji {
+  font-size: 48px;
+  margin-bottom: var(--space-3);
+}
+.de-rf-thanks h2 {
+  font-size: var(--fs-20);
+  font-weight: 700;
+  margin: 0 0 var(--space-2);
+  color: var(--fg-1);
+}
+.de-rf-thanks p {
+  font-size: var(--fs-14);
+  line-height: 1.55;
+  color: var(--fg-2);
+  margin: 0 auto;
+  max-width: 420px;
+}

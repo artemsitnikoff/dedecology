@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuthStore, selectIsAuthenticated } from '@/store/authStore';
@@ -17,6 +17,8 @@ const SettingsPage = lazy(() =>
 const NotFoundPage = lazy(() =>
   import('@/pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage }))
 );
+// Публичная форма обращения — без авторизации и без сайдбара (sibling /login).
+const ReportFormPage = lazy(() => import('@/pages/public/ReportFormPage'));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const isAuthenticated = useAuthStore(selectIsAuthenticated);
@@ -62,6 +64,14 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/form"
+        element={
+          <Suspense fallback={null}>
+            <ReportFormPage />
+          </Suspense>
+        }
+      />
       <Route
         path="/"
         element={
