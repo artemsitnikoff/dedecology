@@ -1,0 +1,63 @@
+  name: Deploy to VPS
+
+  # CI/CD как у glafira: push в main → SSH на сервер → git pull → пересборка изменившейся
+  # части (backend/frontend) → up -d → alembic upgrade head, если менялись миграции.
+  # Первый деплой (clone + .env + seed) делается ВРУЧНУЮ — см. DEPLOY.md. CI обслуживает
+  # последующие пуши. Секреты репозитория: SSH_HOST, SSH_USER, SSH_PRIVATE_KEY (опц. SSH_PORT).
+
+  on:
+    push:
+      branches: [main]
+    workflow_dispatch:        # можно запустить вручную из вкладки Actions
+
+  jobs:
+    deploy:
+      runs-on: ubuntu-latest
+      steps:
+        - name: SSH deploy
+          uses: appleboy/ssh-action@v1.0.3
+          with:
+            host: ${{ secrets.SSH_HOST }}
+            username: ${{ secrets.SSH_USER }}
+            key: ${{ secrets.SSH_PRIVATE_KEY }}
+            # Нестандартный SSH-порт? добавь секрет SSH_PORT и строку: port: ${{ secrets.SSH_PORT }}
+            script_stop: true
+            command_timeout: 20m
+            script: |
+              set -e
+              cd /var/www/dedecology      # путь, где склонирован репозиторий на сервере
+
+              git fetch origin main --quiet
+              LOCAL=$(git rev-parse HEAD)
+              REMOTE=$(git rev-parse origin/main)
+
+              if [ "$LOCAL" = "$REMOTE" ]; then
+                echo "No new commits — nothing to deploy."
+                exit 0
+              fi
+  
+              echo "[$(date -Iseconds)] new commits: $LOCAL → $REMOTE"
+              git pull origin main --ff-only
+
+              CHANGED=$(git diff --name-only "$LOCAL" "$REMOTE")
+              REBUILD_FRONT=$(echo "$CHANGED" | grep -E "^frontend/" || true)
+              REBUILD_BACK=$(echo "$CHANGED" | grep -E "^backend/" || true)
+
+              if [ -n "$REBUILD_BACK" ]; then
+                echo "Rebuild backend"
+                docker compose -f docker-compose.prod.yml build backend
+              fi
+              if [ -n "$REBUILD_FRONT" ]; then
+                echo "Rebuild frontend"
+                docker compose -f docker-compose.prod.yml build frontend
+              fi
+
+              docker compose -f docker-compose.prod.yml up -d
+  
+              # Миграции применяем ТОЛЬКО если менялись файлы версий alembic.
+              if echo "$CHANGED" | grep -qE "^backend/alembic/versions/"; then
+                echo "Run alembic upgrade head"
+                docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+              fi
+
+              echo "[$(date -Iseconds)] deployed: $REMOTE"
