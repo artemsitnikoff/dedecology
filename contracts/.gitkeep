@@ -1,0 +1,1 @@
+openapi.json генерируется из живого бэкенда позже (export схемы FastAPI → contracts/openapi.json), затем фронт делает `npm run types:gen`. Сейчас типы во frontend/src/api/aliases.ts написаны руками под Pydantic-схемы.

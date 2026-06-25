@@ -1,0 +1,72 @@
+from pydantic import BaseModel
+from typing import Literal, Optional
+from uuid import UUID
+from datetime import datetime
+
+from .base import ORMBase
+
+IncidentStatus = Literal["new", "found", "none", "exported"]
+IncidentSource = Literal["max", "form"]
+
+
+class IncidentListItem(ORMBase):
+    """Строка таблицы инцидентов."""
+    id: UUID
+    source: IncidentSource
+    status: IncidentStatus
+    fio: str
+    region: str
+    city: str
+    street: str
+    coords: str
+    photo_time: Optional[datetime]
+    photos: int
+    photo_urls: list[str]
+    msg: Optional[str]
+    received_at: datetime
+
+
+class IncidentDetail(ORMBase):
+    """Полная карточка инцидента (включая bins)."""
+    id: UUID
+    source: IncidentSource
+    status: IncidentStatus
+    fio: str
+    region: str
+    city: str
+    street: str
+    coords: str
+    photo_time: Optional[datetime]
+    photos: int
+    photo_urls: list[str]
+    msg: Optional[str]
+    bins: Optional[bool]
+    received_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class IncidentStatusUpdate(BaseModel):
+    status: IncidentStatus
+
+
+class BulkStatusUpdate(BaseModel):
+    ids: list[UUID]
+    status: IncidentStatus
+
+
+class ExportSelection(BaseModel):
+    """Тело POST /incidents/export — id выбранных инцидентов."""
+    ids: list[UUID]
+
+
+class BulkStatusResult(BaseModel):
+    updated: int
+
+
+class FunnelCounts(BaseModel):
+    all: int
+    new: int
+    found: int
+    none: int
+    exported: int

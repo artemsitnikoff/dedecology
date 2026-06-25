@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+
+# Virtualenv
+venv/
+.venv/
+env/
+ENV/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Alembic temp
+backend/alembic/versions/__pycache__/
+
+# Node (frontend)
+node_modules/
+.next/
+.nuxt/
+*.tsbuildinfo
+frontend/.vite/
+
+# Backend file storage (uploads/exports)
+storage/
+backend/storage/
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+
+# Выгрузки/экспорты с ПДН — НИКОГДА не коммитить
+*.xlsx
+
+# Бэкапы БД — НИКОГДА не коммитить
+/backups/
+*.sql.gz
+*.dump

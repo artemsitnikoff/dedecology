@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ДедЭколог — сбор обращений</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<!-- React + Babel (как у Глафиры) -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js" crossorigin></script>
+
+<!-- Данные (картинки в data-URI + хелперы), грузятся до компонентов -->
+<script src="imgs.js"></script>
+<script src="data.js"></script>
+
+<!-- Компоненты -->
+<script type="text/babel" src="components/Sidebar.jsx"></script>
+<script type="text/babel" src="components/Funnel.jsx"></script>
+<script type="text/babel" src="components/FilterBar.jsx"></script>
+<script type="text/babel" src="components/IncidentsTable.jsx"></script>
+<script type="text/babel" src="components/DetailDrawer.jsx"></script>
+<script type="text/babel" src="components/Lightbox.jsx"></script>
+<script type="text/babel" src="components/Settings.jsx"></script>
+
+<!-- Точка входа -->
+<script type="text/babel" src="App.jsx"></script>
+</body>
+</html>

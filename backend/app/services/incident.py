@@ -1,0 +1,282 @@
+"""Инциденты: список+фильтры+сортировка, воронка, карточка, смена статуса (SPEC §3)."""
+
+import math
+from datetime import datetime, time, timezone
+from uuid import UUID
+
+from sqlalchemy import and_, asc, case, desc, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..core.errors import NotFoundError, ValidationError
+from ..models import Incident
+from ..schemas.base import Paginated
+from ..schemas.incident import FunnelCounts, IncidentListItem
+from .audit import audit
+
+# Порядок статусов в БД для сортировки `status` (new < found < none < exported)
+_STATUS_ORDER = case(
+    (Incident.status == "new", 0),
+    (Incident.status == "found", 1),
+    (Incident.status == "none", 2),
+    (Incident.status == "exported", 3),
+    else_=99,
+)
+
+# sort-ключ из API → колонка/выражение
+_SORT_COLUMNS = {
+    "date": Incident.photo_time,
+    "time": Incident.photo_time,
+    "region": Incident.region,
+    "city": Incident.city,
+    "address": Incident.street,
+    "status": _STATUS_ORDER,
+    "source": Incident.source,
+}
+
+
+def _search_clause(search: str):
+    """ilike-OR по fio/region/city/street/coords/msg."""
+    term = f"%{search.strip()}%"
+    return or_(
+        Incident.fio.ilike(term),
+        Incident.region.ilike(term),
+        Incident.city.ilike(term),
+        Incident.street.ilike(term),
+        Incident.coords.ilike(term),
+        Incident.msg.ilike(term),
+    )
+
+
+def _base_filters(
+    search: str | None,
+    source: list[str] | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> list:
+    """Фильтры, общие для списка и воронки (без статуса)."""
+    filters: list = []
+    if search and search.strip():
+        filters.append(_search_clause(search))
+    if source:
+        filters.append(Incident.source.in_(source))
+    # Период по photo_time (НЕ received_at), включительно
+    if date_from is not None:
+        filters.append(
+            Incident.photo_time >= datetime.combine(date_from.date(), time.min, tzinfo=timezone.utc)
+        )
+    if date_to is not None:
+        filters.append(
+            Incident.photo_time <= datetime.combine(date_to.date(), time.max, tzinfo=timezone.utc)
+        )
+    return filters
+
+
+async def list_incidents(
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    source: list[str] | None = None,
+    status: list[str] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    sort: str = "date",
+    order: str = "desc",
+    page: int = 1,
+    page_size: int = 100,
+) -> Paginated[IncidentListItem]:
+    """Список инцидентов с фильтрами/сортировкой/пагинацией."""
+    rows = await _query_incidents(
+        session,
+        search=search,
+        source=source,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        sort=sort,
+        order=order,
+        offset=(page - 1) * page_size,
+        limit=page_size,
+        with_total=True,
+    )
+    items, total = rows
+    pages = math.ceil(total / page_size) if total > 0 else 0
+    return Paginated[IncidentListItem](
+        items=[IncidentListItem.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages,
+    )
+
+
+async def _query_incidents(
+    session: AsyncSession,
+    *,
+    search,
+    source,
+    status,
+    date_from,
+    date_to,
+    sort,
+    order,
+    offset: int | None,
+    limit: int | None,
+    with_total: bool,
+):
+    filters = _base_filters(search, source, date_from, date_to)
+    if status:
+        filters.append(Incident.status.in_(status))
+    where_clause = and_(*filters) if filters else None
+
+    total = 0
+    if with_total:
+        count_stmt = select(func.count(Incident.id))
+        if where_clause is not None:
+            count_stmt = count_stmt.where(where_clause)
+        total = (await session.execute(count_stmt)).scalar_one()
+
+    sort_col = _SORT_COLUMNS.get(sort, Incident.photo_time)
+    direction = asc if order == "asc" else desc
+    stmt = select(Incident)
+    if where_clause is not None:
+        stmt = stmt.where(where_clause)
+    # Стабильная сортировка: вторичный ключ по id
+    stmt = stmt.order_by(direction(sort_col).nulls_last(), direction(Incident.id))
+    if offset is not None:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+
+    result = await session.execute(stmt)
+    items = result.scalars().all()
+    if with_total:
+        return items, total
+    return items
+
+
+async def list_for_export(
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    source: list[str] | None = None,
+    status: list[str] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    sort: str = "date",
+    order: str = "desc",
+) -> list[Incident]:
+    """Полный отфильтрованный набор (без пагинации) для GET /export."""
+    return await _query_incidents(
+        session,
+        search=search,
+        source=source,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        sort=sort,
+        order=order,
+        offset=None,
+        limit=None,
+        with_total=False,
+    )
+
+
+async def list_by_ids(session: AsyncSession, ids: list[UUID]) -> list[Incident]:
+    """Инциденты по списку id (для POST /export). Сохраняет порядок запроса."""
+    if not ids:
+        return []
+    result = await session.execute(select(Incident).where(Incident.id.in_(ids)))
+    by_id = {i.id: i for i in result.scalars().all()}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+async def funnel_counts(
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    source: list[str] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> FunnelCounts:
+    """Счётчики чипов воронки. Honor search/source/period, НО игнорируют status —
+    каждый чип показывает свой потенциальный объём."""
+    filters = _base_filters(search, source, date_from, date_to)
+    where_clause = and_(*filters) if filters else None
+
+    stmt = select(Incident.status, func.count(Incident.id)).group_by(Incident.status)
+    if where_clause is not None:
+        stmt = stmt.where(where_clause)
+    result = await session.execute(stmt)
+
+    counts = {"new": 0, "found": 0, "none": 0, "exported": 0}
+    total = 0
+    for status_value, cnt in result.all():
+        total += cnt
+        if status_value in counts:
+            counts[status_value] = cnt
+    return FunnelCounts(all=total, **counts)
+
+
+async def get_incident(session: AsyncSession, incident_id: UUID) -> Incident:
+    result = await session.execute(select(Incident).where(Incident.id == incident_id))
+    incident = result.scalar_one_or_none()
+    if incident is None:
+        raise NotFoundError("Инцидент")
+    return incident
+
+
+async def set_status(
+    session: AsyncSession,
+    incident_id: UUID,
+    new_status: str,
+    actor_user_id: UUID,
+) -> Incident:
+    """Смена статуса одного инцидента (PATCH /{id}/status)."""
+    incident = await get_incident(session, incident_id)
+    before = {"status": incident.status}
+    incident.status = new_status
+    await session.flush()
+    await audit(
+        session,
+        action="set_status",
+        entity_type="incident",
+        entity_id=incident.id,
+        before=before,
+        after={"status": incident.status},
+        actor_user_id=actor_user_id,
+    )
+    return incident
+
+
+async def bulk_status(
+    session: AsyncSession,
+    ids: list[UUID],
+    new_status: str,
+    actor_user_id: UUID,
+) -> int:
+    """Массовая смена статуса (POST /bulk-status). Возвращает число обновлённых."""
+    if not ids:
+        return 0
+
+    result = await session.execute(select(Incident).where(Incident.id.in_(ids)))
+    incidents = result.scalars().all()
+
+    updated = 0
+    for incident in incidents:
+        if incident.status == new_status:
+            continue
+        before = {"status": incident.status}
+        incident.status = new_status
+        await audit(
+            session,
+            action="set_status",
+            entity_type="incident",
+            entity_id=incident.id,
+            before=before,
+            after={"status": incident.status},
+            actor_user_id=actor_user_id,
+        )
+        updated += 1
+
+    await session.flush()
+    return updated

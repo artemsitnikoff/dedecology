@@ -1,0 +1,160 @@
+:root {
+  /* ============================================================
+     ARK PALETTE — base colors (эталон)
+     ============================================================ */
+
+  /* Neutrals (cool gray, slight blue tint) */
+  --ark-white: #FFFFFF;
+  --ark-gray-50:  #F8F9FB;
+  --ark-gray-100: #F4F6F8;
+  --ark-gray-200: #ECEFF2;
+  --ark-gray-300: #E6E9EC;
+  --ark-gray-400: #C9CFD6;
+  --ark-gray-500: #9AA3AE;
+  --ark-gray-600: #5B6573;
+  --ark-gray-700: #3A4452;
+  --ark-gray-800: #1F2733;
+  --ark-gray-900: #0F1620;
+
+  /* Brand accent (calm blue) — прототип использует синий для активного/ссылок */
+  --ark-blue-50:  #EAF3FE;
+  --ark-blue-100: #CFE2FB;
+  --ark-blue-300: #7AB4F5;
+  --ark-blue-500: #2A8AF0;
+  --ark-blue-600: #1F7AE0;
+  --ark-blue-700: #1865BE;
+
+  /* Semantic accents */
+  --ark-green-100: #DEF5E5;
+  --ark-green-500: #16A34A;
+  --ark-green-600: #128640;
+
+  --ark-yellow-100: #FFF1C8;
+  --ark-yellow-500: #E0A21A;
+  --ark-yellow-600: #B5821A;
+
+  --ark-red-100: #FCE3E3;
+  --ark-red-500: #DC4646;
+  --ark-red-600: #B83030;
+
+  --ark-violet-100: #ECE7FE;
+  --ark-violet-500: #7E5CF0;
+
+  /* ============================================================
+     SEMANTIC COLORS — переопределение через ark
+     ============================================================ */
+
+  /* Фоны */
+  --bg-1: var(--ark-white);          /* #FFFFFF */
+  --bg-2: var(--ark-gray-100);       /* #F4F6F8 ← КЛЮЧЕВОЕ для сайдбара */
+  --bg-3: var(--ark-gray-100);       /* #F4F6F8 — hover surface */
+  --bg-3-hover: var(--ark-gray-200); /* #ECEFF2 */
+  --bg-active: var(--ark-blue-50);   /* #EAF3FE */
+  --bg-app: var(--ark-white);        /* alias для bg-1 */
+  --bg-panel: var(--ark-gray-100);   /* alias для bg-2 */
+  --bg-panel-2: var(--ark-gray-50);  /* #F8F9FB */
+  --bg-elevated: var(--ark-white);   /* #FFFFFF — для карточек, активных элементов */
+  --bg-selected: var(--ark-blue-50); /* #EAF3FE */
+
+  /* Границы */
+  --border-1: var(--ark-gray-300);   /* #E6E9EC */
+  --border-2: var(--ark-gray-200);   /* #ECEFF2 */
+
+  /* Текст */
+  --fg-1: var(--ark-gray-900);       /* #0F1620 primary */
+  --fg-2: var(--ark-gray-600);       /* #5B6573 secondary */
+  --fg-3: var(--ark-gray-500);       /* #9AA3AE muted/placeholder */
+  --fg-4: var(--ark-gray-400);       /* #C9CFD6 faint */
+
+  /* Акцент — СИНИЙ (прототип использует синий для активного/ссылок) */
+  --accent: var(--ark-blue-500);     /* #2A8AF0 */
+  --accent-hover: var(--ark-blue-600); /* #1F7AE0 */
+
+  /* ============================================================
+     БРЕНД ДедЭколог — эко-зелёный
+     (градиент бренд-марки в сайдбаре прототипа — зелёный;
+      :focus-visible использует --brand-accent → ring эко-зелёный)
+     ============================================================ */
+  --de-brand: #1F8A5B;
+  --de-brand-light: #3FB36B;
+
+  --brand-accent: #1F8A5B;
+  --brand-accent-strong: #128640;
+  --brand-bg: #ECF8F0;     /* очень светлый зелёный для фонов */
+  --brand-border: #A7DDB9; /* граница бренда */
+  --brand-fg: #128640;     /* темнее для текста */
+
+  /* ============================================================
+     ШРИФТЫ
+     ============================================================ */
+
+  --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Шкала размеров */
+  --fs-11: 11px;   /* micro caption */
+  --fs-12: 12px;   /* caption, label */
+  --fs-13: 13px;   /* dense table/list text */
+  --fs-14: 14px;   /* body, default UI */
+  --fs-15: 15px;   /* slightly emphasized body */
+  --fs-16: 16px;   /* section headline */
+  --fs-18: 18px;   /* small page title */
+  --fs-20: 20px;   /* page title */
+  --fs-24: 24px;   /* large page title / KPI value */
+  --fs-32: 32px;   /* hero number */
+
+  /* ============================================================
+     ГЕОМЕТРИЯ
+     ============================================================ */
+
+  --sidebar-width: 260px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 12px;
+  --radius-card: 12px;
+  --radius-chip: 16px;
+  --radius-full: 9999px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  --shadow-1: var(--shadow-sm); /* alias */
+
+  /* Z-index */
+  --z-dropdown: 1000;
+  --z-modal: 2000;
+
+  /* Status colors */
+  --status-success: #16A34A;
+  --status-error: #DC4646;
+
+  /* Semantic status colors (aliases) */
+  --success-bg: #ECFDF5;
+  --success-border: #BBF7D0;
+  --success-fg: #16A34A;
+  --error-bg: #FEF2F2;
+  --error-border: #FECACA;
+  --error-fg: #DC4646;
+  --warning-bg: #FFFBEB;
+  --warning-fg: #D97706;
+
+  /* Durations */
+  --dur-fast: 150ms;
+  --dur-normal: 200ms;
+
+  /* Easings */
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
