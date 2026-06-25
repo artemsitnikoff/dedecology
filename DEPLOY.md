@@ -154,4 +154,3 @@ docker compose -f docker-compose.prod.yml run --rm backend python -m app.seed
 - `... logs backend` — нет ошибок подключения к БД? (проверь, что `DATABASE_URL` пароль == `POSTGRES_PASSWORD`).
 - 502 на `/api/...` — backend ещё поднимается или упал; смотри его логи.
 - Логин не держится / сразу разлогинивает — убедись, что `SESSION_COOKIE_SECURE=False` при заходе по HTTP.
-</content>

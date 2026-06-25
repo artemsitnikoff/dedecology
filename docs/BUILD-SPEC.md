@@ -170,5 +170,4 @@ frontend/
 - Frontend `verbatimModuleSyntax: true` → **`import type`** for type-only imports. `noUnusedLocals/Parameters` will fail the build on dead code.
 - Access token in memory only; reload bootstraps via `/auth/refresh` cookie + `withCredentials: true` → backend CORS `allow_credentials=True` + explicit origins (not `*`).
 - Russian UI copy + Russian code comments throughout. JetBrains Mono for counts/time/coords.
-</content>
 </invoke>
