@@ -190,6 +190,11 @@ def build_router() -> Router:
     @router.message_created()
     async def on_message_created(event: MessageCreated) -> None:
         msg = event.message
+        # В ГРУППЕ бот не болтает: принимает только фото+подпись (создаёт обращение,
+        # уведомление шлёт notify_loop карточкой). Пример/приветствие/ошибки и любые
+        # не-фото сообщения (pptx, файлы, текст) в группе игнорируются молча.
+        ct = getattr(getattr(msg, "recipient", None), "chat_type", None)
+        is_group = getattr(ct, "value", ct) == "chat"
         try:
             body = msg.body
             text = ((body.text if body else None) or "").strip()
@@ -197,8 +202,8 @@ def build_router() -> Router:
             sender_name = _sender_display_name(msg.sender)
             images = _all_images(msg)
 
-            # Приветствие/пустое сообщение без фото → показываем пример.
-            if not images and _is_greeting(text):
+            # Приветствие/пустое сообщение без фото → пример (ТОЛЬКО в личке, не в группе).
+            if not is_group and not images and _is_greeting(text):
                 await _send_example(msg)
                 return
 
@@ -249,7 +254,10 @@ def build_router() -> Router:
                     if isinstance(result, dict):
                         quote = (result.get("quote") or "").strip()
                     reply = _REPLY_ACCEPTED + (f"\n\n{quote}" if quote else "")
-                    await msg.answer(text=reply)
+                    # В личке отвечаем волонтёру; в группе молчим (туда уведомление
+                    # отправит notify_loop отдельной карточкой).
+                    if not is_group:
+                        await msg.answer(text=reply)
                     return
 
             # Невалидно (нет фото / пустой текст) — МОЛЧИМ, в чат ничего не пишем (по требованию).
@@ -274,7 +282,10 @@ def build_router() -> Router:
 
 
 async def _safe_reply(msg: Message) -> None:
-    """Best-effort soft error reply; swallow secondary failures."""
+    """Best-effort soft error reply; swallow secondary failures. В группе молчим."""
+    ct = getattr(getattr(msg, "recipient", None), "chat_type", None)
+    if getattr(ct, "value", ct) == "chat":
+        return
     try:
         await msg.answer(text=_REPLY_SOFT_ERROR)
     except Exception:  # noqa: BLE001
