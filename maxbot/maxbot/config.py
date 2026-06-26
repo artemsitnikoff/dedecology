@@ -6,7 +6,7 @@
 
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,21 @@ class Settings(BaseSettings):
 
     # Период опроса backend на наличие неотправленных обращений, секунды.
     NOTIFY_INTERVAL: int = 15
+
+    @field_validator("MAX_GROUP_CHAT_ID", mode="before")
+    @classmethod
+    def _blank_group_id_to_none(cls, v):
+        """Пустая строка из env → None (фича выключена), а не краш каста "" → int.
+
+        docker-compose передаёт ${MAX_GROUP_CHAT_ID:-}: если переменной нет в .env,
+        в контейнер уходит ПУСТАЯ строка. Без этого валидатора pydantic уронил бы
+        Settings() при импорте → весь бот падал в краш-луп (поллинг не стартовал).
+        """
+        if v is None:
+            return None
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
     model_config = SettingsConfigDict(
         env_file=".env",
