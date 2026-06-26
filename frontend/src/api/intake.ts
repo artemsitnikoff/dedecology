@@ -29,6 +29,8 @@ interface SuggestResponse {
 export interface IntakeFormResult {
   ok: boolean;
   incident_id?: string;
+  /** Короткая мотивирующая цитата о природе — показывается на экране «Спасибо». */
+  quote?: string;
 }
 
 /** Вид подсказки: ограничивает выдачу DaData до региона/города/улицы/полного адреса. */

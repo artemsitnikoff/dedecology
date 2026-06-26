@@ -127,6 +127,7 @@ export default function ReportFormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [quote, setQuote] = useState('');
 
   // Превью фото через object URL; чистим, когда набор файлов меняется.
   const previews = useMemo(() => photos.map((f) => URL.createObjectURL(f)), [photos]);
@@ -233,7 +234,8 @@ export default function ReportFormPage() {
       fd.append('website', websiteRef.current?.value ?? '');
       for (const file of photos) fd.append('photos', file);
 
-      await submitIntakeForm(fd);
+      const res = await submitIntakeForm(fd);
+      setQuote(res.quote ?? '');
       setDone(true);
     } catch (err) {
       setSubmitError(getErrorMessage(err));
@@ -251,6 +253,7 @@ export default function ReportFormPage() {
             <div className="de-rf-thanks-emoji">🌳</div>
             <h2>Спасибо!</h2>
             <p>Обращение принято и передано инспектору.</p>
+            {quote && <p className="de-rf-quote">{quote}</p>}
           </div>
         ) : (
           <form className="de-rf-form" onSubmit={handleSubmit} noValidate>

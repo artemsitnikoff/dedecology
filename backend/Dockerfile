@@ -3,12 +3,16 @@ FROM python:3.12-slim
 # Рабочая директория
 WORKDIR /app
 
-# Системные зависимости (без Node — фронтенд собирается отдельно)
+# Системные зависимости + Node.js 20 + claude CLI (мотивирующая цитата о природе)
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
     curl \
     ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
 
 # Копируем requirements и устанавливаем зависимости

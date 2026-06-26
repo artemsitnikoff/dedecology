@@ -223,14 +223,19 @@ def build_router() -> Router:
                                 .replace(hour=hour, minute=minute, second=0, microsecond=0)
                                 .strftime("%Y-%m-%dT%H:%M")
                             )
-                            await push_incident(
+                            result = await push_incident(
                                 text=address,
                                 msg_id=str(mid),
                                 sender_name=sender_name,
                                 photo_bytes_list=photos,
                                 photo_time=photo_time,
                             )
-                            await msg.answer(text=_REPLY_ACCEPTED)
+                            # Бэк возвращает мотивирующую цитату о природе — дописываем к ответу.
+                            quote = ""
+                            if isinstance(result, dict):
+                                quote = (result.get("quote") or "").strip()
+                            reply = _REPLY_ACCEPTED + (f"\n\n{quote}" if quote else "")
+                            await msg.answer(text=reply)
                             return
 
             # Всё остальное (нет фото / нет времени / пустой адрес) — подсказка по формату.

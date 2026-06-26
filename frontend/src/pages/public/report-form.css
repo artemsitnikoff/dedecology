@@ -305,3 +305,12 @@
   margin: 0 auto;
   max-width: 420px;
 }
+.de-rf-quote {
+  margin: var(--space-5) auto 0;
+  max-width: 380px;
+  font-size: var(--fs-13);
+  font-style: italic;
+  line-height: 1.55;
+  color: var(--fg-2);
+  text-align: center;
+}

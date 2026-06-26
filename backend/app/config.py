@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     # в контейнере = /app/storage). Структура: {STORAGE_DIR}/incidents/{id}/{n}.ext
     STORAGE_DIR: str = "storage"
 
+    # --- claude CLI (мотивирующая цитата о природе на успешном приёме) ---
+    # Долгоживущий OAuth-токен из `claude setup-token`. Фолбэк, если нет CLAUDE_TOKEN_FILE.
+    CLAUDE_CODE_OAUTH_TOKEN: str = ""
+    # Путь к общему токен-файлу claude (JSON {access_token, ...}); читаем на каждый вызов,
+    # имеет приоритет над CLAUDE_CODE_OAUTH_TOKEN. Монтируется в контейнер.
+    CLAUDE_TOKEN_FILE: str = ""
+    CLAUDE_CLI_PATH: str = "claude"
+    CLAUDE_QUOTE_MODEL: str = "haiku"
+    CLAUDE_QUOTE_TIMEOUT: int = 20
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

@@ -361,11 +361,12 @@ async def test_public_form_creates_incident(client):
     fake_incident = Incident(source="form", status="new")
     fake_incident.id = uuid4()
     create = AsyncMock(return_value=fake_incident)
+    quote = AsyncMock(return_value="«тестовая цитата» — Тест Автор")
 
     with patch(
         "app.api.v1.intake.intake_service.create_incident_from_public_form",
         new=create,
-    ):
+    ), patch("app.api.v1.intake.quotes_service.nature_quote", new=quote):
         resp = await client.post(
             "/api/v1/intake/form",
             data={
@@ -386,6 +387,7 @@ async def test_public_form_creates_incident(client):
     body = resp.json()
     assert body["ok"] is True
     assert body["incident_id"] == str(fake_incident.id)
+    assert body["quote"] == "«тестовая цитата» — Тест Автор"
 
     create.assert_awaited_once()
     kwargs = create.call_args.kwargs
@@ -466,6 +468,10 @@ async def test_public_form_resizes_and_serves(client, fake_session, monkeypatch,
                 obj.id = uuid4()
 
     fake_session.flush = AsyncMock(side_effect=_flush)
+    monkeypatch.setattr(
+        "app.api.v1.intake.quotes_service.nature_quote",
+        AsyncMock(return_value="«цитата» — Автор"),
+    )
 
     resp = await client.post(
         "/api/v1/intake/form",
@@ -675,7 +681,10 @@ async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tm
         "geo_lon": "50.6",
     }
     fake_clean = AsyncMock(return_value=cleaned)
-    with patch("app.services.intake.clean_address", new=fake_clean):
+    quote = AsyncMock(return_value="«цитата о природе» — Автор")
+    with patch("app.services.intake.clean_address", new=fake_clean), patch(
+        "app.api.v1.intake.quotes_service.nature_quote", new=quote
+    ):
         resp = await client.post(
             "/api/v1/intake/max",
             headers={"X-Intake-Token": "secret-token"},
@@ -691,6 +700,7 @@ async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tm
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
+    assert body["quote"] == "«цитата о природе» — Автор"
 
     incident = next(o for o in added if isinstance(o, Incident))
     assert body["incident_id"] == str(incident.id)
@@ -747,7 +757,10 @@ async def test_max_intake_falls_back_to_heuristic(client, fake_session, monkeypa
     added = _max_session(fake_session)
 
     fake_clean = AsyncMock(return_value=None)
-    with patch("app.services.intake.clean_address", new=fake_clean):
+    quote = AsyncMock(return_value="«цитата» — Автор")
+    with patch("app.services.intake.clean_address", new=fake_clean), patch(
+        "app.api.v1.intake.quotes_service.nature_quote", new=quote
+    ):
         resp = await client.post(
             "/api/v1/intake/max",
             headers={"X-Intake-Token": "secret-token"},
@@ -767,3 +780,38 @@ async def test_max_intake_falls_back_to_heuristic(client, fake_session, monkeypa
     assert incident.street == "ул. Маяковского, 41"
     assert incident.coords == ""
     fake_clean.assert_awaited_once()
+
+
+# --------------------------------------------------------------------------- #
+# Мотивирующая цитата о природе: nature_quote (claude CLI + фолбэк)            #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_nature_quote_falls_back_when_cli_none():
+    """claude_cli_complete → None: nature_quote отдаёт непустую цитату из фолбэка."""
+    from app.services import quotes as quotes_service
+
+    with patch(
+        "app.services.quotes.claude_cli_complete",
+        new=AsyncMock(return_value=None),
+    ):
+        quote = await quotes_service.nature_quote()
+
+    assert isinstance(quote, str)
+    assert quote.strip()
+    assert quote in quotes_service._FALLBACK
+
+
+@pytest.mark.asyncio
+async def test_nature_quote_uses_cli_result_cleaned():
+    """Ответ CLI схлопывается в одну строку и используется как есть."""
+    from app.services import quotes as quotes_service
+
+    with patch(
+        "app.services.quotes.claude_cli_complete",
+        new=AsyncMock(return_value="  «Береги природу»\n  — Иван Иванов  "),
+    ):
+        quote = await quotes_service.nature_quote()
+
+    assert quote == "«Береги природу» — Иван Иванов"

@@ -22,6 +22,7 @@ from ...core.errors import AppError, ForbiddenError, NotFoundError, ValidationEr
 from ...database import get_db
 from ...services import dadata as dadata_service
 from ...services import intake as intake_service
+from ...services import quotes as quotes_service
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +174,9 @@ async def public_form(
         photo_files=photos,
     )
     await session.commit()
-    return {"ok": True, "incident_id": str(incident.id)}
+    # Цитату генерируем ПОСЛЕ commit — медленный/упавший CLI не блокирует запись.
+    quote = await quotes_service.nature_quote()
+    return {"ok": True, "incident_id": str(incident.id), "quote": quote}
 
 
 @router.post("/max")
@@ -215,7 +218,9 @@ async def max_intake(
         photo_files=photos,
     )
     await session.commit()
-    return {"ok": True, "incident_id": str(incident.id)}
+    # Цитату генерируем ПОСЛЕ commit — медленный/упавший CLI не блокирует запись.
+    quote = await quotes_service.nature_quote()
+    return {"ok": True, "incident_id": str(incident.id), "quote": quote}
 
 
 @router.get("/photo/{incident_id}/{filename}")
