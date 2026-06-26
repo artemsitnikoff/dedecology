@@ -25,7 +25,7 @@ export function DetailDrawer({ incident: d, onClose, onPhoto }: Props) {
   const setStatus = useSetStatus();
   const statusMeta = STATUS[d.status];
   const sourceMeta = SOURCE[d.source];
-  const link = maxLink(d.msg);
+  const link = maxLink(d.msg_url);
   const addr = fullAddr(d);
 
   const fields: Array<[string, string]> = [

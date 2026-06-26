@@ -34,6 +34,7 @@ async def push_incident(
     sender_name: str,
     photo_bytes_list: list[bytes],
     photo_time: str | None = None,
+    msg_url: str = "",
 ) -> dict:
     """Передаёт обращение из MAX в backend intake API и возвращает разобранный JSON.
 
@@ -44,12 +45,16 @@ async def push_incident(
     :param photo_time: Время на фото в ISO-формате "%Y-%m-%dT%H:%M" (опционально).
         Если задано — отправляется multipart-полем `photo_time`; иначе поле не добавляется,
         и контракт остаётся прежним.
+    :param msg_url: Готовый полный https-URL сообщения MAX (Message.url). Для лички с ботом
+        обычно пустой — тогда ссылку нигде не показываем. Всегда отправляется multipart-полем
+        `msg_url` (пустая строка по умолчанию).
     :raises IntakeError: при сетевой ошибке, таймауте или не-2xx ответе backend.
     """
     data = {
         "text": text,
         "msg_id": msg_id,
         "sender_name": sender_name,
+        "msg_url": msg_url,
     }
     if photo_time is not None:
         data["photo_time"] = photo_time

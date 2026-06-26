@@ -61,7 +61,7 @@ const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, o
   const sourceMeta = SOURCE[d.source];
   // Превью в строке — уменьшенная версия (thumb) для быстрой загрузки списка.
   const thumb = d.photo_urls[0] ? thumbUrl(d.photo_urls[0]) : undefined;
-  const link = maxLink(d.msg);
+  const link = maxLink(d.msg_url);
 
   return (
     <div

@@ -216,6 +216,7 @@ async def create_incident_from_max(
     msg_id: str,
     sender_name: str,
     photo_files: list,
+    msg_url: str = "",
     photo_time=None,
     actor_user_id=None,
 ) -> Incident:
@@ -240,6 +241,8 @@ async def create_incident_from_max(
     raw_text = _clean_str(text)
     fio = _clean_str(sender_name)
     msg = _clean_str(msg_id) or None
+    # Готовый https-URL сообщения (Message.url); для лички с ботом обычно пуст → None.
+    msg_url_clean = _clean_str(msg_url) or None
 
     # AI-разбор свободного текста (graceful: любой сбой → None).
     ai: dict | None = None
@@ -326,6 +329,7 @@ async def create_incident_from_max(
         photos=0,
         photo_urls=[],
         msg=msg,
+        msg_url=msg_url_clean,
         received_at=datetime.now(timezone.utc),
     )
     session.add(incident)

@@ -224,6 +224,17 @@ def build_router() -> Router:
                         ).strftime("%Y-%m-%dT%H:%M")
                     else:
                         photo_time = now.strftime("%Y-%m-%dT%H:%M")
+                    # Готовый веб-URL сообщения из MAX (Optional[str]); для лички с ботом обычно None.
+                    # Берём через getattr на случай отсутствия поля в текущей версии maxapi.
+                    msg_url = getattr(msg, "url", None) or ""
+                    # Диагностика прода: подтверждаем, что реально шлёт API (url/chat_id/seq/mid).
+                    logger.info(
+                        "max msg url=%r chat_id=%s seq=%s mid=%s",
+                        getattr(msg, "url", None),
+                        getattr(getattr(msg, "recipient", None), "chat_id", None),
+                        getattr(body, "seq", None),
+                        mid,
+                    )
                     # Весь текст уходит как адрес → бэк разберёт его через DaData Clean.
                     result = await push_incident(
                         text=text,
@@ -231,6 +242,7 @@ def build_router() -> Router:
                         sender_name=sender_name,
                         photo_bytes_list=photos,
                         photo_time=photo_time,
+                        msg_url=msg_url,
                     )
                     # Бэк возвращает мотивирующую цитату о природе — дописываем к ответу.
                     quote = ""

@@ -38,8 +38,12 @@ export function fullAddr(parts: {
     .join(', ');
 }
 
-/** Ссылка на сообщение в Максе по msg id; null, если источник не Макс / нет msg. */
-export function maxLink(msg: string | null | undefined): string | null {
-  if (!msg) return null;
-  return `https://max.ru/m/${msg}`;
+/**
+ * Ссылка на сообщение в Максе — приходит готовой в поле msg_url (полный https-URL).
+ * Возвращаем как есть, только если непустая и начинается с http(s); иначе null
+ * (ссылку не показываем — никаких битых конструкций на FE не строим).
+ */
+export function maxLink(msgUrl: string | null | undefined): string | null {
+  if (!msgUrl) return null;
+  return /^https?:\/\//i.test(msgUrl) ? msgUrl : null;
 }

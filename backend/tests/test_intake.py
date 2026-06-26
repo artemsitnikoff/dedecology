@@ -697,6 +697,7 @@ async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tm
             data={
                 "text": "Самарская область, Кинель, Маяковского 41",
                 "msg_id": "msg-123",
+                "msg_url": "https://max.ru/c/-75787158905457/AZ8DNeZnbkM",
                 "sender_name": "Иванов Иван",
                 "photo_time": "2026-04-26T08:05:00",
             },
@@ -714,6 +715,8 @@ async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tm
     assert incident.status == "new"
     assert incident.fio == "Иванов Иван"
     assert incident.msg == "msg-123"
+    # Готовый https-URL сообщения проброшен из формы и сохранён как есть.
+    assert incident.msg_url == "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
     assert incident.region == "Самарская обл"
     assert incident.city == "г Кинель"
     assert incident.street == "ул Маяковского, д 41"
@@ -917,6 +920,47 @@ async def test_max_service_ai_time_sets_photo_time(fake_session):
     assert (incident.photo_time.hour, incident.photo_time.minute) == (10, 28)
 
 
+@pytest.mark.asyncio
+async def test_max_service_saves_msg_url(fake_session):
+    """Непустой msg_url сохраняется на инциденте КАК ЕСТЬ (полный https-URL)."""
+    _max_session(fake_session)
+    url = "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="Самарская область, г. Кинель, ул. Маяковского, 41",
+            msg_id="m-url",
+            msg_url=url,
+            sender_name="Иван",
+            photo_files=[],
+        )
+
+    assert incident.msg == "m-url"
+    assert incident.msg_url == url
+
+
+@pytest.mark.asyncio
+async def test_max_service_blank_msg_url_is_none(fake_session):
+    """Пустой/пробельный msg_url (личка с ботом) → msg_url = None (ссылка не строится)."""
+    _max_session(fake_session)
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="Самарская область, г. Кинель, ул. Маяковского, 41",
+            msg_id="m-blank",
+            msg_url="   ",
+            sender_name="Иван",
+            photo_files=[],
+        )
+
+    assert incident.msg == "m-blank"
+    assert incident.msg_url is None
+
+
 # --------------------------------------------------------------------------- #
 # ai_parse_incident — извлечение JSON из ответа CLI (DB-free, CLI замокан)     #
 # --------------------------------------------------------------------------- #
@@ -1058,6 +1102,7 @@ def _pending_incident() -> Incident:
         photos=1,
         photo_urls=["/api/v1/intake/photo/x/0.jpg"],
         msg="msg-1",
+        msg_url="https://max.ru/c/-75787158905457/AZ8DNeZnbkM",
         quote="«цитата» — Автор",
     )
     inc.id = uuid4()
@@ -1089,6 +1134,8 @@ async def test_pending_notify_returns_unnotified(client, monkeypatch):
     assert item["city"] == "г Кинель"
     assert item["photo_urls"] == ["/api/v1/intake/photo/x/0.jpg"]
     assert item["msg"] == "msg-1"
+    # Готовый https-URL сообщения отдаётся боту для ссылки в группе (как есть).
+    assert item["msg_url"] == "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
     assert item["quote"] == "«цитата» — Автор"
     assert item["photo_time"] is None
     lister.assert_awaited_once()

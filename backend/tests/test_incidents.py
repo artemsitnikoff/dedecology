@@ -25,6 +25,7 @@ def _list_item(**kw):
         photos=1,
         photo_urls=["placeholder://incident-photo/1"],
         msg="max-msg-1",
+        msg_url="https://max.ru/c/-75787158905457/AZ8DNeZnbkM",
         received_at=datetime(2026, 4, 26, 8, 11, tzinfo=timezone.utc),
     )
     base.update(kw)
@@ -45,6 +46,7 @@ def _detail(**kw):
         photos=1,
         photo_urls=["placeholder://incident-photo/1"],
         msg="max-msg-1",
+        msg_url="https://max.ru/c/-75787158905457/AZ8DNeZnbkM",
         bins=None,
         received_at=datetime(2026, 4, 26, 8, 11, tzinfo=timezone.utc),
         created_at=datetime(2026, 4, 26, 8, 11, tzinfo=timezone.utc),
@@ -69,6 +71,11 @@ async def test_list_incidents_returns_paginated(client):
     assert body["total"] == 1
     assert len(body["items"]) == 1
     assert body["items"][0]["fio"] == "Громов Сергей Петрович"
+    # Готовый https-URL сообщения отдаётся в строке списка (как есть).
+    assert (
+        body["items"][0]["msg_url"]
+        == "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
+    )
 
 
 @pytest.mark.asyncio
@@ -134,6 +141,7 @@ async def test_get_incident_by_id(client):
     body = resp.json()
     assert body["id"] == str(detail.id)
     assert body["bins"] is None
+    assert body["msg_url"] == "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
 
 
 @pytest.mark.asyncio

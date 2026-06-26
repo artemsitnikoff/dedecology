@@ -70,10 +70,11 @@ def _build_message(incident: dict) -> str:
     if photo_time:
         lines.append(f"Время фотофиксации: {photo_time}")
 
-    if is_max:
-        msg = (incident.get("msg") or "").strip()
-        if msg:
-            lines.append(f"Сообщение: https://max.ru/m/{msg}")
+    # Ссылка на сообщение = готовый https-URL из msg_url КАК ЕСТЬ. Показываем только если
+    # он непустой и начинается с http; битые ссылки не выводим (поле msg для ссылки не используем).
+    url = (incident.get("msg_url") or "").strip()
+    if url.startswith("http"):
+        lines.append(f"Сообщение: {url}")
 
     lines.append("")
     lines.append("Спасибо!")

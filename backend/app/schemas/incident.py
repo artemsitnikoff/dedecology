@@ -23,6 +23,7 @@ class IncidentListItem(ORMBase):
     photos: int
     photo_urls: list[str]
     msg: Optional[str]
+    msg_url: str | None = None
     received_at: datetime
 
 
@@ -40,6 +41,7 @@ class IncidentDetail(ORMBase):
     photos: int
     photo_urls: list[str]
     msg: Optional[str]
+    msg_url: str | None = None
     bins: Optional[bool]
     received_at: datetime
     created_at: datetime
@@ -92,6 +94,7 @@ class PendingNotifyItem(ORMBase):
     photo_time: Optional[datetime]
     photo_urls: list[str]
     msg: Optional[str]
+    msg_url: str | None = None
     quote: Optional[str]
 
 

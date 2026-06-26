@@ -56,9 +56,8 @@ def _photo_time(inc: Incident) -> str:
 
 
 def _message_link(inc: Incident) -> str:
-    if inc.source == "max" and inc.msg:
-        return f"https://max.ru/m/{inc.msg}"
-    return ""
+    """Готовый https-URL сообщения (msg_url) как есть; иначе '' (без фолбэка на mid)."""
+    return inc.msg_url or ""
 
 
 def _received(inc: Incident) -> str:

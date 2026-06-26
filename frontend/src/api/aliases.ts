@@ -33,8 +33,10 @@ export interface Incident {
   photo_time: string | null;
   photos: number;
   photo_urls: string[];
-  /** Макс message id; null для формы. Ссылка строится на FE: https://max.ru/m/{msg} */
+  /** Макс message id (mid); null для формы. Трейс/поиск, для ссылки НЕ используется. */
   msg: string | null;
+  /** Готовый https-URL сообщения Макс (формат https://max.ru/c/{chat_id}/{web_id}); null/пусто — ссылку не показываем. Строится на бэке, на FE больше не собирается. */
+  msg_url: string | null;
   /** Форма «баки раздельного сбора»; null для Макса. Скрыто в таблице (ТЗ §11), есть в модели. */
   bins: boolean | null;
   /** ISO-строка — «поступило». */
@@ -56,7 +58,10 @@ export interface IncidentListItem {
   photo_time: string | null;
   photos: number;
   photo_urls: string[];
+  /** Макс message id (mid); null для формы. Трейс/поиск, для ссылки НЕ используется. */
   msg: string | null;
+  /** Готовый https-URL сообщения Макс; null/пусто — ссылку не показываем. */
+  msg_url: string | null;
   received_at: string;
 }
 

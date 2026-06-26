@@ -37,8 +37,11 @@ class Incident(Base, TimestampMixin):
     photos: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     # list[str] — пути/data-URL фото (сид: placeholder-картинки)
     photo_urls: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
-    # id сообщения Макс (ссылка https://max.ru/m/{msg} строится на фронте)
+    # id сообщения Макс (внутренний mid; трейс/поиск — ссылка из него НЕ строится)
     msg: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    # Готовый полный https-URL сообщения Макс (Message.url), напр.
+    # "https://max.ru/c/-757…/AZ8…". Для лички с ботом обычно отсутствует (NULL).
+    msg_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     # Форма «баки раздельного сбора» (в модели есть, в таблице скрыто по ТЗ §11)
     bins: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     # «поступило»
