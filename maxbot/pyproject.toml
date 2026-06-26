@@ -1,0 +1,18 @@
+[project]
+name = "dedecology-maxbot"
+version = "0.1.0"
+description = "Max (max.ru) messenger long-polling bot for ДедЭколог — forwards messages to the backend intake API"
+requires-python = ">=3.11"
+dependencies = [
+    "maxapi==0.9.4",
+    "httpx>=0.25",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+]
+
+[tool.setuptools.packages.find]
+include = ["maxbot*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

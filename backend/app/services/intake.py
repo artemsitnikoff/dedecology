@@ -20,6 +20,7 @@ from ..config import settings
 from ..core.errors import ValidationError
 from ..models import Incident
 from .audit import audit
+from .dadata import clean_address
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ _FIELD_LIMITS = {
     "city": 255,
     "street": 500,
     "coords": 64,
+    "msg": 120,
 }
 
 
@@ -192,6 +194,84 @@ async def create_incident_from_form(
     return incident
 
 
+async def create_incident_from_max(
+    session: AsyncSession,
+    *,
+    text: str,
+    msg_id: str,
+    sender_name: str,
+    photo_files: list,
+    photo_time=None,
+    actor_user_id=None,
+) -> Incident:
+    """Создаёт Incident (source='max') из сабмита Макс-бота.
+
+    Адрес приходит свободным текстом в сообщении пользователя. Сначала пробуем
+    разобрать его через DaData Clean API (clean_address) — при успехе берём
+    стандартизированные регион/город/улицу + координаты. Если ключи не заданы /
+    DaData недоступна / разбор пустой — деградируем на эвристику _parse_address
+    (coords тогда пустые). flush() здесь, commit() — в роутере.
+    """
+    raw_text = _clean_str(text)
+    fio = _clean_str(sender_name)
+    msg = _clean_str(msg_id) or None
+
+    cleaned = await clean_address(raw_text)
+    if cleaned:
+        region = _clean_str(cleaned.get("region"))
+        city = _clean_str(cleaned.get("city"))
+        street = _clean_str(cleaned.get("street"))
+        coords = _clean_str(cleaned.get("coords"))
+    else:
+        region, city, street = _parse_address(raw_text)
+        coords = ""
+
+    # Отсекаем текст до ширины колонок БД.
+    fio = fio[: _FIELD_LIMITS["fio"]]
+    region = region[: _FIELD_LIMITS["region"]]
+    city = city[: _FIELD_LIMITS["city"]]
+    street = street[: _FIELD_LIMITS["street"]]
+    coords = coords[: _FIELD_LIMITS["coords"]]
+    if msg is not None:
+        msg = msg[: _FIELD_LIMITS["msg"]]
+
+    parsed_photo_time = _parse_photo_time(photo_time)
+
+    incident = Incident(
+        source="max",
+        status="new",
+        fio=fio or "",
+        region=region,
+        city=city,
+        street=street,
+        coords=coords or "",
+        photo_time=parsed_photo_time,
+        photos=0,
+        photo_urls=[],
+        msg=msg,
+        received_at=datetime.now(timezone.utc),
+    )
+    session.add(incident)
+    await session.flush()  # → incident.id
+
+    photo_urls, count = await _process_photos(incident.id, photo_files)
+    if count:
+        incident.photo_urls = photo_urls
+        incident.photos = count
+        await session.flush()
+
+    await audit(
+        session,
+        action="intake_max",
+        entity_type="incident",
+        entity_id=incident.id,
+        after={"source": "max", "fio": fio, "msg": msg, "text": raw_text},
+        actor_user_id=actor_user_id,
+        actor_type="system",
+    )
+    return incident
+
+
 async def _read_upload_bytes(upload) -> bytes:
     """Считывает поток загрузки целиком чанками с контролем размера ≤10 МБ.
 
@@ -251,6 +331,66 @@ def _save_variant(img: Image.Image, dest: Path, max_side, quality: int) -> None:
     variant.save(dest, "JPEG", quality=quality, optimize=True)
 
 
+async def _decode_uploads(photo_files: list) -> list[Image.Image]:
+    """Валидирует и декодирует загруженные фото (без записи на диск).
+
+    Фильтрует пустые поля, проверяет количество (≤3), читает байты с лимитом
+    10 МБ, декодирует через Pillow (авторитетная проверка формата — multipart
+    Content-Type не в счёт). Невалидное/лишнее фото → ValidationError. Вызывается
+    ДО создания инцидента, чтобы битый файл отбивался 400 без записи в БД.
+    """
+    photo_files = [f for f in (photo_files or []) if getattr(f, "filename", None)]
+    if len(photo_files) > _MAX_PHOTOS:
+        raise ValidationError(
+            f"Можно загрузить не более {_MAX_PHOTOS} фото",
+            details={"count": len(photo_files)},
+        )
+    decoded: list[Image.Image] = []
+    for upload in photo_files:
+        data = await _read_upload_bytes(upload)
+        decoded.append(_decode_image(data, getattr(upload, "filename", None)))
+    return decoded
+
+
+def _store_decoded(incident_id, decoded: list[Image.Image]) -> tuple[list[str], int]:
+    """Сохраняет уже декодированные фото в {STORAGE_DIR}/incidents/{id}/.
+
+    Каждое фото пере-кодируется в JPEG: FULL `{i}.jpg` (просмотр) + THUMB
+    `{i}_thumb.jpg` (превью). Возвращает (photo_urls, count). При сбое записи
+    частично созданный каталог удаляется (не оставляем мусор на диске).
+    """
+    if not decoded:
+        return [], 0
+
+    photo_urls: list[str] = []
+    incident_dir = _incidents_dir() / str(incident_id)
+    try:
+        incident_dir.mkdir(parents=True, exist_ok=True)
+        for i, img in enumerate(decoded):
+            _save_variant(img, incident_dir / f"{i}.jpg", _FULL_MAX_SIDE, _FULL_QUALITY)
+            _save_variant(
+                img,
+                incident_dir / f"{i}_thumb.jpg",
+                _THUMB_MAX_SIDE,
+                _THUMB_QUALITY,
+            )
+            photo_urls.append(f"/api/v1/intake/photo/{incident_id}/{i}.jpg")
+    except Exception:
+        shutil.rmtree(incident_dir, ignore_errors=True)
+        raise
+
+    return photo_urls, len(photo_urls)
+
+
+async def _process_photos(incident_id, photo_files: list) -> tuple[list[str], int]:
+    """Полный конвейер фото: валидация/декод + сохранение → (photo_urls, count).
+
+    Переиспользуемый хелпер (Макс-бот). Невалидное фото → ValidationError.
+    """
+    decoded = await _decode_uploads(photo_files)
+    return _store_decoded(incident_id, decoded)
+
+
 async def create_incident_from_public_form(
     session: AsyncSession,
     *,
@@ -292,19 +432,9 @@ async def create_incident_from_public_form(
     parsed_bins = _parse_bins(bins)
     parsed_photo_time = _parse_photo_time(photo_time)
 
-    photo_files = [f for f in (photo_files or []) if getattr(f, "filename", None)]
-    if len(photo_files) > _MAX_PHOTOS:
-        raise ValidationError(
-            f"Можно загрузить не более {_MAX_PHOTOS} фото",
-            details={"count": len(photo_files)},
-        )
-    # Не доверяем multipart Content-Type: читаем байты и валидируем/декодируем
-    # через Pillow (авторитетная проверка формата) ДО создания инцидента —
-    # битый файл отбивается 400 без записи в БД.
-    decoded: list[Image.Image] = []
-    for upload in photo_files:
-        data = await _read_upload_bytes(upload)
-        decoded.append(_decode_image(data, getattr(upload, "filename", None)))
+    # Валидируем/декодируем фото ДО создания инцидента — битый файл отбивается
+    # 400 без записи в БД.
+    decoded = await _decode_uploads(photo_files)
 
     incident = Incident(
         source="form",
@@ -323,33 +453,10 @@ async def create_incident_from_public_form(
     session.add(incident)
     await session.flush()  # → incident.id
 
-    photo_urls: list[str] = []
-    if decoded:
-        incident_dir = _incidents_dir() / str(incident.id)
-        try:
-            incident_dir.mkdir(parents=True, exist_ok=True)
-            for i, img in enumerate(decoded):
-                # FULL — версия для просмотра, THUMB — превью. Обе пере-кодированы
-                # в JPEG, поэтому расширение всегда .jpg.
-                _save_variant(
-                    img, incident_dir / f"{i}.jpg", _FULL_MAX_SIDE, _FULL_QUALITY
-                )
-                _save_variant(
-                    img,
-                    incident_dir / f"{i}_thumb.jpg",
-                    _THUMB_MAX_SIDE,
-                    _THUMB_QUALITY,
-                )
-                photo_urls.append(
-                    f"/api/v1/intake/photo/{incident.id}/{i}.jpg"
-                )
-        except Exception:
-            # Очистка частично записанного каталога — не оставляем мусор на диске.
-            shutil.rmtree(incident_dir, ignore_errors=True)
-            raise
-
+    photo_urls, count = _store_decoded(incident.id, decoded)
+    if count:
         incident.photo_urls = photo_urls
-        incident.photos = len(photo_urls)
+        incident.photos = count
         await session.flush()
 
     await audit(

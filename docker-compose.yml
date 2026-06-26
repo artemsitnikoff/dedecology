@@ -50,6 +50,18 @@ services:
     ports:
       - "8080:80"
 
+  # Макс-бот (long-polling). Под профилем — обычный `up` его не трогает. Включить:
+  #   docker compose --profile maxbot up -d --build maxbot
+  maxbot:
+    build: ./maxbot
+    profiles: ["maxbot"]
+    depends_on:
+      - backend
+    environment:
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
+      INTAKE_URL: http://backend:8000/api/v1/intake/max
+      INTAKE_TOKEN: ${YANDEX_INTAKE_TOKEN:-}
+
 volumes:
   dedecolog_pgdata:
   backend_storage:

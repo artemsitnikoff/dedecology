@@ -53,6 +53,20 @@ services:
     ports:
       - "8888:80"
 
+  # Макс-бот: long-polling воркер (только исходящие к API Макса, портов наружу нет).
+  # ПОД ПРОФИЛЕМ — обычный `up -d` его НЕ трогает (нужен MAX_BOT_TOKEN). Включить вручную:
+  #   docker compose -f docker-compose.prod.yml --profile maxbot up -d --build maxbot
+  maxbot:
+    build: ./maxbot
+    restart: unless-stopped
+    profiles: ["maxbot"]
+    depends_on:
+      - backend
+    environment:
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN}
+      INTAKE_URL: http://backend:8000/api/v1/intake/max
+      INTAKE_TOKEN: ${YANDEX_INTAKE_TOKEN}
+
 volumes:
   dedecolog_pgdata:
   backend_storage:

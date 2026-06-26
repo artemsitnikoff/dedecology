@@ -637,3 +637,133 @@ async def test_photo_missing_file_404(client):
     resp = await client.get(f"/api/v1/intake/photo/{valid_uuid}/0.jpg")
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+# --------------------------------------------------------------------------- #
+# Приём из Макс-бота: POST /api/v1/intake/max                                  #
+# --------------------------------------------------------------------------- #
+
+
+def _max_session(fake_session):
+    """Готовит fake_session: add копит объекты, flush присваивает UUID инциденту."""
+    added: list = []
+    fake_session.add = MagicMock(side_effect=added.append)
+
+    async def _flush(*args, **kwargs):
+        for obj in added:
+            if isinstance(obj, Incident) and getattr(obj, "id", None) is None:
+                obj.id = uuid4()
+
+    fake_session.flush = AsyncMock(side_effect=_flush)
+    return added
+
+
+@pytest.mark.asyncio
+async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tmp_path):
+    """POST /max (валидный токен + фото) → 200; source='max', msg выставлен,
+    region/city/street/coords взяты из разбора DaData Clean (clean_address)."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    added = _max_session(fake_session)
+
+    cleaned = {
+        "region": "Самарская обл",
+        "city": "г Кинель",
+        "street": "ул Маяковского, д 41",
+        "coords": "53.2, 50.6",
+        "geo_lat": "53.2",
+        "geo_lon": "50.6",
+    }
+    fake_clean = AsyncMock(return_value=cleaned)
+    with patch("app.services.intake.clean_address", new=fake_clean):
+        resp = await client.post(
+            "/api/v1/intake/max",
+            headers={"X-Intake-Token": "secret-token"},
+            data={
+                "text": "Самарская область, Кинель, Маяковского 41",
+                "msg_id": "msg-123",
+                "sender_name": "Иванов Иван",
+                "photo_time": "2026-04-26T08:05:00",
+            },
+            files=[("photos", ("0.jpg", BytesIO(_FAKE_IMG), "image/jpeg"))],
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+
+    incident = next(o for o in added if isinstance(o, Incident))
+    assert body["incident_id"] == str(incident.id)
+    assert incident.source == "max"
+    assert incident.status == "new"
+    assert incident.fio == "Иванов Иван"
+    assert incident.msg == "msg-123"
+    assert incident.region == "Самарская обл"
+    assert incident.city == "г Кинель"
+    assert incident.street == "ул Маяковского, д 41"
+    assert incident.coords == "53.2, 50.6"
+    assert incident.photos == 1
+    assert len(incident.photo_urls) == 1
+    fake_clean.assert_awaited_once()
+    fake_session.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_max_intake_wrong_token_403(client, monkeypatch):
+    """Неверный X-Intake-Token → 403 FORBIDDEN, сервис не вызывается."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    create = AsyncMock()
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_max",
+        new=create,
+    ):
+        resp = await client.post(
+            "/api/v1/intake/max",
+            headers={"X-Intake-Token": "WRONG"},
+            data={"text": "адрес", "msg_id": "m-1", "sender_name": "Кто-то"},
+        )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_max_intake_disabled_when_unset(client, monkeypatch):
+    """Токен приёма не сконфигурирован → 503 INTAKE_DISABLED."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", None)
+    resp = await client.post(
+        "/api/v1/intake/max",
+        headers={"X-Intake-Token": "anything"},
+        data={"text": "адрес", "msg_id": "m-1", "sender_name": "Кто-то"},
+    )
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "INTAKE_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_max_intake_falls_back_to_heuristic(client, fake_session, monkeypatch):
+    """clean_address → None: разбор адреса уходит в эвристику (без 500), coords=''."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    added = _max_session(fake_session)
+
+    fake_clean = AsyncMock(return_value=None)
+    with patch("app.services.intake.clean_address", new=fake_clean):
+        resp = await client.post(
+            "/api/v1/intake/max",
+            headers={"X-Intake-Token": "secret-token"},
+            data={
+                "text": "Самарская область, г. Кинель, ул. Маяковского, 41",
+                "msg_id": "m-9",
+                "sender_name": "Петров",
+            },
+        )
+
+    assert resp.status_code == 200
+    incident = next(o for o in added if isinstance(o, Incident))
+    assert incident.source == "max"
+    assert incident.msg == "m-9"
+    assert incident.region == "Самарская область"
+    assert incident.city == "г. Кинель"
+    assert incident.street == "ул. Маяковского, 41"
+    assert incident.coords == ""
+    fake_clean.assert_awaited_once()

@@ -176,6 +176,48 @@ async def public_form(
     return {"ok": True, "incident_id": str(incident.id)}
 
 
+@router.post("/max")
+async def max_intake(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    text: str = Form(""),
+    msg_id: str = Form(""),
+    sender_name: str = Form(""),
+    photo_time: str = Form(""),
+    photos: list[UploadFile] = File(default=[]),
+):
+    """Приём обращения из Макс-бота (multipart/form-data) → Incident(source='max').
+
+    Вызывается сервером Макс-бота server-to-server. Самозащита — общий секрет
+    в заголовке X-Intake-Token (тот же гейт, что у /yandex): токен не задан на
+    сервере → 503; не совпал → 403. Адрес из текста разбирается DaData Clean API
+    (с эвристическим фолбэком). Возвращает {"ok": True, "incident_id": ...}.
+    """
+    # Гейт по токену (общий секрет в заголовке) — зеркалит /yandex.
+    if settings.YANDEX_INTAKE_TOKEN is None:
+        raise AppError(
+            code="INTAKE_DISABLED",
+            message="Intake not configured",
+            status_code=503,
+        )
+    header_token = request.headers.get("X-Intake-Token")
+    if not header_token or not hmac.compare_digest(
+        header_token, settings.YANDEX_INTAKE_TOKEN
+    ):
+        raise ForbiddenError("Неверный токен приёма")
+
+    incident = await intake_service.create_incident_from_max(
+        session,
+        text=text,
+        msg_id=msg_id,
+        sender_name=sender_name,
+        photo_time=photo_time or None,
+        photo_files=photos,
+    )
+    await session.commit()
+    return {"ok": True, "incident_id": str(incident.id)}
+
+
 @router.get("/photo/{incident_id}/{filename}")
 async def get_photo(incident_id: str, filename: str):
     """ПУБЛИЧНО: отдаёт байты фото обращения. Жёсткий анти-traversal.

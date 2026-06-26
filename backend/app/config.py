@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # None → подсказки отключены (форма работает в режиме ручного ввода).
     DADATA_API_KEY: str | None = None
 
+    # Секретный ключ DaData — нужен Clean API (разбор адреса из Макс-сообщений).
+    # Clean API требует ОБА ключа (DADATA_API_KEY + DADATA_SECRET_KEY).
+    DADATA_SECRET_KEY: str | None = None
+
     # Каталог хранения загруженных фото обращений (относительно cwd процесса;
     # в контейнере = /app/storage). Структура: {STORAGE_DIR}/incidents/{id}/{n}.ext
     STORAGE_DIR: str = "storage"
