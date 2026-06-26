@@ -215,6 +215,14 @@ export default function ReportFormPage() {
       setSubmitError('Пожалуйста, укажите город или населённый пункт.');
       return;
     }
+    if (!street.trim()) {
+      setSubmitError('Пожалуйста, укажите улицу и дом.');
+      return;
+    }
+    if (!coords.trim()) {
+      setSubmitError('Пожалуйста, укажите координаты (подставятся при выборе улицы из подсказок).');
+      return;
+    }
     setSubmitError(null);
     setSubmitting(true);
     try {
@@ -311,6 +319,7 @@ export default function ReportFormPage() {
               {/* Улица, дом с автодополнением */}
               <AddressField
                 label="Улица, дом"
+                required
                 value={street}
                 onChange={setStreet}
                 onPick={handlePickStreet}
@@ -320,7 +329,9 @@ export default function ReportFormPage() {
 
               {/* Координаты */}
               <label className="de-rf-field">
-                <span className="de-rf-label">Координаты</span>
+                <span className="de-rf-label">
+                  Координаты <span className="de-rf-req">*</span>
+                </span>
                 <input
                   type="text"
                   className="de-rf-input de-rf-mono"
