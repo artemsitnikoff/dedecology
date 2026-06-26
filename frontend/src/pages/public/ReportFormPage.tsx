@@ -111,6 +111,10 @@ export default function ReportFormPage() {
   const [city, setCity] = useState('');
   const [street, setStreet] = useState('');
   const [coords, setCoords] = useState('');
+  // Голые имена выбранного региона/города (без типа) — для фильтрации
+  // следующего уровня в DaData (locations матчит "Самарская", а не "Самарская обл").
+  const [regionPlain, setRegionPlain] = useState('');
+  const [cityPlain, setCityPlain] = useState('');
   const [photoTime, setPhotoTime] = useState(nowLocalDatetime);
   const [bins, setBins] = useState<Bins>('');
   const [photos, setPhotos] = useState<File[]>([]);
@@ -135,12 +139,15 @@ export default function ReportFormPage() {
     if (s.value !== region) {
       setCity('');
       setStreet('');
+      setCityPlain('');
     }
     setRegion(s.value);
+    setRegionPlain(s.region_plain || s.region || '');
   };
 
   const handlePickCity = (s: AddressSuggestion) => {
     setCity(s.value);
+    setCityPlain(s.city_plain || s.city || '');
   };
 
   // Выбор улицы: подставляем координаты из geo (если есть), иначе готовые.
@@ -281,7 +288,7 @@ export default function ReportFormPage() {
                 value={city}
                 onChange={setCity}
                 onPick={handlePickCity}
-                opts={{ kind: 'city', region }}
+                opts={{ kind: 'city', region: regionPlain }}
                 placeholder="Начните вводить город…"
               />
 
@@ -291,7 +298,7 @@ export default function ReportFormPage() {
                 value={street}
                 onChange={setStreet}
                 onPick={handlePickStreet}
-                opts={{ kind: 'street', region, city }}
+                opts={{ kind: 'street', region: regionPlain, city: cityPlain }}
                 placeholder="Начните вводить улицу…"
               />
 

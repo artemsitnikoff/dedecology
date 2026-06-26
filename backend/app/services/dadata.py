@@ -94,6 +94,10 @@ async def suggest_address(
                 "coords": coords,
                 "geo_lat": geo_lat,
                 "geo_lon": geo_lon,
+                # Голые имена (без типа) — DaData фильтрует locations именно по ним
+                # ("Самарская", "Кинель"), а не по "Самарская обл" / "г Кинель".
+                "region_plain": d.get("region") or "",
+                "city_plain": d.get("city") or d.get("settlement") or "",
             }
         )
     return out

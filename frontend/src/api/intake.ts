@@ -16,6 +16,9 @@ export interface AddressSuggestion {
   coords: string;
   geo_lat: string;
   geo_lon: string;
+  /** Голые имена (без типа) — для фильтрации следующего уровня (DaData locations). */
+  region_plain?: string;
+  city_plain?: string;
 }
 
 interface SuggestResponse {
