@@ -33,6 +33,12 @@ class User(Base, TimestampMixin):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
+    # Супер-админ (сидовый pulse@reo.ru / самый старый admin): нельзя удалить,
+    # разжаловать или сбросить ему пароль чужими руками. В остальном — обычный admin.
+    is_superadmin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+
     # Защита от брутфорса пароля (account lockout через БД, работает при 2+ воркерах)
     failed_login_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")

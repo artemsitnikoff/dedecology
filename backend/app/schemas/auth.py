@@ -21,3 +21,4 @@ class UserMe(ORMBase):
     fio: str
     role: Literal["admin", "user"]
     status: Literal["active", "invited"]
+    is_superadmin: bool

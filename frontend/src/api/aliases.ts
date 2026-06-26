@@ -90,6 +90,8 @@ export interface UserMe {
   fio: string;
   role: Role;
   status: UserStatus;
+  /** Защищённый супер-админ: нельзя удалить/разжаловать/сбросить пароль чужими руками. */
+  is_superadmin: boolean;
 }
 
 /** Строка списка пользователей (GET /users). */
@@ -99,16 +101,16 @@ export interface UserListItem {
   email: string;
   role: Role;
   status: UserStatus;
+  /** Защищённый супер-админ: нельзя удалить/разжаловать/сбросить пароль чужими руками. */
+  is_superadmin: boolean;
 }
 
-/** Результат создания пользователя (POST /users) — temp_password возвращается один раз. */
-export interface UserCreateResult {
-  id: string;
+/** Тело создания пользователя (POST /users) — пароль задаётся вручную, пользователь сразу active. */
+export interface UserCreate {
   fio: string;
   email: string;
   role: Role;
-  status: 'invited';
-  temp_password: string;
+  password: string;
 }
 
 /** Конверт ошибки API: { error: { code, message, details } }. */

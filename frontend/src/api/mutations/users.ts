@@ -1,16 +1,17 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
-import type { Role, UserCreateResult } from '@/api/aliases';
+import type { UserCreate, UserListItem } from '@/api/aliases';
 
 /**
- * POST /users — создание приглашённого пользователя.
- * Возвращает temp_password ОДИН раз (письмо не отправляется — фаза позже).
+ * POST /users — создание пользователя с ручным паролем.
+ * Пользователь создаётся сразу active (без инвайт-флоу), is_superadmin=false.
+ * Возвращает созданного пользователя как элемент списка.
  */
 export function useCreateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ fio, email, role }: { fio: string; email: string; role: Role }) => {
-      const res = await api.post<UserCreateResult>('/users', { fio, email, role });
+    mutationFn: async ({ fio, email, role, password }: UserCreate) => {
+      const res = await api.post<UserListItem>('/users', { fio, email, role, password });
       return res.data;
     },
     onSuccess: () => {
@@ -19,7 +20,24 @@ export function useCreateUser() {
   });
 }
 
-/** DELETE /users/{id} — удаление пользователя (admin-роли защищены на бэке). */
+/**
+ * POST /users/{id}/password — ручная установка/сброс пароля пользователю (только admin).
+ * Запрещено для супер-админа (бэк отдаёт 403).
+ */
+export function useSetUserPassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, new_password }: { id: string; new_password: string }) => {
+      await api.post(`/users/${id}/password`, { new_password });
+      return id;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+    },
+  });
+}
+
+/** DELETE /users/{id} — удаление пользователя (admin-роли и супер-админ защищены на бэке). */
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({

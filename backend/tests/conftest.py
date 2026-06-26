@@ -42,6 +42,7 @@ def current_user() -> User:
         role="admin",
         status="active",
         is_active=True,
+        is_superadmin=False,
     )
     user.id = uuid4()
     return user

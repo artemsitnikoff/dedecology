@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/store/authStore';
 import { useUsers } from '@/api/hooks/useUsers';
 import { useUpdateProfile, useResetPassword } from '@/api/mutations/profile';
-import { useCreateUser, useDeleteUser } from '@/api/mutations/users';
+import { useCreateUser, useDeleteUser, useSetUserPassword } from '@/api/mutations/users';
 import type { Role, UserStatus } from '@/api/aliases';
 import './Settings.css';
 
@@ -34,7 +34,8 @@ type Banner = { kind: 'success' | 'error'; text: string } | null;
 
 /**
  * Экран «Настройки»: профиль (Заявитель + смена пароля) и — только для admin —
- * управление пользователями (список, приглашение с честным temp_password, удаление).
+ * управление пользователями (список, создание с ручным паролем, сброс пароля, удаление).
+ * Супер-админ защищён: ему нельзя сбросить пароль чужими руками и нельзя удалить.
  */
 export function SettingsPage() {
   const me = useAuthStore((s) => s.user);
@@ -87,33 +88,63 @@ export function SettingsPage() {
   const users = usersQuery.data ?? [];
   const createUser = useCreateUser();
   const deleteUser = useDeleteUser();
+  const setUserPassword = useSetUserPassword();
 
   const [nuFio, setNuFio] = useState('');
   const [nuEmail, setNuEmail] = useState('');
   const [nuRole, setNuRole] = useState<Role>('user');
+  const [nuPw, setNuPw] = useState('');
 
-  const inviteUser = () => {
+  // Инлайн-форма сброса пароля: id целевого пользователя + значение поля.
+  const [pwTargetId, setPwTargetId] = useState<string | null>(null);
+  const [pwTargetValue, setPwTargetValue] = useState('');
+
+  const addUser = () => {
     const f = nuFio.trim();
     const e = nuEmail.trim();
     if (!f || !e) {
       setBanner({ kind: 'error', text: 'Заполните заявителя и email.' });
       return;
     }
+    if (nuPw.length < 6) {
+      setBanner({ kind: 'error', text: 'Пароль — минимум 6 символов.' });
+      return;
+    }
     createUser.mutate(
-      { fio: f, email: e, role: nuRole },
+      { fio: f, email: e, role: nuRole, password: nuPw },
       {
-        onSuccess: (res) => {
+        onSuccess: () => {
           setNuFio('');
           setNuEmail('');
           setNuRole('user');
-          // Честно показываем временный пароль — письмо не отправляется (фаза позже).
-          setBanner({
-            kind: 'success',
-            text: `Пользователь добавлен. Временный пароль: ${res.temp_password}`,
-          });
+          setNuPw('');
+          setBanner({ kind: 'success', text: 'Пользователь создан.' });
         },
         onError: () =>
           setBanner({ kind: 'error', text: 'Не удалось создать пользователя (возможно, email занят).' }),
+      }
+    );
+  };
+
+  const openPwSetter = (id: string) => {
+    setPwTargetId((cur) => (cur === id ? null : id));
+    setPwTargetValue('');
+  };
+
+  const submitPwSetter = (id: string) => {
+    if (pwTargetValue.length < 6) {
+      setBanner({ kind: 'error', text: 'Пароль — минимум 6 символов.' });
+      return;
+    }
+    setUserPassword.mutate(
+      { id, new_password: pwTargetValue },
+      {
+        onSuccess: () => {
+          setPwTargetId(null);
+          setPwTargetValue('');
+          setBanner({ kind: 'success', text: 'Пароль пользователя обновлён.' });
+        },
+        onError: () => setBanner({ kind: 'error', text: 'Не удалось задать пароль.' }),
       }
     );
   };
@@ -213,7 +244,7 @@ export function SettingsPage() {
               <span className="de-set-count">{users.length}</span>
             </div>
             <div className="de-set-card-sub">
-              Добавьте сотрудника — временный пароль покажем здесь (письмо не отправляется).
+              Добавьте сотрудника и задайте ему пароль вручную.
             </div>
 
             <div className="de-set-invite">
@@ -239,6 +270,18 @@ export function SettingsPage() {
                   />
                 </div>
               </div>
+              <div className="de-set-invite-grow">
+                <div className="de-set-field">
+                  <label className="de-set-field-label">Пароль</label>
+                  <input
+                    className="de-set-input"
+                    type="password"
+                    value={nuPw}
+                    onChange={(e) => setNuPw(e.target.value)}
+                    placeholder="мин. 6 символов"
+                  />
+                </div>
+              </div>
               <div className="de-set-field">
                 <label className="de-set-field-label">Доступ</label>
                 <div className="de-set-access-chips">
@@ -257,11 +300,11 @@ export function SettingsPage() {
               <button
                 type="button"
                 className="de-set-btn de-set-btn-success"
-                onClick={inviteUser}
+                onClick={addUser}
                 disabled={createUser.isPending}
               >
                 <Icon name="plus" size={15} />
-                Отправить приглашение
+                Создать пользователя
               </button>
             </div>
 
@@ -280,50 +323,110 @@ export function SettingsPage() {
                 users.map((u) => {
                   const roleMeta = ROLE_META[u.role];
                   const statusMeta = STATUS_META[u.status];
+                  const isSuper = u.is_superadmin;
                   return (
-                    <div key={u.id} className="de-set-row">
-                      <div className="de-set-user-cell">
-                        <Avatar name={u.fio} size="md" />
-                        <div className="de-set-user-meta">
-                          <div className="de-set-user-name">{u.fio}</div>
-                          <div className="de-set-user-email">{u.email}</div>
+                    <Fragment key={u.id}>
+                      <div className="de-set-row">
+                        <div className="de-set-user-cell">
+                          <Avatar name={u.fio} size="md" />
+                          <div className="de-set-user-meta">
+                            <div className="de-set-user-name-row">
+                              <span className="de-set-user-name">{u.fio}</span>
+                              {isSuper && (
+                                <span
+                                  className="de-set-super-badge"
+                                  title="Супер-администратор — защищён"
+                                >
+                                  <Icon name="shield" size={11} />
+                                  Супер-админ
+                                </span>
+                              )}
+                            </div>
+                            <div className="de-set-user-email">{u.email}</div>
+                          </div>
+                        </div>
+                        <div className="de-set-cell-access">
+                          <span
+                            className="de-set-badge"
+                            style={{ background: roleMeta.bg, color: roleMeta.fg }}
+                          >
+                            {roleMeta.label}
+                          </span>
+                        </div>
+                        <div className="de-set-cell-status">
+                          <span
+                            className="de-set-badge"
+                            style={{ background: statusMeta.bg, color: statusMeta.fg }}
+                          >
+                            <span
+                              className="de-set-badge-dot"
+                              style={{ background: statusMeta.dot }}
+                            />
+                            {statusMeta.label}
+                          </span>
+                        </div>
+                        <div className="de-set-cell-action">
+                          {isSuper ? (
+                            <span className="de-set-lock" title="Супер-администратор защищён">
+                              <Icon name="lock" size={15} />
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className={`de-set-key ${pwTargetId === u.id ? 'active' : ''}`}
+                                aria-label="Задать пароль"
+                                title="Задать пароль"
+                                onClick={() => openPwSetter(u.id)}
+                              >
+                                <Icon name="key" size={15} />
+                              </button>
+                              <button
+                                type="button"
+                                className="de-set-trash"
+                                aria-label="Удалить пользователя"
+                                title="Удалить пользователя"
+                                onClick={() => removeUser(u.id)}
+                                disabled={deleteUser.isPending}
+                              >
+                                <Icon name="trash" size={15} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
-                      <div className="de-set-cell-access">
-                        <span
-                          className="de-set-badge"
-                          style={{ background: roleMeta.bg, color: roleMeta.fg }}
-                        >
-                          {roleMeta.label}
-                        </span>
-                      </div>
-                      <div className="de-set-cell-status">
-                        <span
-                          className="de-set-badge"
-                          style={{ background: statusMeta.bg, color: statusMeta.fg }}
-                        >
-                          <span className="de-set-badge-dot" style={{ background: statusMeta.dot }} />
-                          {statusMeta.label}
-                        </span>
-                      </div>
-                      <div className="de-set-cell-action">
-                        {u.role === 'admin' ? (
-                          <span className="de-set-lock" title="Администратора нельзя удалить">
-                            <Icon name="lock" size={15} />
-                          </span>
-                        ) : (
+                      {pwTargetId === u.id && (
+                        <div className="de-set-pw-setter">
+                          <Icon name="key" size={14} />
+                          <input
+                            className="de-set-input de-set-pw-setter-input"
+                            type="password"
+                            autoFocus
+                            value={pwTargetValue}
+                            onChange={(e) => setPwTargetValue(e.target.value)}
+                            placeholder="Новый пароль (мин. 6 символов)"
+                          />
                           <button
                             type="button"
-                            className="de-set-trash"
-                            aria-label="Удалить пользователя"
-                            onClick={() => removeUser(u.id)}
-                            disabled={deleteUser.isPending}
+                            className="de-set-btn de-set-btn-primary"
+                            onClick={() => submitPwSetter(u.id)}
+                            disabled={setUserPassword.isPending}
                           >
-                            <Icon name="trash" size={15} />
+                            Сохранить
                           </button>
-                        )}
-                      </div>
-                    </div>
+                          <button
+                            type="button"
+                            className="de-set-btn de-set-btn-outline"
+                            onClick={() => {
+                              setPwTargetId(null);
+                              setPwTargetValue('');
+                            }}
+                          >
+                            Отмена
+                          </button>
+                        </div>
+                      )}
+                    </Fragment>
                   );
                 })
               )}

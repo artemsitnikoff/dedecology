@@ -292,7 +292,7 @@
   padding: 0 14px;
 }
 .de-set-th-action {
-  width: 44px;
+  width: 88px;
   flex: none;
 }
 .de-set-row {
@@ -319,6 +319,12 @@
 .de-set-user-meta {
   min-width: 0;
 }
+.de-set-user-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .de-set-user-name {
   font-size: var(--fs-13);
   font-weight: 500;
@@ -326,6 +332,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--fg-1);
+}
+.de-set-super-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--ark-yellow-100);
+  color: var(--ark-yellow-600);
 }
 .de-set-user-email {
   font-size: 11.5px;
@@ -345,11 +364,13 @@
   padding: 0 14px;
 }
 .de-set-cell-action {
-  width: 44px;
+  width: 88px;
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding-right: 12px;
 }
 
 .de-set-badge {
@@ -392,4 +413,39 @@
 .de-set-trash:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.de-set-key {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--fg-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.de-set-key:hover,
+.de-set-key.active {
+  background: var(--ark-blue-50);
+  color: var(--accent);
+}
+
+/* ---------- Инлайн-форма сброса пароля пользователю ---------- */
+.de-set-pw-setter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-panel-2);
+  border-bottom: 1px solid var(--border-2);
+  color: var(--fg-2);
+}
+.de-set-pw-setter:last-child {
+  border-bottom: 0;
+}
+.de-set-pw-setter-input {
+  max-width: 320px;
 }

@@ -88,6 +88,7 @@ async def seed_admin(session: AsyncSession) -> None:
             role="admin",
             status="active",
             is_active=True,
+            is_superadmin=True,
         )
     )
     logger.info("Создан админ: %s", email)

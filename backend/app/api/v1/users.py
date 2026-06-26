@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_db
 from ...deps import get_current_user
 from ...models import User
-from ...schemas.user import UserCreate, UserCreateResult, UserListItem, UserShort
-from ...services.user import create_invite, delete_user, list_users
+from ...schemas.user import PasswordReset, UserCreate, UserListItem
+from ...services.user import create_user, delete_user, list_users, set_user_password
 
 router = APIRouter()
 
@@ -22,22 +22,29 @@ async def get_users(
     return await list_users(session)
 
 
-@router.post("", response_model=UserCreateResult, status_code=201)
-async def invite_user(
+@router.post("", response_model=UserListItem, status_code=201)
+async def create_user_endpoint(
     user_data: UserCreate,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Создаёт приглашённого пользователя, возвращает временный пароль один раз.
-
-    Письмо НЕ отправляется (на фронте честно подписываем).
-    """
-    user, temp_password = await create_invite(session, user_data, current_user.id)
+    """Создаёт активного пользователя с заданным админом паролем (инвайт-флоу убран)."""
+    user = await create_user(session, user_data, current_user.id)
     await session.commit()
-    result = UserShort.model_validate(user).model_dump()
-    result["status"] = user.status
-    result["temp_password"] = temp_password
-    return UserCreateResult(**result)
+    return UserListItem.model_validate(user)
+
+
+@router.post("/{user_id}/password", status_code=204)
+async def set_password(
+    user_id: UUID,
+    data: PasswordReset,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Задаёт/сбрасывает пароль пользователю. Супер-админу — запрещено (403)."""
+    await set_user_password(session, user_id, data.new_password, current_user.id)
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.delete("/{user_id}", status_code=204)
@@ -46,7 +53,7 @@ async def remove_user(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Удаляет пользователя. Нельзя удалить admin-роль и самого себя."""
+    """Удаляет пользователя. Нельзя удалить супер-админа, admin-роль и самого себя."""
     await delete_user(session, user_id, current_user.id)
     await session.commit()
     return Response(status_code=204)

@@ -10,6 +10,7 @@ class UserShort(ORMBase):
     fio: str
     email: str
     role: Literal["admin", "user"]
+    is_superadmin: bool
 
 
 class UserListItem(ORMBase):
@@ -19,19 +20,15 @@ class UserListItem(ORMBase):
     email: str
     role: Literal["admin", "user"]
     status: Literal["active", "invited"]
+    is_superadmin: bool
 
 
 class UserCreate(BaseModel):
+    """Создание пользователя админом: пароль задаётся вручную (инвайт-флоу убран)."""
     fio: str
     email: EmailStr
     role: Literal["admin", "user"] = "user"
-
-
-class UserCreateResult(UserShort):
-    """Ответ POST /users — выдаёт сгенерированный временный пароль один раз.
-    Письмо НЕ отправляется (честно подписываем на фронте)."""
-    status: Literal["active", "invited"] = "invited"
-    temp_password: str
+    password: str = Field(min_length=6, max_length=128)
 
 
 class ProfileUpdate(BaseModel):

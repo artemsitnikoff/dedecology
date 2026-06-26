@@ -1,6 +1,5 @@
-"""Пользователи: список, создание-приглашение, удаление (SPEC §3 /users)."""
+"""Пользователи: список, создание, смена пароля, удаление (SPEC §3 /users)."""
 
-import secrets
 from uuid import UUID
 
 from sqlalchemy import select
@@ -29,15 +28,14 @@ async def get_user(session: AsyncSession, user_id: UUID) -> User:
     return user
 
 
-async def create_invite(
+async def create_user(
     session: AsyncSession,
     user_data: UserCreate,
     actor_user_id: UUID,
-) -> tuple[User, str]:
-    """Создаёт приглашённого пользователя (status='invited') с временным паролем.
+) -> User:
+    """Создаёт активного пользователя с заданным админом паролем (инвайт-флоу убран).
 
-    Письмо НЕ отправляется (честно подписываем на фронте) — пароль возвращается один раз.
-    Возвращает (user, temp_password). Дубликат email → 409 CONFLICT.
+    status='active', is_superadmin=False. Дубликат email → 409 CONFLICT.
     """
     existing = await session.execute(
         select(User).where(User.email == user_data.email)
@@ -45,15 +43,14 @@ async def create_invite(
     if existing.scalar_one_or_none() is not None:
         raise ConflictError("Пользователь с таким email уже существует")
 
-    temp_password = secrets.token_urlsafe(12)
-
     user = User(
         email=user_data.email,
-        password_hash=get_password_hash(temp_password),
+        password_hash=get_password_hash(user_data.password),
         fio=user_data.fio,
         role=user_data.role,
-        status="invited",
+        status="active",
         is_active=True,
+        is_superadmin=False,
     )
     session.add(user)
     try:
@@ -78,7 +75,30 @@ async def create_invite(
         },
         actor_user_id=actor_user_id,
     )
-    return user, temp_password
+    return user
+
+
+async def set_user_password(
+    session: AsyncSession,
+    user_id: UUID,
+    new_password: str,
+    actor_user_id: UUID,
+) -> None:
+    """Админ задаёт/сбрасывает пароль пользователю. Супер-админу — НЕЛЬЗЯ (403)."""
+    user = await get_user(session, user_id)
+
+    if user.is_superadmin:
+        raise ForbiddenError("Нельзя сбросить пароль супер-админа")
+
+    user.password_hash = get_password_hash(new_password)
+    await session.flush()
+    await audit(
+        session,
+        action="password_reset",
+        entity_type="user",
+        entity_id=user.id,
+        actor_user_id=actor_user_id,
+    )
 
 
 async def delete_user(
@@ -86,11 +106,14 @@ async def delete_user(
     user_id: UUID,
     actor_user_id: UUID,
 ) -> None:
-    """Удаляет пользователя. Нельзя удалить admin-роль и нельзя удалить самого себя."""
+    """Удаляет пользователя. Нельзя удалить супер-админа, admin-роль и самого себя."""
     user = await get_user(session, user_id)
 
     if user.id == actor_user_id:
         raise ForbiddenError("Нельзя удалить самого себя")
+
+    if user.is_superadmin:
+        raise ForbiddenError("Нельзя удалить супер-админа")
 
     if user.role == "admin":
         raise ForbiddenError("Нельзя удалить администратора")

@@ -93,3 +93,4 @@ async def test_me_returns_current_user(client, current_user):
     assert body["email"] == current_user.email
     assert body["role"] == "admin"
     assert body["status"] == "active"
+    assert body["is_superadmin"] is False
