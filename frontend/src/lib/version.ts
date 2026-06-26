@@ -1,2 +1,2 @@
 /** Версия приложения — показывается в сайдбаре, бампится при деплое. */
-export const APP_VERSION = '0.7.0';
+export const APP_VERSION = '0.7.1';
