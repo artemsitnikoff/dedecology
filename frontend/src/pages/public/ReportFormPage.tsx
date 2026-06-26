@@ -260,9 +260,9 @@ export default function ReportFormPage() {
             <div className="de-rf-header">
               <div className="de-rf-brand">
                 <span className="de-rf-brand-emoji" aria-hidden>
-                  👴
+                  💚
                 </span>
-                <span className="de-rf-brand-name">ДедЭколог</span>
+                <span className="de-rf-brand-name">ЭкоПульс</span>
               </div>
               <h1 className="de-rf-title">Сообщить о состоянии площадки ТКО</h1>
               <p className="de-rf-sub">
@@ -410,7 +410,7 @@ export default function ReportFormPage() {
             <button type="submit" className="de-rf-submit" disabled={submitting}>
               {submitting ? 'Отправляем…' : 'Отправить'}
             </button>
-            <div className="de-rf-foot">ДедЭколог · забота о чистоте</div>
+            <div className="de-rf-foot">ЭкоПульс · забота о чистоте</div>
           </form>
         )}
       </div>

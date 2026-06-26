@@ -1,7 +1,7 @@
 [project]
 name = "dedecology-maxbot"
 version = "0.1.0"
-description = "Max (max.ru) messenger long-polling bot for ДедЭколог — forwards messages to the backend intake API"
+description = "Max (max.ru) messenger long-polling bot for ЭкоПульс — forwards messages to the backend intake API"
 requires-python = ">=3.11"
 dependencies = [
     "maxapi==0.9.4",

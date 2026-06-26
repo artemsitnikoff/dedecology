@@ -5,8 +5,8 @@ import { buildIncidentParams } from '@/api/hooks/useIncidents';
 import type { IncidentFilters } from '@/api/hooks/useIncidents';
 
 /** Имя файла по умолчанию (см. BUILD-SPEC §3) — fallback, если нет Content-Disposition. */
-const EXPORT_FILENAME_ALL = 'Инциденты_ДедЭколог.xlsx';
-const EXPORT_FILENAME_SELECTED = 'Инциденты_ДедЭколог_выбранные.xlsx';
+const EXPORT_FILENAME_ALL = 'Инциденты_ЭкоПульс.xlsx';
+const EXPORT_FILENAME_SELECTED = 'Инциденты_ЭкоПульс_выбранные.xlsx';
 
 /**
  * Достаёт имя файла из заголовка Content-Disposition.

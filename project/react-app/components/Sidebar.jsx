@@ -4,9 +4,9 @@ function Sidebar({ total, view, onNav }) {
   return (
     <aside style={{ width: 248, flex: 'none', background: '#F4F6F8', borderRight: '1px solid #E6E9EC', display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="de-brand" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '17px 18px 15px', borderBottom: '1px solid #E6E9EC' }}>
-        <div className="de-mark" style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg,#3FB36B 0%,#1F8A5B 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, lineHeight: 1, boxShadow: '0 2px 6px rgba(31,138,91,.32)', flex: 'none' }}>👴</div>
+        <div className="de-mark" style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg,#3FB36B 0%,#1F8A5B 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, lineHeight: 1, boxShadow: '0 2px 6px rgba(31,138,91,.32)', flex: 'none' }}>💚</div>
         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
-          <span style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: '-0.01em' }}>ДедЭколог</span>
+          <span style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: '-0.01em' }}>ЭкоПульс</span>
           <span style={{ fontSize: 11, color: '#9AA3AE', marginTop: 2 }}>сбор обращений</span>
         </div>
       </div>
@@ -30,7 +30,7 @@ function Sidebar({ total, view, onNav }) {
         <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#1F8A5B', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: 12, flex: 'none' }}>АД</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 500 }}>Администратор</div>
-          <div style={{ fontSize: 11, color: '#9AA3AE' }}>ДедЭколог · смена</div>
+          <div style={{ fontSize: 11, color: '#9AA3AE' }}>ЭкоПульс · смена</div>
         </div>
       </div>
     </aside>

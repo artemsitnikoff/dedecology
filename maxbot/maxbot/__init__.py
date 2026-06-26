@@ -1,7 +1,7 @@
-"""ДедЭколог Max (max.ru) messenger long-polling bot.
+"""ЭкоПульс Max (max.ru) messenger long-polling bot.
 
 Outbound-only worker: long-polls the MAX Bot API for incoming messages and
-forwards each message's text + first photo to the ДедЭколог backend intake API,
+forwards each message's text + first photo to the ЭкоПульс backend intake API,
 which creates an incident. No inbound port / webhook is required.
 """
 

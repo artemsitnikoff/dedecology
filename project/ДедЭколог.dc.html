@@ -46,9 +46,9 @@
   <!-- ============ SIDEBAR ============ -->
   <aside style="width:248px; flex:none; background:#F4F6F8; border-right:1px solid #E6E9EC; display:flex; flex-direction:column; height:100%;">
     <div class="de-brand" style="display:flex; align-items:center; gap:11px; padding:17px 18px 15px; border-bottom:1px solid #E6E9EC;">
-      <div class="de-mark" style="width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,#3FB36B 0%,#1F8A5B 100%); display:flex; align-items:center; justify-content:center; font-size:19px; line-height:1; box-shadow:0 2px 6px rgba(31,138,91,.32); flex:none;">👴</div>
+      <div class="de-mark" style="width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,#3FB36B 0%,#1F8A5B 100%); display:flex; align-items:center; justify-content:center; font-size:19px; line-height:1; box-shadow:0 2px 6px rgba(31,138,91,.32); flex:none;">💚</div>
       <div style="display:flex; flex-direction:column; line-height:1.1;">
-        <span style="font-weight:700; font-size:15.5px; letter-spacing:-0.01em;">ДедЭколог</span>
+        <span style="font-weight:700; font-size:15.5px; letter-spacing:-0.01em;">ЭкоПульс</span>
         <span style="font-size:11px; color:#9AA3AE; margin-top:2px;">сбор обращений</span>
       </div>
     </div>
@@ -71,7 +71,7 @@
       <div style="width:32px; height:32px; border-radius:50%; background:#1F8A5B; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex:none;">АД</div>
       <div style="flex:1; min-width:0;">
         <div style="font-size:13px; font-weight:500;">Администратор</div>
-        <div style="font-size:11px; color:#9AA3AE;">ДедЭколог · смена</div>
+        <div style="font-size:11px; color:#9AA3AE;">ЭкоПульс · смена</div>
       </div>
     </div>
   </aside>
@@ -220,7 +220,7 @@
       <!-- Empty -->
       <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:80px 32px; text-align:center;">
-          <div style="width:88px; height:88px; border-radius:50%; background:#F4F6F8; display:flex; align-items:center; justify-content:center; font-size:38px;">👴</div>
+          <div style="width:88px; height:88px; border-radius:50%; background:#F4F6F8; display:flex; align-items:center; justify-content:center; font-size:38px;">💚</div>
           <h3 style="margin:0; font-size:16px; font-weight:600;">Ничего не найдено</h3>
           <p style="margin:0; max-width:360px; color:#5B6573; font-size:13px; line-height:1.5;">Под заданные фильтры обращений нет. Попробуйте сбросить фильтры.</p>
           <button class="de-btn" onClick="{{ resetFilters }}" style="height:32px; padding:0 14px; border-radius:7px; border:1px solid #E6E9EC; background:#fff; font:inherit; font-size:13px; cursor:pointer;">Сбросить фильтры</button>
@@ -579,10 +579,10 @@ class Component extends DCLogic {
   }
   exportSelected = () => {
     const rows = this.DATA.filter(d => this.state.selected.includes(d.id));
-    this.download(rows, 'Инциденты_ДедЭколог_выбранные.csv');
+    this.download(rows, 'Инциденты_ЭкоПульс_выбранные.csv');
   };
   exportAll = () => {
-    this.download(this.getFiltered(), 'Инциденты_ДедЭколог.csv');
+    this.download(this.getFiltered(), 'Инциденты_ЭкоПульс.csv');
   };
   markExported = () => {
     this.state.selected.forEach(id => { const r = this.DATA.find(d => d.id === id); if (r) r.status = 'exported'; });

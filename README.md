@@ -19,4 +19,4 @@ The design medium is **HTML/CSS/JS** — these are prototypes, not production co
 ## Bundle contents
 
 - `untitled/README.md` — this file
-- `untitled/project/` — the `ДедЭколог админка` project files (HTML prototypes, assets, components)
+- `untitled/project/` — the `ЭкоПульс админка` project files (HTML prototypes, assets, components)

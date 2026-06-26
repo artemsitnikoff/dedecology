@@ -13,7 +13,7 @@ from .core.errors import (
     generic_exception_handler,
 )
 
-app = FastAPI(title="ДедЭколог", version="1.0.0", redirect_slashes=False)
+app = FastAPI(title="ЭкоПульс", version="1.0.0", redirect_slashes=False)
 
 # CORS для фронтенда (origins из env CORS_ORIGINS, comma-separated)
 app.add_middleware(

@@ -37,7 +37,8 @@
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--de-brand) 0%, var(--de-brand-light) 100%);
+  /* Светлый фон, чтобы зелёное сердце 💚 было видно (на зелёном градиенте сливалось). */
+  background: var(--ark-green-100);
   display: flex;
   align-items: center;
   justify-content: center;

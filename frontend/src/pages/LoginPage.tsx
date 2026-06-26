@@ -29,9 +29,9 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-brand">
-        <span className="login-brand-mark">👴</span>
+        <span className="login-brand-mark">💚</span>
         <div className="login-brand-text">
-          <span className="login-brand-name">ДедЭколог</span>
+          <span className="login-brand-name">ЭкоПульс</span>
           <span className="login-brand-sub">сбор обращений</span>
         </div>
       </div>

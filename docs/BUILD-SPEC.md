@@ -1,9 +1,9 @@
-# BUILD SPEC — ДедЭколог (v1 scaffold)
+# BUILD SPEC — ЭкоПульс (v1 scaffold)
 
-> Admin panel for an ecologist/inspector to triage TKO-site reports. Built on the **glafira stack & conventions** (FastAPI async + React 18 / TS / Vite). This file is the **single source of truth** for the scaffold. Faithful behavior contract = `project/react-app/` source + `project/docs/ТЗ - ДедЭколог.md`.
+> Admin panel for an ecologist/inspector to triage TKO-site reports. Built on the **glafira stack & conventions** (FastAPI async + React 18 / TS / Vite). This file is the **single source of truth** for the scaffold. Faithful behavior contract = `project/react-app/` source + `project/docs/ТЗ - ЭкоПульс.md`.
 
 ## 0. Reference material (READ THESE)
-- **Behavior/ТЗ:** `project/docs/ТЗ - ДедЭколог.md`
+- **Behavior/ТЗ:** `project/docs/ТЗ - ЭкоПульс.md`
 - **Prototype source (functional contract):** `project/react-app/{App.jsx,data.js,styles.css,components/*.jsx}`
 - **Recon blueprints (deep patterns extracted from glafira — READ the relevant one before building your half):**
   - Backend infra: `/private/tmp/claude-501/-Users-artemsitnikov-claudeproject-dedecology/d2243561-7cd1-44f8-b7f5-9119e51561e7/scratchpad/recon/backend-infra.md`
@@ -76,8 +76,8 @@
   - **period:** `photo_time` between `date_from 00:00:00` and `date_to 23:59:59` inclusive (filter on **photo_time**, not received_at).
   - **sort:** `date|time`→`photo_time`; `address`→`street`; `status`→CASE order `new<found<none<exported`; `source`→`source`; others→same-named col. default `photo_time desc`.
 - `GET /incidents/funnel` query: `search,source,date_from,date_to` (same as list, **excluding** status) → `FunnelCounts {all,new,found,none,exported}` (counts honor search/source/period but NOT the status filter — so each chip shows its candidate count). **Declare this route BEFORE `/{id}`.**
-- `GET /incidents/export` (same query as list) → `.xlsx` of the full filtered set, `Content-Disposition: attachment; filename*=UTF-8''Инциденты_ДедЭколог.xlsx`. **Declare before `/{id}`.**
-- `POST /incidents/export` `{ids:[uuid,…]}` → `.xlsx` of selected, filename `Инциденты_ДедЭколог_выбранные.xlsx`. **Declare before `/{id}`.**
+- `GET /incidents/export` (same query as list) → `.xlsx` of the full filtered set, `Content-Disposition: attachment; filename*=UTF-8''Инциденты_ЭкоПульс.xlsx`. **Declare before `/{id}`.**
+- `POST /incidents/export` `{ids:[uuid,…]}` → `.xlsx` of selected, filename `Инциденты_ЭкоПульс_выбранные.xlsx`. **Declare before `/{id}`.**
 - `GET /incidents/{id}` → `IncidentDetail` (all fields incl. `bins`).
 - `PATCH /incidents/{id}/status` `{status}` → `IncidentDetail` (audit).
 - `POST /incidents/bulk-status` `{ids:[…], status}` → `{updated:int}` (audit). Powers «Пометить Выгружен».
@@ -141,12 +141,12 @@ frontend/
 - Copy `glafira/frontend/src/styles/tokens.css` and `global.css` **verbatim** into `frontend/src/styles/`, with two edits to `tokens.css`:
   - Re-theme the brand to **eco green** (prototype sidebar mark is green gradient): add `--de-brand: #1F8A5B; --de-brand-light: #3FB36B;` and set `--brand-accent: #1F8A5B; --brand-accent-strong: #128640; --brand-bg:#ECF8F0; --brand-border:#A7DDB9; --brand-fg:#128640;` so the `:focus-visible` ring (which uses `--brand-accent`) is eco-green, not glafira pink. Keep the **blue `--accent: #2A8AF0`** (prototype uses blue for active/links).
   - You may drop glafira's ATS-only domain tokens (`--stage-*`, `--score-*`, `--risk-*`, `--src-*`) — not needed.
-- Fonts via `<link>` in `index.html` (Inter 400;500;600;700 + JetBrains Mono 400;500) — same as glafira. `lang="ru"`, title `ДедЭколог — сбор обращений`.
+- Fonts via `<link>` in `index.html` (Inter 400;500;600;700 + JetBrains Mono 400;500) — same as glafira. `lang="ru"`, title `ЭкоПульс — сбор обращений`.
 - The prototype's inline colors all already equal `--ark-*` values, so map every prototype hex to its token (e.g. `#EAF3FE`→`var(--ark-blue-50)`, `#2A8AF0`→`var(--accent)`). Do NOT paste raw hex — use tokens.
-- Sidebar brand: green-gradient 34px rounded mark with 👴 emoji, title `ДедЭколог`, subtitle `сбор обращений`. Nav: `Инциденты` (count badge) + `Настройки`. User card at bottom.
+- Sidebar brand: green-gradient 34px rounded mark with 💚 emoji, title `ЭкоПульс`, subtitle `сбор обращений`. Nav: `Инциденты` (count badge) + `Настройки`. User card at bottom.
 
 ## 7. Behavior contract (port the prototype 1:1 — see prototype-behavior.md)
-- **Incidents screen:** header (title «Инциденты» + counter «N обращений · обновлено сегодня» / «Показано X из N» when filtered + «Выгрузить всё» button → backend export of current filter). Search row (300px field, placeholder «Поиск по адресу, ФИО, координатам…», hint «Сортировка — по клику на заголовок столбца»). **Funnel** chips (single-select status; order: Все | Новый→Инцидент обнаружен | Выгружен | Нет инцидента; mono counts from `/incidents/funnel`). **FilterBar** (Источник multi-select chips Макс/Яндекс форма; Период two native date inputs «с — по» with ✕ clear; «Сбросить» when active). **Bulk bar** (when rows selected: «Выбрано N», green «Выгрузить в Excel»→POST export selected, «Пометить Выгружен»→bulk-status, «Снять выделение»). **Table** 10 cols in order: Фото(thumb+count badge, click→lightbox) · Дата · Время(mono) · Регион · Город · Адрес(flex) · Координаты(mono) · Статус(pill+dot) · Источник(pill) · Чат(Макс→link, Форма→empty). Checkbox col + select-all. Header-click sort (first click desc, repeat asc; ▲/▼ indicator, active in accent). Row click→drawer. Empty state (👴 circle, «Ничего не найдено», «Сбросить фильтры»).
+- **Incidents screen:** header (title «Инциденты» + counter «N обращений · обновлено сегодня» / «Показано X из N» when filtered + «Выгрузить всё» button → backend export of current filter). Search row (300px field, placeholder «Поиск по адресу, ФИО, координатам…», hint «Сортировка — по клику на заголовок столбца»). **Funnel** chips (single-select status; order: Все | Новый→Инцидент обнаружен | Выгружен | Нет инцидента; mono counts from `/incidents/funnel`). **FilterBar** (Источник multi-select chips Макс/Яндекс форма; Период two native date inputs «с — по» with ✕ clear; «Сбросить» when active). **Bulk bar** (when rows selected: «Выбрано N», green «Выгрузить в Excel»→POST export selected, «Пометить Выгружен»→bulk-status, «Снять выделение»). **Table** 10 cols in order: Фото(thumb+count badge, click→lightbox) · Дата · Время(mono) · Регион · Город · Адрес(flex) · Координаты(mono) · Статус(pill+dot) · Источник(pill) · Чат(Макс→link, Форма→empty). Checkbox col + select-all. Header-click sort (first click desc, repeat asc; ▲/▼ indicator, active in accent). Row click→drawer. Empty state (💚 circle, «Ничего не найдено», «Сбросить фильтры»).
 - **DetailDrawer:** right slide-over (560px) over `rgba(15,22,32,.4)`. Header: source+status pills, `fullAddr` title, ✕. Photos (click→lightbox). Fields: ФИО, Регион, Город/н.п., Адрес, Координаты, Дата/Время фотофиксации, Фотографий, Источник, Поступило. Для Макса: «Открыть сообщение в Максе» link. Status-change chips (4 statuses; active=current; click→PATCH status, live update + invalidate list+funnel).
 - **Lightbox:** full-screen `rgba(15,22,32,.84)`; arrows + mono counter `i/N` when >1 photo; caption=fullAddr; click bg/✕ closes.
 - **Settings:** title «Настройки». Profile card: ФИО editable, Email readonly, «Сохранить»→PATCH /profile; «Смена пароля»: new-password field + «Сбросить»→POST /profile/password. Users card (admin-only): list with avatar-initials, ФИО+email, role badge (Администратор violet / Пользователь gray), status badge (Активен green / Приглашён amber); invite form (ФИО + email + access chips Пользователь/Администратор + «Отправить приглашение»→POST /users, then show the returned temp password honestly, e.g. «Пользователь добавлен. Временный пароль: …»); delete trash for non-admins, lock icon for admins. Success notices via a banner.

@@ -59,11 +59,11 @@ export function Sidebar() {
     <aside className="sidebar-wide">
       <div className="brand-wide" onClick={() => navigate('/incidents')}>
         <div className="brand-mark">
-          <span className="brand-emoji">👴</span>
+          <span className="brand-emoji">💚</span>
         </div>
         <div className="brand-text">
           <span className="brand-name">
-            ДедЭколог
+            ЭкоПульс
             <span className="brand-version">v{APP_VERSION}</span>
           </span>
           <span className="brand-sub">сбор обращений</span>

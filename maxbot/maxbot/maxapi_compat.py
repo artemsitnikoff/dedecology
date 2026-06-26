@@ -1,4 +1,4 @@
-"""maxapi 0.9.4 compatibility layer for the ДедЭколог maxbot.
+"""maxapi 0.9.4 compatibility layer for the ЭкоПульс maxbot.
 
 Single source of truth for anything maxapi-version-specific. `apply_patches()`
 is the only side-effecting call; it is idempotent and version-guarded.

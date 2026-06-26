@@ -1,4 +1,4 @@
-# Dev-окружение ДедЭколог. Поднять:
+# Dev-окружение ЭкоПульс. Поднять:
 #   cp .env.example .env   # при необходимости поправить значения
 #   docker compose up --build
 # Бек: http://localhost:8000  ·  Фронт (nginx со статикой): http://localhost:8080

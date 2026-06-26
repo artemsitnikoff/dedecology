@@ -1,4 +1,4 @@
-// ДедЭколог — корневой компонент (классический React + ReactDOM.createRoot)
+// ЭкоПульс — корневой компонент (классический React + ReactDOM.createRoot)
 function App() {
   const { useState, useMemo } = React;
 
@@ -53,8 +53,8 @@ function App() {
   const detail = detailId ? data.find(d => d.id === detailId) : null;
   const lbInc = lb ? data.find(d => d.id === lb.id) : null;
 
-  const exportSelected = () => de.download(data.filter(d => selected.includes(d.id)), 'Инциденты_ДедЭколог_выбранные.csv');
-  const exportAll = () => de.download(filtered, 'Инциденты_ДедЭколог.csv');
+  const exportSelected = () => de.download(data.filter(d => selected.includes(d.id)), 'Инциденты_ЭкоПульс_выбранные.csv');
+  const exportAll = () => de.download(filtered, 'Инциденты_ЭкоПульс.csv');
   const markExported = () => { setData(prev => prev.map(d => selected.includes(d.id) ? { ...d, status: 'exported' } : d)); setSelected([]); };
 
   const lbStep = (delta) => setLb(prev => {
@@ -132,7 +132,7 @@ function App() {
             />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '80px 32px', textAlign: 'center' }}>
-              <div style={{ width: 88, height: 88, borderRadius: '50%', background: '#F4F6F8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38 }}>👴</div>
+              <div style={{ width: 88, height: 88, borderRadius: '50%', background: '#F4F6F8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38 }}>💚</div>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Ничего не найдено</h3>
               <p style={{ margin: 0, maxWidth: 360, color: '#5B6573', fontSize: 13, lineHeight: 1.5 }}>Под заданные фильтры обращений нет. Попробуйте сбросить фильтры.</p>
               <button className="de-btn" onClick={resetFilters} style={{ height: 32, padding: '0 14px', borderRadius: 7, border: '1px solid #E6E9EC', background: '#fff', font: 'inherit', fontSize: 13, cursor: 'pointer' }}>Сбросить фильтры</button>

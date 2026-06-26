@@ -1,4 +1,4 @@
-"""Entrypoint for the ДедЭколог MAX long-polling worker.
+"""Entrypoint for the ЭкоПульс MAX long-polling worker.
 
 Outbound-only: connects out to the MAX Bot API, polls for updates and forwards
 each message to the backend intake API. No inbound port / webhook is used.

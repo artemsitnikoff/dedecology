@@ -397,7 +397,7 @@ export function IncidentsPage() {
           />
         ) : (
           <div className="de-inc-empty">
-            <div className="de-inc-empty-mark">👴</div>
+            <div className="de-inc-empty-mark">💚</div>
             <h3>Ничего не найдено</h3>
             <p>Под заданные фильтры обращений нет. Попробуйте сбросить фильтры.</p>
             {hasFilters && (

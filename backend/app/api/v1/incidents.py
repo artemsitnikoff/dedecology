@@ -121,7 +121,7 @@ async def export_incidents_get(
         sort=sort,
         order=order,
     )
-    return _xlsx_response(build_xlsx(rows), "Инциденты_ДедЭколог.xlsx")
+    return _xlsx_response(build_xlsx(rows), "Инциденты_ЭкоПульс.xlsx")
 
 
 @router.post("/export")
@@ -132,7 +132,7 @@ async def export_incidents_post(
 ):
     """Экспорт выбранных инцидентов в .xlsx."""
     rows = await incident_service.list_by_ids(session, payload.ids)
-    return _xlsx_response(build_xlsx(rows), "Инциденты_ДедЭколог_выбранные.xlsx")
+    return _xlsx_response(build_xlsx(rows), "Инциденты_ЭкоПульс_выбранные.xlsx")
 
 
 @router.post("/bulk-status", response_model=BulkStatusResult)
