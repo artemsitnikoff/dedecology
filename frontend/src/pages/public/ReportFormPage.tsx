@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { submitIntakeForm } from '@/api/intake';
-import type { AddressSuggestion } from '@/api/intake';
+import type { AddressSuggestion, SuggestOptions } from '@/api/intake';
 import { useAddressSuggest } from './useAddressSuggest';
 import './report-form.css';
 
@@ -33,10 +33,80 @@ function getErrorMessage(err: unknown): string {
   return 'Не удалось отправить обращение. Попробуйте ещё раз.';
 }
 
+/** Пропсы поля адреса с автодополнением (регион/город/улица). */
+type AddressFieldProps = {
+  label: string;
+  required?: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  onPick: (s: AddressSuggestion) => void;
+  opts: SuggestOptions;
+  placeholder: string;
+};
+
+/**
+ * Одно автодополняемое поле адреса. Хранит свой ввод (через value/onChange
+ * родителя) + локальный «выбранный» текст: дропдаун показывается, только пока
+ * поле в фокусе и текст отличается от уже выбранной подсказки. Свободный ввод
+ * разрешён — пользователь может не выбирать подсказку (ручной ввод).
+ */
+function AddressField({ label, required, value, onChange, onPick, opts, placeholder }: AddressFieldProps) {
+  const [picked, setPicked] = useState('');
+  const [focused, setFocused] = useState(false);
+  const enabled = focused && value !== picked;
+  const { suggestions, loading } = useAddressSuggest(value, enabled, opts);
+  const showDropdown = enabled && (suggestions.length > 0 || loading);
+
+  const handlePick = (s: AddressSuggestion) => {
+    setPicked(s.value);
+    setFocused(false);
+    onPick(s);
+  };
+
+  return (
+    <label className="de-rf-field de-rf-field-addr">
+      <span className="de-rf-label">
+        {label} {required && <span className="de-rf-req">*</span>}
+      </span>
+      <input
+        type="text"
+        className="de-rf-input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      {showDropdown && (
+        <div className="de-rf-dropdown">
+          {loading && suggestions.length === 0 ? (
+            <div className="de-rf-dropdown-empty">Поиск…</div>
+          ) : (
+            suggestions.map((s, i) => (
+              <button
+                key={`${s.value}-${i}`}
+                type="button"
+                className="de-rf-suggest"
+                // onMouseDown — чтобы клик сработал до blur инпута.
+                onMouseDown={(ev) => {
+                  ev.preventDefault();
+                  handlePick(s);
+                }}
+              >
+                {s.value}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </label>
+  );
+}
+
 export default function ReportFormPage() {
   // --- Поля формы ---
   const [fio, setFio] = useState('');
-  const [addr, setAddr] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
   const [street, setStreet] = useState('');
@@ -45,13 +115,6 @@ export default function ReportFormPage() {
   const [bins, setBins] = useState<Bins>('');
   const [photos, setPhotos] = useState<File[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
-
-  // --- Автодополнение адреса ---
-  const [pickedValue, setPickedValue] = useState('');
-  const [addrFocused, setAddrFocused] = useState(false);
-  const suggestEnabled = addrFocused && addr !== pickedValue;
-  const { suggestions, loading: suggestLoading } = useAddressSuggest(addr, suggestEnabled);
-  const showDropdown = suggestEnabled && (suggestions.length > 0 || suggestLoading);
 
   // --- Ханипот (заполняют боты; человек не видит) ---
   const websiteRef = useRef<HTMLInputElement>(null);
@@ -67,16 +130,24 @@ export default function ReportFormPage() {
     return () => previews.forEach((url) => URL.revokeObjectURL(url));
   }, [previews]);
 
-  const handlePickSuggestion = (s: AddressSuggestion) => {
-    setAddr(s.value);
-    setPickedValue(s.value);
-    setRegion(s.region);
-    setCity(s.city);
-    setStreet(s.street);
-    // Координаты собираем из geo_lat/geo_lon (если есть), иначе берём готовые.
+  // Выбор региона: при смене региона сбрасываем зависимые город/улицу.
+  const handlePickRegion = (s: AddressSuggestion) => {
+    if (s.value !== region) {
+      setCity('');
+      setStreet('');
+    }
+    setRegion(s.value);
+  };
+
+  const handlePickCity = (s: AddressSuggestion) => {
+    setCity(s.value);
+  };
+
+  // Выбор улицы: подставляем координаты из geo (если есть), иначе готовые.
+  const handlePickStreet = (s: AddressSuggestion) => {
+    setStreet(s.value);
     const fromGeo = s.geo_lat && s.geo_lon ? `${s.geo_lat}, ${s.geo_lon}` : '';
     setCoords(fromGeo || s.coords || '');
-    setAddrFocused(false);
   };
 
   const handleFiles = (fileList: FileList | null, inputEl?: HTMLInputElement) => {
@@ -115,19 +186,26 @@ export default function ReportFormPage() {
       setSubmitError('Пожалуйста, укажите ФИО.');
       return;
     }
-    if (!addr.trim()) {
-      setSubmitError('Пожалуйста, укажите адрес площадки.');
+    if (!region.trim()) {
+      setSubmitError('Пожалуйста, укажите регион.');
+      return;
+    }
+    if (!city.trim()) {
+      setSubmitError('Пожалуйста, укажите город или населённый пункт.');
       return;
     }
     setSubmitError(null);
     setSubmitting(true);
     try {
+      const fullAddress = [region.trim(), city.trim(), street.trim()]
+        .filter(Boolean)
+        .join(', ');
       const fd = new FormData();
       fd.append('fio', fio.trim());
-      fd.append('full_address', addr.trim());
-      fd.append('region', region);
-      fd.append('city', city);
-      fd.append('street', street);
+      fd.append('full_address', fullAddress);
+      fd.append('region', region.trim());
+      fd.append('city', city.trim());
+      fd.append('street', street.trim());
       fd.append('coords', coords.trim());
       fd.append('photo_time', photoTime || '');
       fd.append('bins', bins);
@@ -185,44 +263,37 @@ export default function ReportFormPage() {
                 />
               </label>
 
-              {/* Адрес с автодополнением */}
-              <label className="de-rf-field de-rf-field-addr">
-                <span className="de-rf-label">
-                  Адрес площадки <span className="de-rf-req">*</span>
-                </span>
-                <input
-                  type="text"
-                  className="de-rf-input"
-                  value={addr}
-                  onChange={(e) => setAddr(e.target.value)}
-                  onFocus={() => setAddrFocused(true)}
-                  onBlur={() => setAddrFocused(false)}
-                  placeholder="Начните вводить адрес…"
-                  autoComplete="off"
-                />
-                {showDropdown && (
-                  <div className="de-rf-dropdown">
-                    {suggestLoading && suggestions.length === 0 ? (
-                      <div className="de-rf-dropdown-empty">Поиск…</div>
-                    ) : (
-                      suggestions.map((s, i) => (
-                        <button
-                          key={`${s.value}-${i}`}
-                          type="button"
-                          className="de-rf-suggest"
-                          // onMouseDown — чтобы клик сработал до blur инпута.
-                          onMouseDown={(ev) => {
-                            ev.preventDefault();
-                            handlePickSuggestion(s);
-                          }}
-                        >
-                          {s.value}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </label>
+              {/* Регион с автодополнением */}
+              <AddressField
+                label="Регион"
+                required
+                value={region}
+                onChange={setRegion}
+                onPick={handlePickRegion}
+                opts={{ kind: 'region' }}
+                placeholder="Начните вводить регион…"
+              />
+
+              {/* Город / населённый пункт с автодополнением */}
+              <AddressField
+                label="Город / населённый пункт"
+                required
+                value={city}
+                onChange={setCity}
+                onPick={handlePickCity}
+                opts={{ kind: 'city', region }}
+                placeholder="Начните вводить город…"
+              />
+
+              {/* Улица, дом с автодополнением */}
+              <AddressField
+                label="Улица, дом"
+                value={street}
+                onChange={setStreet}
+                onPick={handlePickStreet}
+                opts={{ kind: 'street', region, city }}
+                placeholder="Начните вводить улицу…"
+              />
 
               {/* Координаты */}
               <label className="de-rf-field">

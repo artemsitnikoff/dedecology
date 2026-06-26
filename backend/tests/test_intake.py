@@ -239,6 +239,105 @@ async def test_suggest_address_route_returns_suggestions(client):
     fake.assert_awaited_once()
 
 
+def _suggest_call(fake):
+    """Достаёт позиционные/именованные аргументы вызова мокнутого suggest_address.
+
+    Сигнатура сервиса: suggest_address(q, count, from_bound, to_bound, locations).
+    Возвращает (from_bound, to_bound, locations) независимо от позиц./kwargs.
+    """
+    args = fake.call_args.args
+    kwargs = fake.call_args.kwargs
+    from_bound = args[2] if len(args) > 2 else kwargs.get("from_bound")
+    to_bound = args[3] if len(args) > 3 else kwargs.get("to_bound")
+    locations = args[4] if len(args) > 4 else kwargs.get("locations")
+    return from_bound, to_bound, locations
+
+
+@pytest.mark.asyncio
+async def test_suggest_address_kind_region_bounds(client):
+    """kind=region → from_bound/to_bound='region', locations не передаются."""
+    fake = AsyncMock(return_value=[])
+    with patch("app.api.v1.intake.dadata_service.suggest_address", new=fake):
+        resp = await client.get(
+            "/api/v1/intake/suggest/address",
+            params={"q": "Самар", "kind": "region"},
+        )
+    assert resp.status_code == 200
+    from_bound, to_bound, locations = _suggest_call(fake)
+    assert from_bound == "region"
+    assert to_bound == "region"
+    assert locations is None
+
+
+@pytest.mark.asyncio
+async def test_suggest_address_kind_city_with_region_locations(client):
+    """kind=city&region=X → from_bound=city/to_bound=settlement, locations=[{region:X}]."""
+    fake = AsyncMock(return_value=[])
+    with patch("app.api.v1.intake.dadata_service.suggest_address", new=fake):
+        resp = await client.get(
+            "/api/v1/intake/suggest/address",
+            params={"q": "Кинель", "kind": "city", "region": "Самарская область"},
+        )
+    assert resp.status_code == 200
+    from_bound, to_bound, locations = _suggest_call(fake)
+    assert from_bound == "city"
+    assert to_bound == "settlement"
+    assert locations == [{"region": "Самарская область"}]
+
+
+@pytest.mark.asyncio
+async def test_suggest_address_kind_city_without_region_no_locations(client):
+    """kind=city без region → locations не строятся (None)."""
+    fake = AsyncMock(return_value=[])
+    with patch("app.api.v1.intake.dadata_service.suggest_address", new=fake):
+        resp = await client.get(
+            "/api/v1/intake/suggest/address",
+            params={"q": "Кинель", "kind": "city"},
+        )
+    assert resp.status_code == 200
+    from_bound, to_bound, locations = _suggest_call(fake)
+    assert from_bound == "city"
+    assert to_bound == "settlement"
+    assert locations is None
+
+
+@pytest.mark.asyncio
+async def test_suggest_address_kind_street_with_region_and_city(client):
+    """kind=street&region=X&city=Y → bounds street/house, locations с region+city."""
+    fake = AsyncMock(return_value=[])
+    with patch("app.api.v1.intake.dadata_service.suggest_address", new=fake):
+        resp = await client.get(
+            "/api/v1/intake/suggest/address",
+            params={
+                "q": "Маяковского",
+                "kind": "street",
+                "region": "Самарская область",
+                "city": "г. Кинель",
+            },
+        )
+    assert resp.status_code == 200
+    from_bound, to_bound, locations = _suggest_call(fake)
+    assert from_bound == "street"
+    assert to_bound == "house"
+    assert locations == [{"region": "Самарская область", "city": "г. Кинель"}]
+
+
+@pytest.mark.asyncio
+async def test_suggest_address_default_kind_no_bounds(client):
+    """kind по умолчанию (full) → bounds/locations не передаются (None)."""
+    fake = AsyncMock(return_value=[])
+    with patch("app.api.v1.intake.dadata_service.suggest_address", new=fake):
+        resp = await client.get(
+            "/api/v1/intake/suggest/address",
+            params={"q": "Самара Ленина"},
+        )
+    assert resp.status_code == 200
+    from_bound, to_bound, locations = _suggest_call(fake)
+    assert from_bound is None
+    assert to_bound is None
+    assert locations is None
+
+
 # --------------------------------------------------------------------------- #
 # Публичная форма волонтёра: POST /form                                        #
 # --------------------------------------------------------------------------- #

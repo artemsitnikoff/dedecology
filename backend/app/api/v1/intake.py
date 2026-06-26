@@ -91,16 +91,56 @@ async def yandex_intake(
 
 
 @router.get("/suggest/address")
-async def suggest_address(q: str = "", count: int = 8):
+async def suggest_address(
+    q: str = "",
+    kind: str = "full",
+    region: str | None = None,
+    city: str | None = None,
+    count: int = 8,
+):
     """ПУБЛИЧНО: подсказки адреса для автозаполнения формы волонтёра.
 
     Ключ DaData остаётся на сервере. Без ключа / при q<3 символов / при сбое
     DaData отдаём пустой список (форма деградирует до ручного ввода).
+
+    kind ограничивает уровень подсказок (bounded suggest):
+    - "region"  — только регионы;
+    - "city"    — города/населённые пункты (в пределах region, если задан);
+    - "street"  — улицы/дома (в пределах region [+ city], если заданы);
+    - "full"/иное — полный адрес (поведение по умолчанию).
     """
     if len(q.strip()) < _SUGGEST_MIN_LEN:
         return {"suggestions": []}
     count = max(1, min(count, _SUGGEST_MAX_COUNT))
-    suggestions = await dadata_service.suggest_address(q, count=count)
+
+    from_bound: str | None = None
+    to_bound: str | None = None
+    locations: list[dict] | None = None
+    if kind == "region":
+        from_bound, to_bound = "region", "region"
+    elif kind == "city":
+        from_bound, to_bound = "city", "settlement"
+        if region:
+            locations = [{"region": region}]
+    elif kind == "street":
+        from_bound, to_bound = "street", "house"
+        if region or city:
+            locations = [
+                {
+                    k: v
+                    for k, v in (("region", region), ("city", city))
+                    if v
+                }
+            ]
+    # "full"/иное — bounds/locations остаются None (текущее поведение).
+
+    suggestions = await dadata_service.suggest_address(
+        q,
+        count,
+        from_bound,
+        to_bound,
+        locations,
+    )
     return {"suggestions": suggestions}
 
 

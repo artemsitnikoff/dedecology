@@ -21,11 +21,23 @@ DADATA_SUGGEST_URL = (
 DADATA_TIMEOUT = 8
 
 
-async def suggest_address(query: str, count: int = 8) -> list[dict]:
+async def suggest_address(
+    query: str,
+    count: int = 8,
+    from_bound: str | None = None,
+    to_bound: str | None = None,
+    locations: list[dict] | None = None,
+) -> list[dict]:
     """Подсказки адресов по строке ввода.
 
     Возвращает список словарей с полями:
     value, region, city, street, coords, geo_lat, geo_lon.
+
+    Поддержка ограниченных (bounded) подсказок:
+    - from_bound/to_bound сужают уровень адреса (region / city / settlement /
+      street / house) — передаются в DaData как {"value": <bound>};
+    - locations — список фильтров вида [{"region": "..."}] или
+      [{"region": "...", "city": "..."}] — ограничивает географию подсказок.
 
     [] если ключ не задан, query короче 3 символов или DaData недоступна.
     """
@@ -40,14 +52,23 @@ async def suggest_address(query: str, count: int = 8) -> list[dict]:
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    payload = {"query": q, "count": count}
+    payload: dict = {"query": q, "count": count}
+    if from_bound:
+        payload["from_bound"] = {"value": from_bound}
+    if to_bound:
+        payload["to_bound"] = {"value": to_bound}
+    if locations:
+        payload["locations"] = locations
 
     try:
         async with httpx.AsyncClient(timeout=DADATA_TIMEOUT) as http_client:
             resp = await http_client.post(
                 DADATA_SUGGEST_URL, json=payload, headers=headers
             )
-        resp.raise_for_status()
+        # Статус (без тела — без секретов) логируем при не-200 и деградируем в [].
+        if resp.status_code != 200:
+            logger.warning("[dadata] suggest non-200: %s", resp.status_code)
+            return []
         data = resp.json()
     except Exception as e:  # graceful: любой сбой → без подсказок, форма жива
         logger.warning("[dadata] suggest_address failed: %s: %s", type(e).__name__, e)

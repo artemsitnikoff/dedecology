@@ -28,18 +28,35 @@ export interface IntakeFormResult {
   incident_id?: string;
 }
 
+/** Вид подсказки: ограничивает выдачу DaData до региона/города/улицы/полного адреса. */
+export type SuggestKind = 'region' | 'city' | 'street' | 'full';
+
+/** Опции запроса подсказок: вид + контекст (регион/город) + размер выдачи. */
+export interface SuggestOptions {
+  kind?: SuggestKind;
+  region?: string;
+  city?: string;
+  count?: number;
+}
+
 /**
  * GET /intake/suggest/address — подсказки адреса.
  * Пустой список, если нет DADATA_API_KEY или совпадений (graceful).
  * Минимальная длина запроса — 3 символа (короче не дёргаем сервер).
+ * Через `opts` можно запросить ограниченную выдачу (kind=region|city|street)
+ * с контекстом по уже выбранному региону/городу.
  */
 export async function suggestAddress(
   q: string,
-  count = 8,
+  opts: SuggestOptions = {},
   signal?: AbortSignal,
 ): Promise<AddressSuggestion[]> {
   if (q.trim().length < 3) return [];
+  const { kind, region, city, count = 8 } = opts;
   const params = new URLSearchParams({ q: q.trim(), count: String(count) });
+  if (kind) params.set('kind', kind);
+  if (region) params.set('region', region);
+  if (city) params.set('city', city);
   const res = await api.get<SuggestResponse>(`/intake/suggest/address?${params.toString()}`, {
     signal,
   });
