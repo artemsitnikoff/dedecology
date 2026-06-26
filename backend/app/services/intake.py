@@ -10,8 +10,10 @@ import logging
 import re
 import shutil
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -22,10 +24,16 @@ from .audit import audit
 logger = logging.getLogger(__name__)
 
 _MAX_PHOTOS = 3
-_MAX_PHOTO_BYTES = 10 * 1024 * 1024  # 10 MB
+_MAX_PHOTO_BYTES = 10 * 1024 * 1024  # 10 MB (лимит исходного загружаемого файла)
 _PHOTO_CHUNK = 64 * 1024
-# Кол-во первых байт файла, достаточное для проверки сигнатуры формата.
-_PHOTO_HEADER_BYTES = 16
+
+# Параметры серверного ресайза (фото пере-кодируются в JPEG при загрузке):
+# FULL — версия для просмотра, THUMB — превью для списков/карты.
+_FULL_MAX_SIDE = (1600, 1600)
+_FULL_QUALITY = 85
+_THUMB_MAX_SIDE = (400, 400)
+_THUMB_QUALITY = 80
+_WHITE = (255, 255, 255)
 
 # Лимиты длины текстовых полей = ширине колонок БД. Отсекаем over-long значение,
 # чтобы оно не вызвало DataError/500 на INSERT (легитимные данные укладываются).
@@ -36,21 +44,6 @@ _FIELD_LIMITS = {
     "street": 500,
     "coords": 64,
 }
-
-
-def _detect_image_ext(header: bytes) -> str | None:
-    """Определяет реальный формат изображения по «магическим» байтам.
-
-    Клиентский multipart Content-Type не доверяется — расширение выводится из
-    сигнатуры. JPEG → 'jpg', PNG → 'png', WebP → 'webp'; иначе None.
-    """
-    if header[:3] == b"\xff\xd8\xff":
-        return "jpg"
-    if header[:8] == b"\x89PNG\r\n\x1a\n":
-        return "png"
-    if len(header) >= 12 and header[0:4] == b"RIFF" and header[8:12] == b"WEBP":
-        return "webp"
-    return None
 
 
 def _incidents_dir() -> Path:
@@ -199,32 +192,63 @@ async def create_incident_from_form(
     return incident
 
 
-async def _save_photo(upload, dest: Path, header: bytes) -> None:
-    """Пишет уже считанный header + дочитывает остаток потока чанками.
+async def _read_upload_bytes(upload) -> bytes:
+    """Считывает поток загрузки целиком чанками с контролем размера ≤10 МБ.
 
-    header — первые байты, считанные ранее для проверки сигнатуры (их нельзя
-    потерять). Контроль общего размера ≤10 МБ. Слишком большой файл →
-    ValidationError (частично записанный файл удаляет вызывающая сторона
-    вместе со всем каталогом инцидента).
+    Превышение лимита / пустой файл → ValidationError. Возвращает сырые байты
+    для последующей валидации и пере-кодирования через Pillow.
     """
-    written = 0
-    with dest.open("wb") as out:
-        if header:
-            written += len(header)
-            out.write(header)
-        while True:
-            chunk = await upload.read(_PHOTO_CHUNK)
-            if not chunk:
-                break
-            written += len(chunk)
-            if written > _MAX_PHOTO_BYTES:
-                raise ValidationError(
-                    "Файл фото превышает 10 МБ",
-                    details={"filename": getattr(upload, "filename", None)},
-                )
-            out.write(chunk)
-    if written == 0:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(_PHOTO_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_PHOTO_BYTES:
+            raise ValidationError(
+                "Файл фото превышает 10 МБ",
+                details={"filename": getattr(upload, "filename", None)},
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    if not data:
         raise ValidationError("Пустой файл фото")
+    return data
+
+
+def _decode_image(data: bytes, filename) -> Image.Image:
+    """Открывает байты через Pillow → RGB-изображение с исправленной ориентацией.
+
+    Pillow — авторитетный валидатор формата (клиентский Content-Type не в счёт):
+    невалидные/неполные данные → ValidationError. EXIF-ориентация выправляется,
+    прозрачность png/webp «сплющивается» на белый фон.
+    """
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()  # форсируем декодирование — ловим усечённые/битые файлы
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
+        raise ValidationError(
+            "Файл не является изображением (jpg/png/webp)",
+            details={"filename": filename},
+        )
+
+    img = ImageOps.exif_transpose(img)  # выправляем ориентацию по EXIF
+    if img.mode == "RGB":
+        return img
+    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+        rgba = img.convert("RGBA")
+        flattened = Image.new("RGB", rgba.size, _WHITE)
+        flattened.paste(rgba, mask=rgba.split()[-1])
+        return flattened
+    return img.convert("RGB")
+
+
+def _save_variant(img: Image.Image, dest: Path, max_side, quality: int) -> None:
+    """Сохраняет уменьшенную (только downscale, аспект сохранён) JPEG-копию."""
+    variant = img.copy()
+    variant.thumbnail(max_side)  # пропорционально, апскейла не делает
+    variant.save(dest, "JPEG", quality=quality, optimize=True)
 
 
 async def create_incident_from_public_form(
@@ -274,18 +298,13 @@ async def create_incident_from_public_form(
             f"Можно загрузить не более {_MAX_PHOTOS} фото",
             details={"count": len(photo_files)},
         )
-    # Не доверяем multipart Content-Type: читаем первые байты и проверяем
-    # реальную сигнатуру. Расширение определяем по формату, а не по заголовку.
-    validated: list[tuple] = []  # (upload, ext, header_bytes)
+    # Не доверяем multipart Content-Type: читаем байты и валидируем/декодируем
+    # через Pillow (авторитетная проверка формата) ДО создания инцидента —
+    # битый файл отбивается 400 без записи в БД.
+    decoded: list[Image.Image] = []
     for upload in photo_files:
-        header = await upload.read(_PHOTO_HEADER_BYTES)
-        ext = _detect_image_ext(header)
-        if ext is None:
-            raise ValidationError(
-                "Файл не является изображением (jpg/png/webp)",
-                details={"filename": getattr(upload, "filename", None)},
-            )
-        validated.append((upload, ext, header))
+        data = await _read_upload_bytes(upload)
+        decoded.append(_decode_image(data, getattr(upload, "filename", None)))
 
     incident = Incident(
         source="form",
@@ -305,15 +324,24 @@ async def create_incident_from_public_form(
     await session.flush()  # → incident.id
 
     photo_urls: list[str] = []
-    if validated:
+    if decoded:
         incident_dir = _incidents_dir() / str(incident.id)
         try:
             incident_dir.mkdir(parents=True, exist_ok=True)
-            for i, (upload, ext, header) in enumerate(validated):
-                filename = f"{i}.{ext}"
-                await _save_photo(upload, incident_dir / filename, header)
+            for i, img in enumerate(decoded):
+                # FULL — версия для просмотра, THUMB — превью. Обе пере-кодированы
+                # в JPEG, поэтому расширение всегда .jpg.
+                _save_variant(
+                    img, incident_dir / f"{i}.jpg", _FULL_MAX_SIDE, _FULL_QUALITY
+                )
+                _save_variant(
+                    img,
+                    incident_dir / f"{i}_thumb.jpg",
+                    _THUMB_MAX_SIDE,
+                    _THUMB_QUALITY,
+                )
                 photo_urls.append(
-                    f"/api/v1/intake/photo/{incident.id}/{filename}"
+                    f"/api/v1/intake/photo/{incident.id}/{i}.jpg"
                 )
         except Exception:
             # Очистка частично записанного каталога — не оставляем мусор на диске.

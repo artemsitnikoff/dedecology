@@ -1,6 +1,7 @@
 import { Icon } from '@/components/ui/Icon';
 import { STATUS, SOURCE } from '@/lib/status';
 import { formatDate, formatTime, fullAddr, maxLink } from '@/lib/format';
+import { thumbUrl } from '@/lib/photo';
 import { useSetStatus } from '@/api/mutations/incidents';
 import type { IncidentListItem, Status } from '@/api/aliases';
 
@@ -70,7 +71,8 @@ export function DetailDrawer({ incident: d, onClose, onPhoto }: Props) {
                   className="de-inc-drawer-photo"
                   onClick={() => onPhoto(d.id, i)}
                 >
-                  <div className="de-inc-drawer-photo-img" style={{ backgroundImage: `url("${src}")` }} />
+                  {/* Превью — thumb (быстро); клик открывает лайтбокс с FULL по индексу. */}
+                  <div className="de-inc-drawer-photo-img" style={{ backgroundImage: `url("${thumbUrl(src)}")` }} />
                   <span className="de-inc-drawer-photo-label">Фото {i + 1}</span>
                 </div>
               ))}

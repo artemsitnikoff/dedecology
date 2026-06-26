@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 
 from app.config import settings
 from app.models import Incident
@@ -17,11 +18,22 @@ from app.services.intake import (
     create_incident_from_public_form,
 )
 
-# Минимальный «файл» картинки: должен начинаться с валидной JPEG-сигнатуры
-# (FF D8 FF ...), т.к. формат проверяется по магическим байтам, не по content_type.
-_FAKE_IMG = b"\xff\xd8\xff\xe0fakejpeg"
-# Содержимое, не являющееся изображением (для проверки отбраковки по сигнатуре).
-_NOT_IMAGE = b"this is definitely not an image at all"
+
+def _jpeg_bytes(size=(1200, 900), color=(0, 120, 0)) -> bytes:
+    """Реальный JPEG, сгенерированный Pillow.
+
+    Сырой стаб \\xff\\xd8\\xff Pillow открыть не может — фото теперь
+    пере-кодируются через Pillow, поэтому нужен настоящий декодируемый файл.
+    """
+    buf = BytesIO()
+    Image.new("RGB", size, color).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+# Валидный JPEG (декодируется Pillow) — для случаев, где важно лишь количество.
+_FAKE_IMG = _jpeg_bytes()
+# Содержимое, не являющееся изображением (Pillow не откроет → отбраковка 400).
+_NOT_IMAGE = b"not an image"
 
 
 class _FakeUpload:
@@ -438,6 +450,51 @@ async def test_public_form_fake_signature_rejected_400(client):
     assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+@pytest.mark.asyncio
+async def test_public_form_resizes_and_serves(client, fake_session, monkeypatch, tmp_path):
+    """E2E через роут: POST /form с 1 фото → на диске FULL+THUMB; оба отдаются 200
+    с image/jpeg + nosniff; thumb ≤400px и меньше full."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+
+    # Имитируем server_default id (gen_random_uuid): flush присваивает UUID.
+    added: list = []
+    fake_session.add = MagicMock(side_effect=added.append)
+
+    async def _flush(*args, **kwargs):
+        for obj in added:
+            if isinstance(obj, Incident) and getattr(obj, "id", None) is None:
+                obj.id = uuid4()
+
+    fake_session.flush = AsyncMock(side_effect=_flush)
+
+    resp = await client.post(
+        "/api/v1/intake/form",
+        data={"fio": "Фото"},
+        files=[("photos", ("orig.png", BytesIO(_jpeg_bytes()), "image/png"))],
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    incident_id = body["incident_id"]
+
+    incident_dir = tmp_path / "incidents" / incident_id
+    assert (incident_dir / "0.jpg").is_file()
+    assert (incident_dir / "0_thumb.jpg").is_file()
+
+    full_resp = await client.get(f"/api/v1/intake/photo/{incident_id}/0.jpg")
+    thumb_resp = await client.get(f"/api/v1/intake/photo/{incident_id}/0_thumb.jpg")
+    assert full_resp.status_code == 200
+    assert thumb_resp.status_code == 200
+    assert full_resp.headers["content-type"] == "image/jpeg"
+    assert thumb_resp.headers["x-content-type-options"] == "nosniff"
+
+    with Image.open(BytesIO(full_resp.content)) as f_img, Image.open(
+        BytesIO(thumb_resp.content)
+    ) as t_img:
+        assert max(t_img.size) <= 400
+        assert max(t_img.size) < max(f_img.size)
+
+
 # --------------------------------------------------------------------------- #
 # create_incident_from_public_form — ветвление адреса/баков (без диска/БД)     #
 # --------------------------------------------------------------------------- #
@@ -493,11 +550,11 @@ async def test_public_service_derives_address_when_empty(fake_session):
 
 
 @pytest.mark.asyncio
-async def test_public_service_valid_jpeg_signature_accepted(fake_session, tmp_path, monkeypatch):
-    """Валидная JPEG-сигнатура → фото принимается; расширение из формата (не из имени)."""
+async def test_public_service_resizes_full_and_thumb(fake_session, tmp_path, monkeypatch):
+    """Валидное фото → принято и пере-кодировано: на диске FULL `{i}.jpg` + THUMB
+    `{i}_thumb.jpg` (оба JPEG); thumb ≤400px и меньше full. Расширение всегда .jpg."""
     monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
     fake_session.add = MagicMock()
-    valid_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 64
     incident = await create_incident_from_public_form(
         fake_session,
         fio="Волонтёр",
@@ -508,12 +565,23 @@ async def test_public_service_valid_jpeg_signature_accepted(fake_session, tmp_pa
         coords="53.2, 50.1",
         photo_time="",
         bins="",
-        # имя .png + content_type image/png — намеренно «врут»; ext берётся из байт.
-        photo_files=[_FakeUpload(valid_jpeg, filename="photo.png", content_type="image/png")],
+        # имя .png + content_type image/png — намеренно «врут»; формат даёт Pillow.
+        photo_files=[_FakeUpload(_jpeg_bytes(), filename="photo.png", content_type="image/png")],
     )
     assert incident.photos == 1
     assert len(incident.photo_urls) == 1
     assert incident.photo_urls[0].endswith("0.jpg")
+
+    incident_dir = tmp_path / "incidents" / str(incident.id)
+    full = incident_dir / "0.jpg"
+    thumb = incident_dir / "0_thumb.jpg"
+    assert full.is_file()
+    assert thumb.is_file()
+    with Image.open(full) as f_img, Image.open(thumb) as t_img:
+        assert f_img.format == "JPEG"
+        assert t_img.format == "JPEG"
+        assert max(t_img.size) <= 400
+        assert max(t_img.size) < max(f_img.size)
 
 
 @pytest.mark.asyncio

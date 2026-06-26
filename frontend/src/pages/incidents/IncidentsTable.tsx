@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { STATUS, SOURCE } from '@/lib/status';
 import { formatDate, formatTime, fullAddr, maxLink } from '@/lib/format';
+import { thumbUrl } from '@/lib/photo';
 import type { IncidentListItem } from '@/api/aliases';
 import type { SortKey, SortOrder } from '@/api/hooks/useIncidents';
 
@@ -58,7 +59,8 @@ type RowProps = {
 const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, onPhoto }: RowProps) {
   const statusMeta = STATUS[d.status];
   const sourceMeta = SOURCE[d.source];
-  const thumb = d.photo_urls[0];
+  // Превью в строке — уменьшенная версия (thumb) для быстрой загрузки списка.
+  const thumb = d.photo_urls[0] ? thumbUrl(d.photo_urls[0]) : undefined;
   const link = maxLink(d.msg);
 
   return (

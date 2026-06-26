@@ -27,19 +27,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Имя файла фото: только числовой индекс + допустимое расширение (анти-traversal).
-_PHOTO_FILENAME_RE = re.compile(r"^[0-9]+\.(jpg|jpeg|png|webp)$")
+# Имя файла фото: числовой индекс + опц. суффикс _thumb, только .jpg (анти-traversal).
+# Все фото пере-кодируются в JPEG при загрузке: FULL `{i}.jpg`, THUMB `{i}_thumb.jpg`.
+_PHOTO_FILENAME_RE = re.compile(r"^[0-9]+(_thumb)?\.jpg$")
 # Минимальная длина запроса для подсказок адреса.
 _SUGGEST_MIN_LEN = 3
 # Потолок count в подсказках (защита от перебора DaData).
 _SUGGEST_MAX_COUNT = 15
-# media_type по расширению фото для отдачи файла.
-_PHOTO_MEDIA_TYPES = {
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-    "png": "image/png",
-    "webp": "image/webp",
-}
 
 
 @router.post("/yandex")
@@ -186,8 +180,9 @@ async def public_form(
 async def get_photo(incident_id: str, filename: str):
     """ПУБЛИЧНО: отдаёт байты фото обращения. Жёсткий анти-traversal.
 
-    incident_id обязан быть UUID, filename — `^[0-9]+\\.(jpg|jpeg|png|webp)$`,
-    итоговый путь обязан остаться внутри каталога incidents.
+    incident_id обязан быть UUID, filename — `^[0-9]+(_thumb)?\\.jpg$`
+    (FULL `{i}.jpg` или THUMB `{i}_thumb.jpg`), итоговый путь обязан остаться
+    внутри каталога incidents.
     """
     try:
         uuid.UUID(incident_id)
@@ -203,10 +198,9 @@ async def get_photo(incident_id: str, filename: str):
     if not path.is_file():
         raise NotFoundError("Фото")
 
-    ext = filename.rsplit(".", 1)[1].lower()
     return FileResponse(
         path,
-        media_type=_PHOTO_MEDIA_TYPES[ext],
+        media_type="image/jpeg",
         headers={
             "X-Content-Type-Options": "nosniff",
             "Content-Disposition": "inline",

@@ -157,33 +157,46 @@ export default function ReportFormPage() {
     setCoords(fromGeo || s.coords || '');
   };
 
+  // Добавляет только что выбранные файлы к уже набранным (аддитивно), с общим
+  // лимитом MAX_PHOTOS. Это позволяет прикреплять фото по одному в несколько
+  // заходов — без сброса предыдущего выбора. По завершении инпут очищается,
+  // чтобы можно было снова выбрать тот же/новый файл в новом диалоге.
   const handleFiles = (fileList: FileList | null, inputEl?: HTMLInputElement) => {
     setPhotoError(null);
-    if (!fileList || fileList.length === 0) {
-      setPhotos([]);
-      return;
-    }
-    const next = Array.from(fileList);
-    // При любой ошибке валидации сбрасываем набор и сам инпут — чтобы нельзя было
-    // отправить ранее принятые фото при показанной ошибке.
-    const fail = (msg: string) => {
-      setPhotoError(msg);
-      setPhotos([]);
+    // Очистить инпут в любом случае: набор файлов держим в state, а не в DOM.
+    const resetInput = () => {
       if (inputEl) inputEl.value = '';
     };
-    if (next.length > MAX_PHOTOS) {
-      fail(`Можно прикрепить не более ${MAX_PHOTOS} фотографий.`);
+    if (!fileList || fileList.length === 0) {
+      resetInput();
       return;
     }
-    if (next.some((f) => f.size > MAX_PHOTO_BYTES)) {
+    const picked = Array.from(fileList);
+    const fail = (msg: string) => {
+      setPhotoError(msg);
+      // Существующий набор НЕ трогаем — пользователь не теряет ранее добавленное.
+      resetInput();
+    };
+    if (picked.some((f) => f.size > MAX_PHOTO_BYTES)) {
       fail('Каждое фото должно быть не больше 10 МБ.');
       return;
     }
-    if (next.some((f) => !ACCEPTED.test(f.name))) {
+    if (picked.some((f) => !ACCEPTED.test(f.name))) {
       fail('Допустимы только изображения: JPG, PNG или WEBP.');
       return;
     }
-    setPhotos(next);
+    if (photos.length + picked.length > MAX_PHOTOS) {
+      fail(`Можно прикрепить не более ${MAX_PHOTOS} фотографий.`);
+      return;
+    }
+    setPhotos((cur) => [...cur, ...picked]);
+    resetInput();
+  };
+
+  // Удаляет одно фото из набора по индексу (иммутабельно).
+  const removeAt = (index: number) => {
+    setPhotoError(null);
+    setPhotos((cur) => cur.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -356,11 +369,22 @@ export default function ReportFormPage() {
                   multiple
                   onChange={(e) => handleFiles(e.target.files, e.target)}
                 />
+                <span className="de-rf-hint">Можно добавлять по одной, до 3</span>
                 {photoError && <span className="de-rf-inline-err">{photoError}</span>}
                 {previews.length > 0 && (
                   <div className="de-rf-thumbs">
                     {previews.map((url, i) => (
-                      <img key={url} className="de-rf-thumb" src={url} alt={`Фото ${i + 1}`} />
+                      <div key={url} className="de-rf-thumb-wrap">
+                        <img className="de-rf-thumb" src={url} alt={`Фото ${i + 1}`} />
+                        <button
+                          type="button"
+                          className="de-rf-thumb-x"
+                          aria-label={`Удалить фото ${i + 1}`}
+                          onClick={() => removeAt(i)}
+                        >
+                          ✕
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
