@@ -52,6 +52,7 @@ def _base_filters(
     source: list[str] | None,
     date_from: datetime | None,
     date_to: datetime | None,
+    region: str | None = None,
 ) -> list:
     """Фильтры, общие для списка и воронки (без статуса)."""
     filters: list = []
@@ -59,6 +60,9 @@ def _base_filters(
         filters.append(_search_clause(search))
     if source:
         filters.append(Incident.source.in_(source))
+    # Регион — одиночный, ТОЧНОЕ совпадение (равенство, не ilike). Пусто → не фильтруем.
+    if region and region.strip():
+        filters.append(Incident.region == region.strip())
     # Период по photo_time (НЕ received_at), включительно
     if date_from is not None:
         filters.append(
@@ -79,6 +83,7 @@ async def list_incidents(
     status: list[str] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    region: str | None = None,
     sort: str = "date",
     order: str = "desc",
     page: int = 1,
@@ -92,6 +97,7 @@ async def list_incidents(
         status=status,
         date_from=date_from,
         date_to=date_to,
+        region=region,
         sort=sort,
         order=order,
         offset=(page - 1) * page_size,
@@ -122,8 +128,9 @@ async def _query_incidents(
     offset: int | None,
     limit: int | None,
     with_total: bool,
+    region: str | None = None,
 ):
-    filters = _base_filters(search, source, date_from, date_to)
+    filters = _base_filters(search, source, date_from, date_to, region)
     if status:
         filters.append(Incident.status.in_(status))
     where_clause = and_(*filters) if filters else None
@@ -162,6 +169,7 @@ async def list_for_export(
     status: list[str] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    region: str | None = None,
     sort: str = "date",
     order: str = "desc",
 ) -> list[Incident]:
@@ -173,6 +181,7 @@ async def list_for_export(
         status=status,
         date_from=date_from,
         date_to=date_to,
+        region=region,
         sort=sort,
         order=order,
         offset=None,
@@ -231,10 +240,11 @@ async def funnel_counts(
     source: list[str] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    region: str | None = None,
 ) -> FunnelCounts:
-    """Счётчики чипов воронки. Honor search/source/period, НО игнорируют status —
+    """Счётчики чипов воронки. Honor search/source/period/region, НО игнорируют status —
     каждый чип показывает свой потенциальный объём."""
-    filters = _base_filters(search, source, date_from, date_to)
+    filters = _base_filters(search, source, date_from, date_to, region)
     where_clause = and_(*filters) if filters else None
 
     stmt = select(Incident.status, func.count(Incident.id)).group_by(Incident.status)
@@ -249,6 +259,18 @@ async def funnel_counts(
         if status_value in counts:
             counts[status_value] = cnt
     return FunnelCounts(all=total, **counts)
+
+
+async def list_regions(session: AsyncSession) -> list[str]:
+    """DISTINCT непустые регионы, отсортированные A→Я (наполняет дропдаун фильтра)."""
+    stmt = (
+        select(Incident.region)
+        .where(Incident.region.is_not(None), Incident.region != "")
+        .distinct()
+        .order_by(asc(Incident.region))
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
 
 
 async def get_incident(session: AsyncSession, incident_id: UUID) -> Incident:

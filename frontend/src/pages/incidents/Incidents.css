@@ -340,6 +340,27 @@
   outline: none;
   cursor: pointer;
 }
+/* дропдаун выбора региона (под стиль .de-inc-date) */
+.de-inc-select {
+  height: 30px;
+  max-width: 220px;
+  border: 1px solid var(--border-1);
+  border-radius: 7px;
+  padding: 0 9px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg-1);
+  background: var(--bg-1);
+  outline: none;
+  cursor: pointer;
+}
+.de-inc-select:hover {
+  border-color: var(--ark-gray-400);
+}
+.de-inc-select:focus {
+  border-color: var(--accent);
+}
+
 .de-inc-date-dash {
   color: var(--fg-3);
   font-size: var(--fs-13);

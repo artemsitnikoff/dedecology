@@ -6,6 +6,11 @@ type Props = {
   /** Выбранные источники (multi-select). */
   sources: Source[];
   onToggleSource: (source: Source) => void;
+  /** Выбранный регион (точное совпадение); '' — все регионы. */
+  region: string;
+  /** Справочник регионов для дропдауна (А→Я). */
+  regions: string[];
+  onRegion: (region: string) => void;
   dateFrom: string;
   dateTo: string;
   onDateFrom: (v: string) => void;
@@ -25,6 +30,9 @@ const SOURCE_KEYS: Source[] = ['max', 'form'];
 export function FilterBar({
   sources,
   onToggleSource,
+  region,
+  regions,
+  onRegion,
   dateFrom,
   dateTo,
   onDateFrom,
@@ -48,6 +56,24 @@ export function FilterBar({
             {SOURCE[k].label}
           </button>
         ))}
+      </div>
+
+      <div className="de-inc-filter-sep" />
+
+      <div className="de-inc-filter-group">
+        <span className="de-inc-filter-label">Регион</span>
+        <select
+          className="de-inc-select"
+          value={region}
+          onChange={(e) => onRegion(e.target.value)}
+        >
+          <option value="">Все регионы</option>
+          {regions.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="de-inc-filter-sep" />

@@ -57,6 +57,7 @@ async def list_incidents(
     status: list[str] | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    region: str | None = Query(None),
     sort: str = Query("date"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
@@ -72,6 +73,7 @@ async def list_incidents(
         status=status,
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
+        region=region,
         sort=sort,
         order=order,
         page=page,
@@ -85,17 +87,28 @@ async def get_funnel(
     source: list[str] | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    region: str | None = Query(None),
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Счётчики чипов воронки (honor search/source/period, НЕ status)."""
+    """Счётчики чипов воронки (honor search/source/period/region, НЕ status)."""
     return await incident_service.funnel_counts(
         session,
         search=search,
         source=source,
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
+        region=region,
     )
+
+
+@router.get("/regions", response_model=list[str])
+async def list_regions(
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """DISTINCT непустые регионы (А→Я) — наполняет дропдаун фильтра региона."""
+    return await incident_service.list_regions(session)
 
 
 @router.get("/export")
@@ -105,6 +118,7 @@ async def export_incidents_get(
     status: list[str] | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    region: str | None = Query(None),
     sort: str = Query("date"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     session: AsyncSession = Depends(get_db),
@@ -118,6 +132,7 @@ async def export_incidents_get(
         status=status,
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
+        region=region,
         sort=sort,
         order=order,
     )

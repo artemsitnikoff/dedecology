@@ -4,6 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { useIncidents } from '@/api/hooks/useIncidents';
 import type { IncidentFilters, SortKey, SortOrder } from '@/api/hooks/useIncidents';
 import { useFunnelCounts } from '@/api/hooks/useFunnelCounts';
+import { useRegions } from '@/api/hooks/useRegions';
 import { exportAll, exportSelected, useBulkStatus, useBulkDelete } from '@/api/mutations/incidents';
 import type { Source, Status } from '@/api/aliases';
 import { Funnel } from './Funnel';
@@ -42,6 +43,7 @@ export function IncidentsPage() {
   // Реконструируем типизированный объект фильтров из URL на каждый рендер.
   const search = searchParams.get('search') ?? '';
   const sources = parseSources(searchParams.getAll('source'));
+  const region = searchParams.get('region') ?? '';
   const status = parseStatus(searchParams.get('status'));
   const dateFrom = searchParams.get('date_from') ?? '';
   const dateTo = searchParams.get('date_to') ?? '';
@@ -52,13 +54,14 @@ export function IncidentsPage() {
     () => ({
       search: search || undefined,
       source: sources.length ? sources : undefined,
+      region: region || undefined,
       status: status ?? undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       sort,
       order,
     }),
-    [search, sources, status, dateFrom, dateTo, sort, order]
+    [search, sources, region, status, dateFrom, dateTo, sort, order]
   );
 
   // Стабильная ссылка на searchParams для use в колбэках без пересоздания.
@@ -94,6 +97,16 @@ export function IncidentsPage() {
           ? current.filter((s) => s !== src)
           : [...current, src];
         for (const s of nextSet) p.append('source', s);
+      });
+    },
+    [patchParams]
+  );
+
+  const setRegionParam = useCallback(
+    (v: string) => {
+      patchParams((p) => {
+        if (v) p.set('region', v);
+        else p.delete('region');
       });
     },
     [patchParams]
@@ -145,6 +158,7 @@ export function IncidentsPage() {
   const resetFilters = useCallback(() => {
     patchParams((p) => {
       p.delete('source');
+      p.delete('region');
       p.delete('status');
       p.delete('date_from');
       p.delete('date_to');
@@ -154,6 +168,7 @@ export function IncidentsPage() {
   // ----- Данные -----
   const incidentsQuery = useIncidents(filters);
   const funnelQuery = useFunnelCounts(filters);
+  const regionsQuery = useRegions();
   // Нефильтрованный общий итог («из N») — те же пустые фильтры, что и в Sidebar
   // (один queryKey → дедуп). all = grand total по всем обращениям.
   const grandTotalQuery = useFunnelCounts({});
@@ -204,7 +219,10 @@ export function IncidentsPage() {
 
   // ----- Производные -----
   const filterCount =
-    (sources.length ? 1 : 0) + (status ? 1 : 0) + (dateFrom || dateTo ? 1 : 0);
+    (sources.length ? 1 : 0) +
+    (region ? 1 : 0) +
+    (status ? 1 : 0) +
+    (dateFrom || dateTo ? 1 : 0);
   const hasFilters = filterCount > 0;
   const isFiltered = hasFilters || !!search;
 
@@ -300,6 +318,9 @@ export function IncidentsPage() {
       <FilterBar
         sources={sources}
         onToggleSource={toggleSource}
+        region={region}
+        regions={regionsQuery.data ?? []}
+        onRegion={setRegionParam}
         dateFrom={dateFrom}
         dateTo={dateTo}
         onDateFrom={setDateFrom}

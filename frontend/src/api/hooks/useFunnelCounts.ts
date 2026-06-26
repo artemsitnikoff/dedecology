@@ -14,6 +14,7 @@ export function useFunnelCounts(filters: IncidentFilters) {
   const subset = {
     search: filters.search,
     source: filters.source,
+    region: filters.region,
     date_from: filters.date_from,
     date_to: filters.date_to,
   };
@@ -25,6 +26,7 @@ export function useFunnelCounts(filters: IncidentFilters) {
       if (subset.source?.length) {
         for (const s of subset.source) params.append('source', s);
       }
+      if (subset.region) params.set('region', subset.region);
       if (subset.date_from) params.set('date_from', subset.date_from);
       if (subset.date_to) params.set('date_to', subset.date_to);
       const res = await api.get<FunnelCounts>(`/incidents/funnel?${params.toString()}`);
