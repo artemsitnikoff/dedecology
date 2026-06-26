@@ -77,22 +77,32 @@ docker compose -f docker-compose.prod.yml ps
 
 ---
 
-## 6. Завтра: домен + HTTPS
-Когда DNS домена будет указывать на IP сервера — самый простой путь, **Caddy** (авто-Let's Encrypt),
-перед контейнером фронта. Кратко:
-1. Поменять публикацию фронта на внутренний порт (например `127.0.0.1:8080:80` вместо `8888:80`)
-   ИЛИ оставить 8888 и проксировать на него.
-2. Поставить Caddy на хосте, `Caddyfile`:
+## 6. Домен + HTTPS (dedecology.ru) — открывать без :8888
+Код УЖЕ готов к домену: `VITE_API_BASE_URL=/api/v1` — относительный, фронт работает на любом хосте,
+**пересобирать фронт НЕ нужно**. Нужны: реверс-прокси с TLS на хосте + 2 флага в `.env`.
+
+1. **DNS:** A-запись `dedecology.ru` → `5.253.228.219` (+ `www`). IPv6 нет → только A. Дождись пропагации.
+2. **Caddy на хосте** (авто Let's Encrypt) — `/etc/caddy/Caddyfile`:
    ```
-   dedekolog.example.ru {
-       reverse_proxy 127.0.0.1:8080
+   dedecology.ru, www.dedecology.ru {
+       reverse_proxy 127.0.0.1:8888
    }
    ```
-   (Caddy сам получит TLS-сертификат.)
-3. В `.env`: `SESSION_COOKIE_SECURE=True`, `CORS_ORIGINS=https://dedekolog.example.ru`.
-   `VITE_API_BASE_URL=/api/v1` оставить.
-4. Пересобрать фронт: `docker compose -f docker-compose.prod.yml up -d --build frontend`.
-> Альтернатива Caddy — nginx на хосте + `certbot`. Скажи — распишу под выбранный вариант.
+   `sudo systemctl reload caddy`. Caddy сам выпустит сертификат (нужны открытые 80 и 443).
+   (Альтернатива — nginx + certbot, server-блок с `proxy_pass http://127.0.0.1:8888;`.)
+3. **`.env`** (бэк за HTTPS) — `cd /var/www/dedecology`:
+   ```
+   sed -i 's/^SESSION_COOKIE_SECURE=.*/SESSION_COOKIE_SECURE=True/' .env
+   sed -i 's#^CORS_ORIGINS=.*#CORS_ORIGINS=https://dedecology.ru,https://www.dedecology.ru#' .env
+   docker compose -f docker-compose.prod.yml up -d backend
+   ```
+   `VITE_API_BASE_URL=/api/v1` НЕ трогать (фронт не пересобирать).
+4. **Закрыть публичный :8888** (наружу теперь только Caddy 443): в `docker-compose.prod.yml` у `frontend`
+   `ports: ["8888:80"]` → `["127.0.0.1:8888:80"]`, затем `docker compose -f docker-compose.prod.yml up -d frontend`.
+5. **Firewall:** `sudo ufw allow 80,443/tcp` (+ облачный SG); 8888 можно закрыть.
+
+**Проверка:** `https://dedecology.ru` грузится, вход держится (Secure-cookie), `https://dedecology.ru/form`.
+⚠️ С `SESSION_COOKIE_SECURE=True` вход по голому `http://…:8888` сессию держать перестанет — заходи по https-домену.
 
 ---
 
