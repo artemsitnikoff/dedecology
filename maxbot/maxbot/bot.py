@@ -101,14 +101,18 @@ def create_bot() -> Bot:
     return Bot(token=token, default_connection=default_connection)
 
 
-def _first_image(msg: Message) -> Image | None:
-    """Return the first IMAGE attachment of the message, or None."""
+def _all_images(msg: Message, limit: int = 3) -> list[Image]:
+    """Return up to `limit` IMAGE attachments of the message (в сообщении Макса
+    их может быть несколько — забираем все, как массив фоток в админке)."""
     if not msg.body or not msg.body.attachments:
-        return None
+        return []
+    out: list[Image] = []
     for att in msg.body.attachments:
         if isinstance(att, Image) or getattr(att, "type", None) == AttachmentType.IMAGE:
-            return att  # type: ignore[return-value]
-    return None
+            out.append(att)  # type: ignore[arg-type]
+            if len(out) >= limit:
+                break
+    return out
 
 
 def _sender_display_name(sender) -> str:
@@ -189,36 +193,45 @@ def build_router() -> Router:
             text = ((body.text if body else None) or "").strip()
             mid = body.mid if body else ""
             sender_name = _sender_display_name(msg.sender)
-            image = _first_image(msg)
+            images = _all_images(msg)
 
             # Приветствие/пустое сообщение без фото → показываем пример.
-            if image is None and _is_greeting(text):
+            if not images and _is_greeting(text):
                 await _send_example(msg)
                 return
 
             # Строгая отправка: нужно ФОТО + время «Время ЧЧ:ММ» + непустой адрес.
-            if image is not None:
+            if images:
                 match = _TIME_RE.search(text)
                 if match:
                     address = text[: match.start()].strip(" \t\r\n.,;")
                     hour = int(match.group(1))
                     minute = int(match.group(2))
                     if address and hour <= 23:
-                        photo = await _download_image(image, max_bytes=settings.MAX_PHOTO_BYTES)
-                        photo_time = (
-                            datetime.now()
-                            .replace(hour=hour, minute=minute, second=0, microsecond=0)
-                            .strftime("%Y-%m-%dT%H:%M")
-                        )
-                        await push_incident(
-                            text=address,
-                            msg_id=str(mid),
-                            sender_name=sender_name,
-                            photo_bytes_list=[photo],
-                            photo_time=photo_time,
-                        )
-                        await msg.answer(text=_REPLY_ACCEPTED)
-                        return
+                        # Скачиваем ВСЕ картинки (до 3); сбойную/слишком большую — пропускаем.
+                        photos: list[bytes] = []
+                        for img in images:
+                            try:
+                                photos.append(
+                                    await _download_image(img, max_bytes=settings.MAX_PHOTO_BYTES)
+                                )
+                            except AppError as exc:
+                                logger.warning("skip image mid=%s: %s", mid, exc.code)
+                        if photos:
+                            photo_time = (
+                                datetime.now()
+                                .replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                .strftime("%Y-%m-%dT%H:%M")
+                            )
+                            await push_incident(
+                                text=address,
+                                msg_id=str(mid),
+                                sender_name=sender_name,
+                                photo_bytes_list=photos,
+                                photo_time=photo_time,
+                            )
+                            await msg.answer(text=_REPLY_ACCEPTED)
+                            return
 
             # Всё остальное (нет фото / нет времени / пустой адрес) — подсказка по формату.
             await msg.answer(text=_REPLY_INVALID_FORMAT)

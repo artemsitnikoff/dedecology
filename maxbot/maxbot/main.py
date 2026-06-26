@@ -37,7 +37,7 @@ async def main() -> None:
     except Exception as exc:  # noqa: BLE001 — non-fatal; log and keep going
         logger.warning("delete_webhook failed: %s", exc)
 
-    logger.info("MAX bot polling started — build 0.3.3 (CI auto-rebuild test)")
+    logger.info("MAX bot polling started — build 0.3.4 (multi-photo)")
     try:
         await dp.start_polling(bot)
     except asyncio.CancelledError:
