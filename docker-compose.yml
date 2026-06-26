@@ -63,6 +63,7 @@ services:
       MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
       INTAKE_URL: http://backend:8000/api/v1/intake/max
       INTAKE_TOKEN: ${YANDEX_INTAKE_TOKEN:-}
+      MAX_GROUP_CHAT_ID: ${MAX_GROUP_CHAT_ID:-}
 
 volumes:
   dedecolog_pgdata:

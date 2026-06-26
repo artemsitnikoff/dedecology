@@ -78,3 +78,30 @@ class FunnelCounts(BaseModel):
     found: int
     none: int
     exported: int
+
+
+class PendingNotifyItem(ORMBase):
+    """Инцидент, ожидающий уведомления в группу Макс (notified_at IS NULL)."""
+    id: UUID
+    source: IncidentSource
+    fio: str
+    region: str
+    city: str
+    street: str
+    coords: str
+    photo_time: Optional[datetime]
+    photo_urls: list[str]
+    msg: Optional[str]
+    quote: Optional[str]
+
+
+class PendingNotifyResponse(BaseModel):
+    incidents: list[PendingNotifyItem]
+
+
+class MarkNotified(BaseModel):
+    ids: list[UUID]
+
+
+class MarkNotifiedResult(BaseModel):
+    marked: int

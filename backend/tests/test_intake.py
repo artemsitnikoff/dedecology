@@ -388,6 +388,8 @@ async def test_public_form_creates_incident(client):
     assert body["ok"] is True
     assert body["incident_id"] == str(fake_incident.id)
     assert body["quote"] == "«тестовая цитата» — Тест Автор"
+    # Цитата сохранена на самом инциденте (2-й commit в роуте).
+    assert fake_incident.quote == "«тестовая цитата» — Тест Автор"
 
     create.assert_awaited_once()
     kwargs = create.call_args.kwargs
@@ -714,6 +716,8 @@ async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tm
     assert incident.coords == "53.2, 50.6"
     assert incident.photos == 1
     assert len(incident.photo_urls) == 1
+    # Цитата сохранена на инциденте (2-й commit в роуте).
+    assert incident.quote == "«цитата о природе» — Автор"
     fake_clean.assert_awaited_once()
     fake_session.commit.assert_awaited()
 
@@ -815,3 +819,151 @@ async def test_nature_quote_uses_cli_result_cleaned():
         quote = await quotes_service.nature_quote()
 
     assert quote == "«Береги природу» — Иван Иванов"
+
+
+# --------------------------------------------------------------------------- #
+# Групповые уведомления Макс: GET /pending-notify, POST /mark-notified         #
+# --------------------------------------------------------------------------- #
+
+
+def _pending_incident() -> Incident:
+    """Инцидент-кандидат на уведомление (notified_at IS NULL) с полями для схемы."""
+    inc = Incident(
+        source="max",
+        status="new",
+        fio="Иванов Иван",
+        region="Самарская обл",
+        city="г Кинель",
+        street="ул Маяковского, д 41",
+        coords="53.2, 50.6",
+        photo_time=None,
+        photos=1,
+        photo_urls=["/api/v1/intake/photo/x/0.jpg"],
+        msg="msg-1",
+        quote="«цитата» — Автор",
+    )
+    inc.id = uuid4()
+    inc.notified_at = None
+    return inc
+
+
+@pytest.mark.asyncio
+async def test_pending_notify_returns_unnotified(client, monkeypatch):
+    """GET /pending-notify с токеном → список не уведомлённых инцидентов."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    inc = _pending_incident()
+    lister = AsyncMock(return_value=[inc])
+    with patch(
+        "app.api.v1.intake.incident_service.list_pending_notify",
+        new=lister,
+    ):
+        resp = await client.get(
+            "/api/v1/intake/pending-notify",
+            headers={"X-Intake-Token": "secret-token"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["incidents"]) == 1
+    item = body["incidents"][0]
+    assert item["id"] == str(inc.id)
+    assert item["source"] == "max"
+    assert item["fio"] == "Иванов Иван"
+    assert item["city"] == "г Кинель"
+    assert item["photo_urls"] == ["/api/v1/intake/photo/x/0.jpg"]
+    assert item["msg"] == "msg-1"
+    assert item["quote"] == "«цитата» — Автор"
+    assert item["photo_time"] is None
+    lister.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pending_notify_requires_token_403(client, monkeypatch):
+    """GET /pending-notify без X-Intake-Token → 403, сервис не вызывается."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    lister = AsyncMock(return_value=[])
+    with patch(
+        "app.api.v1.intake.incident_service.list_pending_notify",
+        new=lister,
+    ):
+        resp = await client.get("/api/v1/intake/pending-notify")
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"
+    lister.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pending_notify_disabled_when_unset(client, monkeypatch):
+    """Токен приёма не сконфигурирован → 503 INTAKE_DISABLED."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", None)
+    resp = await client.get(
+        "/api/v1/intake/pending-notify",
+        headers={"X-Intake-Token": "anything"},
+    )
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "INTAKE_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_mark_notified_marks_and_commits(client, monkeypatch):
+    """POST /mark-notified с токеном → {"marked": N}; сервис вызван с id, commit."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    ids = [uuid4(), uuid4()]
+    marker = AsyncMock(return_value=2)
+    with patch(
+        "app.api.v1.intake.incident_service.mark_notified",
+        new=marker,
+    ):
+        resp = await client.post(
+            "/api/v1/intake/mark-notified",
+            headers={"X-Intake-Token": "secret-token"},
+            json={"ids": [str(i) for i in ids]},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"marked": 2}
+    marker.assert_awaited_once()
+    passed_ids = marker.call_args.args[1]
+    assert passed_ids == ids
+
+
+@pytest.mark.asyncio
+async def test_mark_notified_requires_token_403(client, monkeypatch):
+    """POST /mark-notified без X-Intake-Token → 403, сервис не вызывается."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    marker = AsyncMock(return_value=0)
+    with patch(
+        "app.api.v1.intake.incident_service.mark_notified",
+        new=marker,
+    ):
+        resp = await client.post(
+            "/api/v1/intake/mark-notified",
+            json={"ids": [str(uuid4())]},
+        )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"
+    marker.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mark_notified_service_sets_notified_at():
+    """Прямой вызов mark_notified: формирует UPDATE notified_at, возвращает rowcount."""
+    from app.services import incident as incident_service
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=MagicMock(rowcount=2))
+    ids = [uuid4(), uuid4()]
+
+    marked = await incident_service.mark_notified(session, ids)
+
+    assert marked == 2
+    session.execute.assert_awaited_once()
+    session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mark_notified_service_empty_noop():
+    """Пустой список id → 0 без обращения к БД."""
+    from app.services import incident as incident_service
+
+    session = AsyncMock()
+    assert await incident_service.mark_notified(session, []) == 0
+    session.execute.assert_not_awaited()

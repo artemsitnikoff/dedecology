@@ -43,6 +43,8 @@ EXAMPLE = (
 
 # Время на фото: «Время 19:30», «время 9.05» и т.п. Группы: часы и минуты.
 _TIME_RE = re.compile(r"врем[яи][\s:]*([0-2]?\d)[:.]([0-5]\d)", re.IGNORECASE)
+# Любое время ЧЧ:ММ где угодно в тексте (со словом «Время» или без), для гибкого извлечения.
+_ANY_TIME_RE = re.compile(r"\b([01]?\d|2[0-3])[:.]([0-5]\d)\b")
 
 # Приветствия/команды, на которые показываем пример (текст уже .strip()/.lower()).
 _GREETINGS = {
@@ -200,46 +202,46 @@ def build_router() -> Router:
                 await _send_example(msg)
                 return
 
-            # Строгая отправка: нужно ФОТО + время «Время ЧЧ:ММ» + непустой адрес.
-            if images:
-                match = _TIME_RE.search(text)
-                if match:
-                    address = text[: match.start()].strip(" \t\r\n.,;")
-                    hour = int(match.group(1))
-                    minute = int(match.group(2))
-                    if address and hour <= 23:
-                        # Скачиваем ВСЕ картинки (до 3); сбойную/слишком большую — пропускаем.
-                        photos: list[bytes] = []
-                        for img in images:
-                            try:
-                                photos.append(
-                                    await _download_image(img, max_bytes=settings.MAX_PHOTO_BYTES)
-                                )
-                            except AppError as exc:
-                                logger.warning("skip image mid=%s: %s", mid, exc.code)
-                        if photos:
-                            photo_time = (
-                                datetime.now()
-                                .replace(hour=hour, minute=minute, second=0, microsecond=0)
-                                .strftime("%Y-%m-%dT%H:%M")
-                            )
-                            result = await push_incident(
-                                text=address,
-                                msg_id=str(mid),
-                                sender_name=sender_name,
-                                photo_bytes_list=photos,
-                                photo_time=photo_time,
-                            )
-                            # Бэк возвращает мотивирующую цитату о природе — дописываем к ответу.
-                            quote = ""
-                            if isinstance(result, dict):
-                                quote = (result.get("quote") or "").strip()
-                            reply = _REPLY_ACCEPTED + (f"\n\n{quote}" if quote else "")
-                            await msg.answer(text=reply)
-                            return
+            # Валидное обращение = ФОТО + непустой текст (адрес). Слово «Время» НЕ обязательно.
+            if images and text:
+                # Скачиваем ВСЕ картинки (до 3); сбойную/слишком большую — пропускаем.
+                photos: list[bytes] = []
+                for img in images:
+                    try:
+                        photos.append(
+                            await _download_image(img, max_bytes=settings.MAX_PHOTO_BYTES)
+                        )
+                    except AppError as exc:
+                        logger.warning("skip image mid=%s: %s", mid, exc.code)
+                if photos:
+                    # Время фотофиксации: любое ЧЧ:ММ из текста (напр. «…, 10:28)» или «Время 19:30»),
+                    # иначе — текущее время приёма.
+                    now = datetime.now()
+                    tm = _ANY_TIME_RE.search(text)
+                    if tm:
+                        photo_time = now.replace(
+                            hour=int(tm.group(1)), minute=int(tm.group(2)), second=0, microsecond=0
+                        ).strftime("%Y-%m-%dT%H:%M")
+                    else:
+                        photo_time = now.strftime("%Y-%m-%dT%H:%M")
+                    # Весь текст уходит как адрес → бэк разберёт его через DaData Clean.
+                    result = await push_incident(
+                        text=text,
+                        msg_id=str(mid),
+                        sender_name=sender_name,
+                        photo_bytes_list=photos,
+                        photo_time=photo_time,
+                    )
+                    # Бэк возвращает мотивирующую цитату о природе — дописываем к ответу.
+                    quote = ""
+                    if isinstance(result, dict):
+                        quote = (result.get("quote") or "").strip()
+                    reply = _REPLY_ACCEPTED + (f"\n\n{quote}" if quote else "")
+                    await msg.answer(text=reply)
+                    return
 
-            # Всё остальное (нет фото / нет времени / пустой адрес) — подсказка по формату.
-            await msg.answer(text=_REPLY_INVALID_FORMAT)
+            # Невалидно (нет фото / пустой текст) — МОЛЧИМ, в чат ничего не пишем (по требованию).
+            logger.info("ignored message mid=%s (нет фото или пустой текст)", mid)
 
         except AppError as exc:
             logger.warning(

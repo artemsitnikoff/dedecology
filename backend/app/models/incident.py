@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, CheckConstraint, Integer, text
+from sqlalchemy import String, Boolean, CheckConstraint, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,6 +45,12 @@ class Incident(Base, TimestampMixin):
     received_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
+    # Момент успешной отправки уведомления в группу Макс (NULL → ещё не отправлено).
+    notified_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    # Сгенерированная цитата о природе (сохраняется для повторного показа в группе).
+    quote: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         CheckConstraint("source IN ('max', 'form')", name="check_incident_source"),

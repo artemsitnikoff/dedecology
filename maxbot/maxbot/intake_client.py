@@ -21,6 +21,12 @@ logger = logging.getLogger("dedecology.maxbot")
 # Backend может перекодировать фото; даём запас на запись инцидента.
 _TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 
+# Опрос/пометка уведомлений — лёгкие JSON-запросы, короткий таймаут.
+_NOTIFY_TIMEOUT = httpx.Timeout(15.0, connect=10.0)
+
+# Скачивание фото для пересылки в групповой чат — потоково, с потолком размера.
+_PHOTO_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+
 
 async def push_incident(
     text: str,
@@ -98,3 +104,93 @@ async def push_incident(
         payload,
     )
     return payload
+
+
+async def fetch_pending() -> list[dict]:
+    """Забрать у backend обращения, ещё не отправленные в групповой чат.
+
+    GET {api_base}/intake/pending-notify с X-Intake-Token.
+    На любую ошибку (сеть, не-2xx, кривой JSON) возвращает [] — фоновый цикл
+    должен пережить недоступность backend и повторить на следующей итерации.
+    """
+    url = f"{settings.api_base}/intake/pending-notify"
+    headers = {"X-Intake-Token": settings.INTAKE_TOKEN}
+    try:
+        async with httpx.AsyncClient(timeout=_NOTIFY_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        payload = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.error("fetch_pending failed url=%s: %s", url, exc)
+        return []
+
+    incidents = payload.get("incidents") if isinstance(payload, dict) else None
+    if not isinstance(incidents, list):
+        logger.error("fetch_pending: unexpected payload shape: %r", payload)
+        return []
+    return incidents
+
+
+async def mark_notified(ids: list[str]) -> None:
+    """Пометить обращения отправленными: POST {api_base}/intake/mark-notified.
+
+    :param ids: Список UUID-строк обращений, успешно запостенных в чат.
+    :raises IntakeError: при сетевой ошибке/таймауте или не-2xx ответе backend
+        — вызывающий цикл логирует и продолжает (обращения переотправятся).
+    """
+    if not ids:
+        return
+    url = f"{settings.api_base}/intake/mark-notified"
+    headers = {"X-Intake-Token": settings.INTAKE_TOKEN}
+    try:
+        async with httpx.AsyncClient(timeout=_NOTIFY_TIMEOUT) as client:
+            resp = await client.post(url, json={"ids": ids}, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.error("mark_notified request failed url=%s: %s", url, exc)
+        raise IntakeError(f"Не удалось пометить обращения отправленными: {exc}") from exc
+
+    if not resp.is_success:
+        body_preview = resp.text[:500]
+        logger.error("mark_notified returned %s: %s", resp.status_code, body_preview)
+        raise IntakeError(
+            f"mark-notified ответил {resp.status_code}",
+            details={"backend_status": resp.status_code, "body": body_preview},
+        )
+
+    logger.info("mark_notified ok count=%d", len(ids))
+
+
+async def download_photo(url_path: str) -> bytes | None:
+    """Скачать фото инцидента по относительному пути (backend_origin + url_path).
+
+    Эндпоинт фото публичный (без X-Intake-Token). Потоково с потолком
+    settings.MAX_PHOTO_BYTES. На любую ошибку/превышение размера → None.
+    """
+    if not url_path:
+        return None
+    # Поддерживаем как относительные (/api/v1/...), так и абсолютные URL.
+    url = url_path if url_path.startswith(("http://", "https://")) else (
+        settings.backend_origin + url_path
+    )
+    try:
+        async with httpx.AsyncClient(
+            timeout=_PHOTO_TIMEOUT, follow_redirects=True
+        ) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > settings.MAX_PHOTO_BYTES:
+                        logger.warning(
+                            "download_photo too large (> %d bytes) url=%s",
+                            settings.MAX_PHOTO_BYTES,
+                            url,
+                        )
+                        return None
+                    chunks.append(chunk)
+    except httpx.HTTPError as exc:
+        logger.error("download_photo failed url=%s: %s", url, exc)
+        return None
+    return b"".join(chunks)

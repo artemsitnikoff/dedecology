@@ -20,13 +20,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config import settings
 from ...core.errors import AppError, ForbiddenError, NotFoundError, ValidationError
 from ...database import get_db
+from ...schemas.incident import (
+    MarkNotified,
+    MarkNotifiedResult,
+    PendingNotifyResponse,
+)
 from ...services import dadata as dadata_service
+from ...services import incident as incident_service
 from ...services import intake as intake_service
 from ...services import quotes as quotes_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _require_intake_token(request: Request) -> None:
+    """Гейт server-to-server по общему секрету X-Intake-Token (как /yandex, /max).
+
+    Токен не задан на сервере → 503 INTAKE_DISABLED; не совпал/отсутствует → 403.
+    Сравнение constant-time (hmac.compare_digest).
+    """
+    if settings.YANDEX_INTAKE_TOKEN is None:
+        raise AppError(
+            code="INTAKE_DISABLED",
+            message="Intake not configured",
+            status_code=503,
+        )
+    header_token = request.headers.get("X-Intake-Token")
+    if not header_token or not hmac.compare_digest(
+        header_token, settings.YANDEX_INTAKE_TOKEN
+    ):
+        raise ForbiddenError("Неверный токен приёма")
 
 # Имя файла фото: числовой индекс + опц. суффикс _thumb, только .jpg (анти-traversal).
 # Все фото пере-кодируются в JPEG при загрузке: FULL `{i}.jpg`, THUMB `{i}_thumb.jpg`.
@@ -48,17 +73,7 @@ async def yandex_intake(
     отрабатывало.
     """
     # Гейт по токену (общий секрет в заголовке).
-    if settings.YANDEX_INTAKE_TOKEN is None:
-        raise AppError(
-            code="INTAKE_DISABLED",
-            message="Intake not configured",
-            status_code=503,
-        )
-    header_token = request.headers.get("X-Intake-Token")
-    if not header_token or not hmac.compare_digest(
-        header_token, settings.YANDEX_INTAKE_TOKEN
-    ):
-        raise ForbiddenError("Неверный токен приёма")
+    _require_intake_token(request)
 
     # Тело: толерантный разбор JSON-RPC-конверта.
     try:
@@ -176,6 +191,9 @@ async def public_form(
     await session.commit()
     # Цитату генерируем ПОСЛЕ commit — медленный/упавший CLI не блокирует запись.
     quote = await quotes_service.nature_quote()
+    # Сохраняем цитату на инциденте 2-м коммитом (запись уже зафиксирована выше).
+    incident.quote = quote
+    await session.commit()
     return {"ok": True, "incident_id": str(incident.id), "quote": quote}
 
 
@@ -197,17 +215,7 @@ async def max_intake(
     (с эвристическим фолбэком). Возвращает {"ok": True, "incident_id": ...}.
     """
     # Гейт по токену (общий секрет в заголовке) — зеркалит /yandex.
-    if settings.YANDEX_INTAKE_TOKEN is None:
-        raise AppError(
-            code="INTAKE_DISABLED",
-            message="Intake not configured",
-            status_code=503,
-        )
-    header_token = request.headers.get("X-Intake-Token")
-    if not header_token or not hmac.compare_digest(
-        header_token, settings.YANDEX_INTAKE_TOKEN
-    ):
-        raise ForbiddenError("Неверный токен приёма")
+    _require_intake_token(request)
 
     incident = await intake_service.create_incident_from_max(
         session,
@@ -220,7 +228,41 @@ async def max_intake(
     await session.commit()
     # Цитату генерируем ПОСЛЕ commit — медленный/упавший CLI не блокирует запись.
     quote = await quotes_service.nature_quote()
+    # Сохраняем цитату на инциденте 2-м коммитом (запись уже зафиксирована выше).
+    incident.quote = quote
+    await session.commit()
     return {"ok": True, "incident_id": str(incident.id), "quote": quote}
+
+
+@router.get("/pending-notify", response_model=PendingNotifyResponse)
+async def pending_notify(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """Очередь инцидентов для уведомления в группу Макс (notified_at IS NULL).
+
+    Server-to-server для воркера Макс-бота: гейт X-Intake-Token (как /max).
+    Старейшие первыми (created_at ASC), не более 20 за вызов.
+    """
+    _require_intake_token(request)
+    incidents = await incident_service.list_pending_notify(session, limit=20)
+    return PendingNotifyResponse(incidents=incidents)
+
+
+@router.post("/mark-notified", response_model=MarkNotifiedResult)
+async def mark_notified(
+    request: Request,
+    payload: MarkNotified,
+    session: AsyncSession = Depends(get_db),
+):
+    """Помечает инциденты как уведомлённые (notified_at = now). Гейт X-Intake-Token.
+
+    Идемпотентно: учитывает только ещё не уведомлённые id. Возвращает {"marked": N}.
+    """
+    _require_intake_token(request)
+    marked = await incident_service.mark_notified(session, payload.ids)
+    await session.commit()
+    return MarkNotifiedResult(marked=marked)
 
 
 @router.get("/photo/{incident_id}/{filename}")

@@ -17,6 +17,7 @@ from .maxapi_compat import apply_patches as _apply_maxapi_patches
 _apply_maxapi_patches()
 
 from .bot import build_router, create_bot  # noqa: E402 — must follow patch init
+from .notify import notify_loop  # noqa: E402 — must follow patch init
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +40,12 @@ async def main() -> None:
 
     logger.info("MAX bot polling started — build 0.3.4 (multi-photo)")
     try:
-        await dp.start_polling(bot)
+        # Поллинг и фоновое оповещение группового чата работают конкурентно.
+        # Если падает любая из задач — gather пробросит исключение и мы выйдем.
+        await asyncio.gather(
+            dp.start_polling(bot),
+            notify_loop(bot),
+        )
     except asyncio.CancelledError:
         logger.info("polling cancelled — shutting down")
         raise

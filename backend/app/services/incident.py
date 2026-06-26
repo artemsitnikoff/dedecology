@@ -4,7 +4,7 @@ import math
 from datetime import datetime, time, timezone
 from uuid import UUID
 
-from sqlalchemy import and_, asc, case, desc, func, or_, select
+from sqlalchemy import and_, asc, case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import NotFoundError, ValidationError
@@ -188,6 +188,40 @@ async def list_by_ids(session: AsyncSession, ids: list[UUID]) -> list[Incident]:
     result = await session.execute(select(Incident).where(Incident.id.in_(ids)))
     by_id = {i.id: i for i in result.scalars().all()}
     return [by_id[i] for i in ids if i in by_id]
+
+
+async def list_pending_notify(session: AsyncSession, limit: int = 20) -> list[Incident]:
+    """Инциденты, ещё не уведомлённые в группу Макс (notified_at IS NULL).
+
+    Сортировка по created_at ASC (старейшие первыми) с лимитом — очередь для
+    воркера Макс-бота.
+    """
+    stmt = (
+        select(Incident)
+        .where(Incident.notified_at.is_(None))
+        .order_by(asc(Incident.created_at), asc(Incident.id))
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def mark_notified(session: AsyncSession, ids: list[UUID]) -> int:
+    """Помечает инциденты как уведомлённые (notified_at = now(utc)).
+
+    Обновляет только ещё не уведомлённые (notified_at IS NULL) из переданных id —
+    идемпотентно. Возвращает число реально обновлённых строк.
+    """
+    if not ids:
+        return 0
+    stmt = (
+        update(Incident)
+        .where(Incident.id.in_(ids), Incident.notified_at.is_(None))
+        .values(notified_at=datetime.now(timezone.utc))
+    )
+    result = await session.execute(stmt)
+    await session.flush()
+    return result.rowcount or 0
 
 
 async def funnel_counts(
