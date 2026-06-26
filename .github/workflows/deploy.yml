@@ -59,5 +59,16 @@
                 echo "Run alembic upgrade head"
                 docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
               fi
-
+              # maxbot — отдельный сервис под профилем. Пересобрать+перезапустить,
+              # если менялись его файлы И он уже запущен (первый запуск — вручную).
+              if echo "$CHANGED" | grep -qE "^maxbot/"; then
+               if [ -n "$(docker compose -f docker-compose.prod.yml --profile maxbot ps -q maxbot)" ]; then
+                echo "Rebuild + restart maxbot"
+                docker compose -f docker-compose.prod.yml --profile maxbot build maxbot \
+                  && docker compose -f docker-compose.prod.yml --profile maxbot up -d maxbot \
+                  || echo "WARN: maxbot rebuild failed"
+               else
+                echo "maxbot not running — skip (поднять: --profile maxbot up -d --build maxbot)"
+               fi
+              fi
               echo "[$(date -Iseconds)] deployed: $REMOTE"
