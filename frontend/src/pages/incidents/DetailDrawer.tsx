@@ -29,7 +29,7 @@ export function DetailDrawer({ incident: d, onClose, onPhoto }: Props) {
   const addr = fullAddr(d);
 
   const fields: Array<[string, string]> = [
-    ['ФИО', d.fio],
+    ['Заявитель', d.fio],
     ['Регион', d.region],
     ['Город / н.п.', d.city],
     ['Адрес', d.street],

@@ -51,7 +51,7 @@ def _build_message(incident: dict) -> str:
 
     fio = (incident.get("fio") or "").strip()
     if fio:
-        lines.append(f"ФИО: {fio}")
+        lines.append(f"Заявитель: {fio}")
 
     address_parts = [
         (incident.get("region") or "").strip(),

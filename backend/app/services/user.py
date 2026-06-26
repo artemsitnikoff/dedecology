@@ -15,7 +15,7 @@ from .audit import audit
 
 
 async def list_users(session: AsyncSession) -> list[UserListItem]:
-    """Все пользователи (сортировка по ФИО) для экрана Настроек."""
+    """Все пользователи (сортировка по заявителю) для экрана Настроек."""
     result = await session.execute(select(User).order_by(User.fio))
     users = result.scalars().all()
     return [UserListItem.model_validate(u) for u in users]
@@ -119,7 +119,7 @@ async def update_profile(
     fio: str,
     actor_user_id: UUID,
 ) -> User:
-    """Обновляет ФИО текущего пользователя (PATCH /profile)."""
+    """Обновляет Заявителя текущего пользователя (PATCH /profile)."""
     before = {"fio": user.fio}
     user.fio = fio
     await session.flush()

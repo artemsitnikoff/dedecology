@@ -33,7 +33,7 @@ const STATUS_META: Record<UserStatus, { label: string; bg: string; fg: string; d
 type Banner = { kind: 'success' | 'error'; text: string } | null;
 
 /**
- * Экран «Настройки»: профиль (ФИО + смена пароля) и — только для admin —
+ * Экран «Настройки»: профиль (Заявитель + смена пароля) и — только для admin —
  * управление пользователями (список, приглашение с честным temp_password, удаление).
  */
 export function SettingsPage() {
@@ -51,7 +51,7 @@ export function SettingsPage() {
   const saveProfile = () => {
     const value = fio.trim();
     if (!value) {
-      setBanner({ kind: 'error', text: 'Введите ФИО.' });
+      setBanner({ kind: 'error', text: 'Введите заявителя.' });
       return;
     }
     updateProfile.mutate(
@@ -96,7 +96,7 @@ export function SettingsPage() {
     const f = nuFio.trim();
     const e = nuEmail.trim();
     if (!f || !e) {
-      setBanner({ kind: 'error', text: 'Заполните ФИО и email.' });
+      setBanner({ kind: 'error', text: 'Заполните заявителя и email.' });
       return;
     }
     createUser.mutate(
@@ -154,7 +154,7 @@ export function SettingsPage() {
           <div className="de-set-card-sub">Ваше имя и доступ к аккаунту</div>
           <div className="de-set-stack">
             <div className="de-set-field">
-              <label className="de-set-field-label">ФИО</label>
+              <label className="de-set-field-label">Заявитель</label>
               <input
                 className="de-set-input"
                 value={fio}
@@ -219,7 +219,7 @@ export function SettingsPage() {
             <div className="de-set-invite">
               <div className="de-set-invite-grow">
                 <div className="de-set-field">
-                  <label className="de-set-field-label">ФИО сотрудника</label>
+                  <label className="de-set-field-label">Заявитель</label>
                   <input
                     className="de-set-input"
                     value={nuFio}

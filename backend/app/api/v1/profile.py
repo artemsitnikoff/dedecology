@@ -20,7 +20,7 @@ async def patch_profile(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Обновляет ФИО текущего пользователя."""
+    """Обновляет Заявителя текущего пользователя."""
     user = await update_profile(session, current_user, data.fio, current_user.id)
     await session.commit()
     return UserMe.model_validate(user)

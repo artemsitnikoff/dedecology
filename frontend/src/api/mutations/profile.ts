@@ -4,7 +4,7 @@ import { useAuthStore } from '@/store/authStore';
 import type { UserMe } from '@/api/aliases';
 
 /**
- * PATCH /profile — смена ФИО текущего пользователя.
+ * PATCH /profile — смена Заявителя текущего пользователя.
  * При успехе обновляем стор (сайдбар/шапка читают user.fio).
  */
 export function useUpdateProfile() {

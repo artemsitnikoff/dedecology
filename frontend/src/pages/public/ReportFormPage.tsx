@@ -205,7 +205,7 @@ export default function ReportFormPage() {
     e.preventDefault();
     if (submitting) return;
     if (!fio.trim()) {
-      setSubmitError('Пожалуйста, укажите ФИО.');
+      setSubmitError('Пожалуйста, укажите заявителя.');
       return;
     }
     if (!region.trim()) {
@@ -283,10 +283,10 @@ export default function ReportFormPage() {
             </div>
 
             <div className="de-rf-fields">
-              {/* ФИО */}
+              {/* Заявитель */}
               <label className="de-rf-field">
                 <span className="de-rf-label">
-                  ФИО <span className="de-rf-req">*</span>
+                  Заявитель <span className="de-rf-req">*</span>
                 </span>
                 <input
                   type="text"

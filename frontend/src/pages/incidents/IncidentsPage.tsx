@@ -306,7 +306,7 @@ export function IncidentsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Поиск по адресу, ФИО, координатам…"
+            placeholder="Поиск по адресу, заявителю, координатам…"
           />
         </div>
         <div className="de-inc-spacer" />
