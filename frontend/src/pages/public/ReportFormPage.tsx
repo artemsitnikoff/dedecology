@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { submitIntakeForm } from '@/api/intake';
 import type { AddressSuggestion, SuggestOptions } from '@/api/intake';
 import { useAddressSuggest } from './useAddressSuggest';
+import { compressImage } from '@/lib/image';
 import './report-form.css';
 
 // Публичная страница обращения о состоянии площадки ТКО. Открывается по ссылке
@@ -240,7 +241,10 @@ export default function ReportFormPage() {
       fd.append('bins', bins);
       // Ханипот: у человека всегда пусто. Если бот заполнил — бэк молча дропнет.
       fd.append('website', websiteRef.current?.value ?? '');
-      for (const file of photos) fd.append('photos', file);
+      // Сжимаем фото в браузере перед отправкой (крупные телефонные фото иначе → 413).
+      // Сервер всё равно делает финальный ресайз; при сбое сжатия шлём оригинал.
+      const prepared = await Promise.all(photos.map((f) => compressImage(f)));
+      for (const file of prepared) fd.append('photos', file);
 
       const res = await submitIntakeForm(fd);
       setQuote(res.quote ?? '');
