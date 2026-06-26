@@ -8,8 +8,9 @@ from openpyxl import load_workbook
 from app.models import Incident
 from app.services.export import build_xlsx
 
-# 0-based индекс колонки «Ссылка на сообщение» в порядке ТЗ §7 (12-я колонка).
-_MSG_LINK_COL = 11
+# 0-based индексы колонок (добавлена «Ссылка на фото» между «Кол-во фото» и «Ссылка на сообщение»).
+_PHOTO_LINK_COL = 11  # «Ссылка на фото»
+_MSG_LINK_COL = 12  # «Ссылка на сообщение»
 
 
 def _incident(**kw) -> Incident:
@@ -53,3 +54,39 @@ def test_export_blank_msg_url_writes_empty_not_mid_link():
     assert cells[0] in (None, "")
     assert "max.ru/m/" not in (cells[0] or "")
     assert "mid.ffffdead" not in (cells[0] or "")
+
+
+def _photo_cells(rows: list[Incident], base_url: str = "") -> list:
+    """Значения колонки «Ссылка на фото» (без строки заголовков)."""
+    wb = load_workbook(BytesIO(build_xlsx(rows, base_url)))
+    ws = wb.active
+    return [row[_PHOTO_LINK_COL].value for row in ws.iter_rows(min_row=2)]
+
+
+def test_export_photo_links_absolute_url():
+    """Относительные photo_urls → абсолютные URL с base_url, по одному на строку."""
+    inc = _incident(
+        photos=2,
+        photo_urls=[
+            "/api/v1/intake/photo/abc/0.jpg",
+            "/api/v1/intake/photo/abc/1.jpg",
+        ],
+    )
+    cell = _photo_cells([inc], base_url="https://ecopulse.reo.ru")[0]
+    assert "https://ecopulse.reo.ru/api/v1/intake/photo/abc/0.jpg" in cell
+    assert "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1.jpg" in cell
+
+
+def test_export_photo_links_skip_placeholder():
+    """Плейсхолдеры демо-сида (placeholder://…) в ссылку не попадают."""
+    inc = _incident(photos=1, photo_urls=["placeholder://incident-photo/1"])
+    assert _photo_cells([inc], base_url="https://ecopulse.reo.ru")[0] in (None, "")
+
+
+def test_export_has_photo_link_header():
+    """Заголовок «Ссылка на фото» на месте, перед «Ссылка на сообщение»."""
+    wb = load_workbook(BytesIO(build_xlsx([])))
+    ws = wb.active
+    headers = [c.value for c in next(ws.iter_rows(max_row=1))]
+    assert headers[_PHOTO_LINK_COL] == "Ссылка на фото"
+    assert headers[_MSG_LINK_COL] == "Ссылка на сообщение"

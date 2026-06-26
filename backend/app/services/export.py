@@ -1,4 +1,4 @@
-"""Серверный экспорт инцидентов в .xlsx (openpyxl). 13 колонок в порядке ТЗ §7."""
+"""Серверный экспорт инцидентов в .xlsx (openpyxl). 14 колонок в порядке ТЗ §7 + ссылка на фото."""
 
 from io import BytesIO
 from typing import Iterable
@@ -32,6 +32,7 @@ _HEADERS = [
     "Дата фотофиксации",
     "Время фотофиксации",
     "Кол-во фото",
+    "Ссылка на фото",
     "Ссылка на сообщение",
     "Поступило",
 ]
@@ -60,13 +61,32 @@ def _message_link(inc: Incident) -> str:
     return inc.msg_url or ""
 
 
+def _photo_links(inc: Incident, base_url: str) -> str:
+    """Полные публичные URL фото (по одному на строку).
+
+    photo_urls хранит относительные пути /api/v1/intake/photo/{id}/{i}.jpg → добавляем
+    base_url (схема+домен). Плейсхолдеры демо-сида (placeholder://…) — реального файла нет,
+    пропускаем. Эндпоинт отдачи фото публичный, ссылка открывается без авторизации.
+    """
+    base = base_url.rstrip("/")
+    out: list[str] = []
+    for u in inc.photo_urls or []:
+        if not isinstance(u, str) or not u:
+            continue
+        if u.startswith("http"):
+            out.append(u)
+        elif u.startswith("/"):
+            out.append(f"{base}{u}")
+    return "\n".join(out)
+
+
 def _received(inc: Incident) -> str:
     if inc.received_at is None:
         return ""
     return inc.received_at.strftime("%Y-%m-%d %H:%M")
 
 
-def _row(inc: Incident) -> list:
+def _row(inc: Incident, base_url: str) -> list:
     return [
         inc.fio,
         _SOURCE_LABELS.get(inc.source, inc.source),
@@ -79,20 +99,24 @@ def _row(inc: Incident) -> list:
         _photo_date(inc),
         _photo_time(inc),
         inc.photos,
+        _photo_links(inc, base_url),
         _message_link(inc),
         _received(inc),
     ]
 
 
-def build_xlsx(rows: Iterable[Incident]) -> bytes:
-    """Строит .xlsx (bytes) из инцидентов. 13 колонок, первая строка — заголовки."""
+def build_xlsx(rows: Iterable[Incident], base_url: str = "") -> bytes:
+    """Строит .xlsx (bytes) из инцидентов. 14 колонок, первая строка — заголовки.
+
+    base_url (схема+домен, напр. https://ecopulse.reo.ru) — для абсолютных ссылок на фото.
+    """
     wb = Workbook()
     ws = wb.active
     ws.title = "Инциденты"
 
     ws.append(_HEADERS)
     for inc in rows:
-        ws.append(_row(inc))
+        ws.append(_row(inc, base_url))
 
     buffer = BytesIO()
     wb.save(buffer)

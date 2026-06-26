@@ -8,7 +8,7 @@ from datetime import date, datetime
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database import get_db
@@ -48,6 +48,21 @@ def _as_datetime(d: date | None) -> datetime | None:
     if d is None:
         return None
     return datetime(d.year, d.month, d.day)
+
+
+def _public_base(request: Request) -> str:
+    """Схема+домен для абсолютных ссылок (ссылка на фото в .xlsx).
+
+    За обратным прокси (Caddy/nginx) берём X-Forwarded-Proto/Host; запрос на экспорт
+    всегда идёт из браузера админа, поэтому Host = публичный домен (ecopulse.reo.ru).
+    """
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.netloc
+    )
+    return f"{proto}://{host}"
 
 
 @router.get("", response_model=Paginated[IncidentListItem])
@@ -113,6 +128,7 @@ async def list_regions(
 
 @router.get("/export")
 async def export_incidents_get(
+    request: Request,
     search: str | None = Query(None),
     source: list[str] | None = Query(None),
     status: list[str] | None = Query(None),
@@ -136,18 +152,21 @@ async def export_incidents_get(
         sort=sort,
         order=order,
     )
-    return _xlsx_response(build_xlsx(rows), "Инциденты_ЭкоПульс.xlsx")
+    return _xlsx_response(build_xlsx(rows, _public_base(request)), "Инциденты_ЭкоПульс.xlsx")
 
 
 @router.post("/export")
 async def export_incidents_post(
+    request: Request,
     payload: ExportSelection,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт выбранных инцидентов в .xlsx."""
     rows = await incident_service.list_by_ids(session, payload.ids)
-    return _xlsx_response(build_xlsx(rows), "Инциденты_ЭкоПульс_выбранные.xlsx")
+    return _xlsx_response(
+        build_xlsx(rows, _public_base(request)), "Инциденты_ЭкоПульс_выбранные.xlsx"
+    )
 
 
 @router.post("/bulk-status", response_model=BulkStatusResult)
