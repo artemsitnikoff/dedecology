@@ -21,6 +21,7 @@ from ..core.errors import ValidationError
 from ..models import Incident
 from .audit import audit
 from .dadata import clean_address
+from .incident_parse import ai_parse_incident
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,20 @@ def _parse_photo_time(value) -> datetime | None:
         return None
 
 
+# Время фотофиксации, извлечённое AI, приходит «голым» в формате ЧЧ:ММ.
+_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _hhmm_today_utc(value) -> datetime | None:
+    """ЧЧ:ММ → сегодня@ЧЧ:ММ (tz-aware UTC). None, если формат не совпал."""
+    m = _HHMM_RE.match(_clean_str(value))
+    if not m:
+        return None
+    return datetime.now(timezone.utc).replace(
+        hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0
+    )
+
+
 def _parse_photo_urls(value) -> list[str]:
     """`photos` как list[str] ИЛИ строка (split по \\n , ; пробел).
 
@@ -206,25 +221,84 @@ async def create_incident_from_max(
 ) -> Incident:
     """Создаёт Incident (source='max') из сабмита Макс-бота.
 
-    Адрес приходит свободным текстом в сообщении пользователя. Сначала пробуем
-    разобрать его через DaData Clean API (clean_address) — при успехе берём
-    стандартизированные регион/город/улицу + координаты. Если ключи не заданы /
-    DaData недоступна / разбор пустой — деградируем на эвристику _parse_address
-    (coords тогда пустые). flush() здесь, commit() — в роутере.
+    Адрес приходит свободным текстом. Разбор адреса:
+      1. claude CLI (ai_parse_incident) извлекает регион/город/улицу/координаты/
+         время из свободного текста;
+      2. если AI дал адрес — склеиваем его и стандартизируем через DaData Clean
+         (clean_address): координаты DaData авторитетны (геокодер); если DaData
+         недоступна — берём поля AI как есть (+ координаты из текста, если AI их
+         нашёл);
+      3. если AI недоступен — текущий путь: clean_address(text) → эвристика
+         _parse_address (coords пустые).
+
+    Приоритет координат: DaData Clean > координаты из AI > "".
+    Время фотофиксации: AI-время ЧЧ:ММ (сегодня@ЧЧ:ММ) переопределяет переданное;
+    иначе разбираем photo_time из запроса. Любой сбой AI/DaData деградирует на
+    фолбэк (log + fall through) и НИКОГДА не роняет приём. flush() здесь,
+    commit() — в роутере.
     """
     raw_text = _clean_str(text)
     fio = _clean_str(sender_name)
     msg = _clean_str(msg_id) or None
 
-    cleaned = await clean_address(raw_text)
-    if cleaned:
-        region = _clean_str(cleaned.get("region"))
-        city = _clean_str(cleaned.get("city"))
-        street = _clean_str(cleaned.get("street"))
-        coords = _clean_str(cleaned.get("coords"))
-    else:
-        region, city, street = _parse_address(raw_text)
-        coords = ""
+    # AI-разбор свободного текста (graceful: любой сбой → None).
+    ai: dict | None = None
+    try:
+        ai = await ai_parse_incident(raw_text)
+    except Exception as e:  # noqa: BLE001 — AI не должен ронять приём
+        logger.warning("[intake.max] ai_parse_incident сбой: %s: %s", type(e).__name__, e)
+        ai = None
+
+    region = city = street = coords = ""
+    resolved = False
+    try:
+        if ai and (
+            _clean_str(ai.get("region"))
+            or _clean_str(ai.get("city"))
+            or _clean_str(ai.get("street"))
+        ):
+            addr = ", ".join(
+                p
+                for p in (
+                    _clean_str(ai.get("region")),
+                    _clean_str(ai.get("city")),
+                    _clean_str(ai.get("street")),
+                )
+                if p
+            )
+            cleaned = await clean_address(addr)
+            if cleaned:
+                # DaData авторитетна: стандартизированные поля + геокод.
+                region = _clean_str(cleaned.get("region"))
+                city = _clean_str(cleaned.get("city"))
+                street = _clean_str(cleaned.get("street"))
+                coords = _clean_str(cleaned.get("coords")) or _clean_str(ai.get("coords"))
+            else:
+                # DaData недоступна → поля AI как есть (+ координаты из текста).
+                region = _clean_str(ai.get("region"))
+                city = _clean_str(ai.get("city"))
+                street = _clean_str(ai.get("street"))
+                coords = _clean_str(ai.get("coords"))
+            resolved = True
+    except Exception as e:  # noqa: BLE001 — DaData/разбор не должны ронять приём
+        logger.warning("[intake.max] AI-адрес сбой: %s: %s", type(e).__name__, e)
+        resolved = False
+
+    if not resolved:
+        # Фолбэк без AI: текущий путь DaData Clean(text) → эвристика.
+        try:
+            cleaned = await clean_address(raw_text)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[intake.max] clean_address сбой: %s: %s", type(e).__name__, e)
+            cleaned = None
+        if cleaned:
+            region = _clean_str(cleaned.get("region"))
+            city = _clean_str(cleaned.get("city"))
+            street = _clean_str(cleaned.get("street"))
+            coords = _clean_str(cleaned.get("coords"))
+        else:
+            region, city, street = _parse_address(raw_text)
+            coords = ""
 
     # Отсекаем текст до ширины колонок БД.
     fio = fio[: _FIELD_LIMITS["fio"]]
@@ -235,7 +309,10 @@ async def create_incident_from_max(
     if msg is not None:
         msg = msg[: _FIELD_LIMITS["msg"]]
 
-    parsed_photo_time = _parse_photo_time(photo_time)
+    # Время фотофиксации: AI-время ЧЧ:ММ переопределяет переданное.
+    parsed_photo_time = _hhmm_today_utc(ai.get("time")) if ai else None
+    if parsed_photo_time is None:
+        parsed_photo_time = _parse_photo_time(photo_time)
 
     incident = Incident(
         source="max",

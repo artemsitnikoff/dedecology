@@ -1,0 +1,108 @@
+"""AI-разбор свободного текста обращения из Макс-бота через claude CLI.
+
+Пользователь Макса присылает адрес площадки ТКО одной свободной строкой
+(«Нижегородская область, г. Нижний Новгород, … улица Сергея Есенина, 38
+(Радар №116495, 26 июня 2026, 10:28)»). claude CLI извлекает из неё
+структурированные поля (регион/город/улица/координаты/время), которые затем
+стандартизируются и геокодируются через DaData (см. intake.create_incident_from_max).
+
+Используется ТОЛЬКО для приёма из Макс-бота (/intake/max). Любой сбой CLI или
+разбора JSON → None: вызывающий код деградирует на DaData Clean / эвристику.
+Функция никогда не бросает исключений.
+"""
+
+import json
+import logging
+import re
+
+from ..config import settings
+from .claude_cli import claude_cli_complete
+
+logger = logging.getLogger(__name__)
+
+# Ожидаемые ключи структурированного разбора (порядок не важен).
+_KEYS = ("region", "city", "street", "coords", "time")
+
+# Промпт собираем конкатенацией (в литерале JSON есть фигурные скобки —
+# f-string/format здесь только мешали бы). Текст обращения вставляется между
+# маркерами <<< >>>, чтобы модель не путала инструкцию с данными.
+_PROMPT_PREFIX = (
+    "Разбери обращение о площадке ТКО. Верни СТРОГО один JSON-объект без "
+    "пояснений и без markdown: "
+    '{"region": "", "city": "", "street": "", "coords": "", "time": ""}. '
+    "region — субъект РФ; city — город/населённый пункт; street — улица и дом "
+    "(+ доп. ориентиры/«Радар №…» если есть); coords — \"широта, долгота\" "
+    "ТОЛЬКО если явно есть числа координат в тексте, иначе пусто; time — время "
+    "фотофиксации в формате ЧЧ:ММ если есть, иначе пусто. Текст обращения: <<<"
+)
+_PROMPT_SUFFIX = ">>>"
+
+
+def _as_str(value) -> str:
+    """Любое значение из JSON → стрипнутая строка ('' для None)."""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _extract_json(raw: str) -> dict | None:
+    """Извлекает первый JSON-объект из ответа CLI. None при любой неудаче.
+
+    Снимает markdown-ограждения (```json … ```), отбрасывает поясняющую прозу
+    вокруг и парсит подстроку от первого `{` до последнего `}`.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+
+    # Снять markdown-ограждения, если модель всё же обернула ответ.
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z0-9]*\s*", "", s)
+        if s.endswith("```"):
+            s = s[:-3]
+        s = s.strip()
+
+    start = s.find("{")
+    end = s.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+
+    try:
+        data = json.loads(s[start : end + 1])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+async def ai_parse_incident(text: str) -> dict | None:
+    """Структурированный разбор свободного текста обращения через claude CLI.
+
+    Возвращает dict с 5 строковыми ключами (region/city/street/coords/time;
+    отсутствующие → ""). None, если текст пуст, CLI недоступен или ответ не
+    содержит валидного JSON-объекта. Никогда не бросает исключений.
+    """
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None
+
+    try:
+        raw = await claude_cli_complete(
+            prompt=_PROMPT_PREFIX + cleaned + _PROMPT_SUFFIX,
+            model=settings.CLAUDE_QUOTE_MODEL,
+            timeout=settings.CLAUDE_QUOTE_TIMEOUT,
+        )
+    except Exception as e:  # noqa: BLE001 — CLI не должен ронять приём
+        logger.warning("[incident_parse] сбой claude CLI: %s: %s", type(e).__name__, e)
+        return None
+
+    if not raw:
+        return None
+
+    data = _extract_json(raw)
+    if data is None:
+        logger.warning("[incident_parse] не удалось извлечь JSON из ответа CLI")
+        return None
+
+    return {key: _as_str(data.get(key)) for key in _KEYS}

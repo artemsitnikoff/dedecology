@@ -15,6 +15,7 @@ from app.config import settings
 from app.models import Incident
 from app.services.intake import (
     create_incident_from_form,
+    create_incident_from_max,
     create_incident_from_public_form,
 )
 
@@ -684,7 +685,10 @@ async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tm
     }
     fake_clean = AsyncMock(return_value=cleaned)
     quote = AsyncMock(return_value="«цитата о природе» — Автор")
-    with patch("app.services.intake.clean_address", new=fake_clean), patch(
+    # ai_parse_incident → None: проверяем именно путь DaData Clean (без shell-out CLI).
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=fake_clean), patch(
         "app.api.v1.intake.quotes_service.nature_quote", new=quote
     ):
         resp = await client.post(
@@ -762,7 +766,10 @@ async def test_max_intake_falls_back_to_heuristic(client, fake_session, monkeypa
 
     fake_clean = AsyncMock(return_value=None)
     quote = AsyncMock(return_value="«цитата» — Автор")
-    with patch("app.services.intake.clean_address", new=fake_clean), patch(
+    # ai_parse_incident → None: разбор уходит в DaData Clean → эвристику.
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=fake_clean), patch(
         "app.api.v1.intake.quotes_service.nature_quote", new=quote
     ):
         resp = await client.post(
@@ -784,6 +791,217 @@ async def test_max_intake_falls_back_to_heuristic(client, fake_session, monkeypa
     assert incident.street == "ул. Маяковского, 41"
     assert incident.coords == ""
     fake_clean.assert_awaited_once()
+
+
+# --------------------------------------------------------------------------- #
+# AI-разбор адреса Макс-обращения: ai_parse_incident → create_incident_from_max #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_max_service_ai_address_dadata_wins_coords(fake_session):
+    """AI извлёк адрес → DaData стандартизирует; coords/поля DaData авторитетны.
+
+    clean_address вызывается композицией region+city+street из AI; результат
+    DaData (стандартизированные поля + геокод) перекрывает «сырой» AI.
+    """
+    _max_session(fake_session)
+    ai = {
+        "region": "Нижегородская область",
+        "city": "Нижний Новгород",
+        "street": "улица Сергея Есенина, 38",
+        "coords": "",  # координат в тексте нет → AI оставил пусто
+        "time": "",
+    }
+    cleaned = {
+        "region": "Нижегородская обл",
+        "city": "г Нижний Новгород",
+        "street": "ул Сергея Есенина, д 38",
+        "coords": "56.23, 44.05",
+        "geo_lat": "56.23",
+        "geo_lon": "44.05",
+    }
+    fake_ai = AsyncMock(return_value=ai)
+    fake_clean = AsyncMock(return_value=cleaned)
+    with patch("app.services.intake.ai_parse_incident", new=fake_ai), patch(
+        "app.services.intake.clean_address", new=fake_clean
+    ):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="Нижегородская область, г. Нижний Новгород, улица Сергея Есенина, 38",
+            msg_id="m-1",
+            sender_name="Иван",
+            photo_files=[],
+        )
+
+    assert incident.source == "max"
+    assert incident.region == "Нижегородская обл"  # DaData
+    assert incident.city == "г Нижний Новгород"  # DaData
+    assert incident.street == "ул Сергея Есенина, д 38"  # DaData
+    assert incident.coords == "56.23, 44.05"  # DaData геокод авторитетен
+    fake_ai.assert_awaited_once()
+    fake_clean.assert_awaited_once()
+    addr_arg = fake_clean.call_args.args[0]
+    assert "Нижегородская область" in addr_arg
+    assert "улица Сергея Есенина, 38" in addr_arg
+
+
+@pytest.mark.asyncio
+async def test_max_service_ai_address_no_dadata_uses_ai(fake_session):
+    """AI дал адрес, DaData недоступна (None) → поля AI + координаты из AI."""
+    _max_session(fake_session)
+    ai = {
+        "region": "Нижегородская область",
+        "city": "Нижний Новгород",
+        "street": "улица Сергея Есенина, 38 (Радар №116495)",
+        "coords": "56.23, 44.05",
+        "time": "",
+    }
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="свободный текст обращения",
+            msg_id="m-2",
+            sender_name="Пётр",
+            photo_files=[],
+        )
+
+    assert incident.region == "Нижегородская область"
+    assert incident.city == "Нижний Новгород"
+    assert incident.street == "улица Сергея Есенина, 38 (Радар №116495)"
+    assert incident.coords == "56.23, 44.05"  # ai.coords как фолбэк координат
+
+
+@pytest.mark.asyncio
+async def test_max_service_ai_none_falls_back_heuristic(fake_session):
+    """ai_parse_incident → None: путь DaData Clean → эвристика (без 500), coords=''."""
+    _max_session(fake_session)
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="Самарская область, г. Кинель, ул. Маяковского, 41",
+            msg_id="m-3",
+            sender_name="Сидоров",
+            photo_files=[],
+        )
+
+    assert incident.region == "Самарская область"
+    assert incident.city == "г. Кинель"
+    assert incident.street == "ул. Маяковского, 41"
+    assert incident.coords == ""
+
+
+@pytest.mark.asyncio
+async def test_max_service_ai_time_sets_photo_time(fake_session):
+    """ai.time в формате ЧЧ:ММ → photo_time = сегодня@ЧЧ:ММ (override)."""
+    _max_session(fake_session)
+    ai = {"region": "", "city": "", "street": "", "coords": "", "time": "10:28"}
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="ул. Есенина, 38, 10:28",
+            msg_id="m-4",
+            sender_name="Аноним",
+            photo_time=None,
+            photo_files=[],
+        )
+
+    assert incident.photo_time is not None
+    assert incident.photo_time.tzinfo is not None
+    assert (incident.photo_time.hour, incident.photo_time.minute) == (10, 28)
+
+
+# --------------------------------------------------------------------------- #
+# ai_parse_incident — извлечение JSON из ответа CLI (DB-free, CLI замокан)     #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_ai_parse_incident_extracts_fenced_json():
+    """Ответ CLI в ```json …``` → распарсенный dict с 5 строковыми ключами."""
+    from app.services import incident_parse
+
+    raw = (
+        "```json\n"
+        '{"region": "Нижегородская область", "city": "Нижний Новгород", '
+        '"street": "ул. Есенина, 38", "coords": "", "time": "10:28"}\n'
+        "```"
+    )
+    with patch(
+        "app.services.incident_parse.claude_cli_complete",
+        new=AsyncMock(return_value=raw),
+    ):
+        result = await incident_parse.ai_parse_incident("какой-то свободный текст")
+
+    assert result == {
+        "region": "Нижегородская область",
+        "city": "Нижний Новгород",
+        "street": "ул. Есенина, 38",
+        "coords": "",
+        "time": "10:28",
+    }
+
+
+@pytest.mark.asyncio
+async def test_ai_parse_incident_prose_and_missing_keys():
+    """JSON в прозе + отсутствующие ключи → извлекаем, отсутствующие → ''."""
+    from app.services import incident_parse
+
+    raw = 'Вот результат: {"region": "Самарская область", "city": "Кинель"} — готово.'
+    with patch(
+        "app.services.incident_parse.claude_cli_complete",
+        new=AsyncMock(return_value=raw),
+    ):
+        result = await incident_parse.ai_parse_incident("текст")
+
+    assert result == {
+        "region": "Самарская область",
+        "city": "Кинель",
+        "street": "",
+        "coords": "",
+        "time": "",
+    }
+
+
+@pytest.mark.asyncio
+async def test_ai_parse_incident_garbage_returns_none():
+    """Ответ без JSON-объекта → None (фолбэк на DaData/эвристику)."""
+    from app.services import incident_parse
+
+    with patch(
+        "app.services.incident_parse.claude_cli_complete",
+        new=AsyncMock(return_value="это не json, извините"),
+    ):
+        assert await incident_parse.ai_parse_incident("текст") is None
+
+
+@pytest.mark.asyncio
+async def test_ai_parse_incident_cli_unavailable_returns_none():
+    """CLI недоступен (claude_cli_complete → None) → None."""
+    from app.services import incident_parse
+
+    with patch(
+        "app.services.incident_parse.claude_cli_complete",
+        new=AsyncMock(return_value=None),
+    ):
+        assert await incident_parse.ai_parse_incident("текст") is None
+
+
+@pytest.mark.asyncio
+async def test_ai_parse_incident_empty_text_skips_cli():
+    """Пустой текст → None, CLI вообще не вызывается."""
+    from app.services import incident_parse
+
+    cli = AsyncMock(return_value='{"region": "x"}')
+    with patch("app.services.incident_parse.claude_cli_complete", new=cli):
+        assert await incident_parse.ai_parse_incident("   ") is None
+    cli.assert_not_awaited()
 
 
 # --------------------------------------------------------------------------- #
