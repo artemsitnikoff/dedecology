@@ -27,13 +27,17 @@ async def push_incident(
     msg_id: str,
     sender_name: str,
     photo_bytes_list: list[bytes],
+    photo_time: str | None = None,
 ) -> dict:
     """Передаёт обращение из MAX в backend intake API и возвращает разобранный JSON.
 
-    :param text: Текст сообщения (может быть пустым, если прислали только фото).
+    :param text: Текст сообщения (адрес площадки; может быть пустым, если прислали только фото).
     :param msg_id: Идентификатор исходного сообщения MAX (mid) — для дедупликации/трейса.
     :param sender_name: Отображаемое имя отправителя (или его user_id строкой).
     :param photo_bytes_list: Байты фото (как правило, одно — первое изображение).
+    :param photo_time: Время на фото в ISO-формате "%Y-%m-%dT%H:%M" (опционально).
+        Если задано — отправляется multipart-полем `photo_time`; иначе поле не добавляется,
+        и контракт остаётся прежним.
     :raises IntakeError: при сетевой ошибке, таймауте или не-2xx ответе backend.
     """
     data = {
@@ -41,6 +45,8 @@ async def push_incident(
         "msg_id": msg_id,
         "sender_name": sender_name,
     }
+    if photo_time is not None:
+        data["photo_time"] = photo_time
     files = [
         ("photos", (f"{i}.jpg", photo, "image/jpeg"))
         for i, photo in enumerate(photo_bytes_list)
@@ -85,9 +91,10 @@ async def push_incident(
         raise IntakeError("Intake API вернул не-JSON ответ") from exc
 
     logger.info(
-        "intake accepted msg_id=%s photos=%d response=%s",
+        "intake accepted msg_id=%s photos=%d photo_time=%s response=%s",
         msg_id,
         len(photo_bytes_list),
+        photo_time,
         payload,
     )
     return payload

@@ -1,20 +1,29 @@
-"""MAX bot wiring: bot factory, attachment helpers and the message handler.
+"""MAX bot wiring: bot factory, attachment helpers and the message handlers.
 
-The handler is the only business entrypoint: it extracts the message text and
-the first photo, downloads the photo bytes, forwards everything to the backend
-intake API and replies to the user. Every failure is caught, logged and turned
-into a soft reply so the long-polling loop never dies.
+The handlers are the only business entrypoints:
+
+* `/start` and greeting/empty messages get an EXAMPLE photo + caption that shows
+  the exact address/time format we expect.
+* A valid report MUST carry BOTH a photo AND text with a time «Время ЧЧ:ММ».
+  When valid, the address (text before the time) and photo are forwarded to the
+  backend intake API; otherwise the user gets a "wrong format" hint.
+
+Every failure is caught, logged and turned into a soft reply so the long-polling
+loop never dies.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+from datetime import datetime
+from pathlib import Path
 
 import httpx
 from maxapi import Bot, Router
 from maxapi.client.default import DefaultConnectionProperties
 from maxapi.enums.attachment import AttachmentType
-from maxapi.types import MessageCreated
+from maxapi.types import CommandStart, InputMediaBuffer, MessageCreated
 from maxapi.types.attachments.image import Image
 from maxapi.types.message import Message
 
@@ -26,11 +35,53 @@ logger = logging.getLogger("dedecology.maxbot")
 
 _DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
-_REPLY_ACCEPTED = "Спасибо! Обращение принято и передано инспектору."
-_REPLY_NEED_PHOTO = (
-    "Пожалуйста, пришлите фотографию места и текстом укажите адрес — "
-    "так инспектор сможет выехать и разобраться."
+# Точный пример подписи БЕЗ опционального района — используется как образец в UI.
+EXAMPLE = (
+    "Московская область, г. Голицыно, ул. Советская д.56/2 "
+    "напротив подъезда 2. Время 19:30"
 )
+
+# Время на фото: «Время 19:30», «время 9.05» и т.п. Группы: часы и минуты.
+_TIME_RE = re.compile(r"врем[яи][\s:]*([0-2]?\d)[:.]([0-5]\d)", re.IGNORECASE)
+
+# Приветствия/команды, на которые показываем пример (текст уже .strip()/.lower()).
+_GREETINGS = {
+    "привет",
+    "здравствуйте",
+    "start",
+    "старт",
+    "начать",
+    "помощь",
+    "/help",
+    "hi",
+    "hello",
+}
+
+# Бандл-ассет с примером фото: maxbot/assets/example.jpg (рядом с пакетом).
+_EXAMPLE_IMAGE_PATH = Path(__file__).resolve().parent.parent / "assets" / "example.jpg"
+
+
+def _read_example_image() -> bytes | None:
+    """Прочитать байты примера один раз при импорте; None — если файла нет."""
+    try:
+        return _EXAMPLE_IMAGE_PATH.read_bytes()
+    except OSError:
+        logger.warning("example asset missing at %s — greeting will be text-only", _EXAMPLE_IMAGE_PATH)
+        return None
+
+
+_EXAMPLE_IMAGE_BYTES = _read_example_image()
+
+_GREETING_CAPTION = (
+    "Здравствуйте! Чтобы сообщить о площадке — пришлите ФОТО и подпись "
+    "к нему в таком формате (район можно не указывать):\n\n" + EXAMPLE
+)
+_REPLY_INVALID_FORMAT = (
+    "Неверный формат. Пришлите ФОТО площадки и подпись в формате:\n\n"
+    + EXAMPLE
+    + "\n\n(район можно не указывать)"
+)
+_REPLY_ACCEPTED = "Спасибо! Обращение принято и передано инспектору."
 _REPLY_SOFT_ERROR = (
     "Не удалось обработать обращение прямо сейчас. Пожалуйста, попробуйте "
     "отправить его ещё раз чуть позже."
@@ -60,6 +111,20 @@ def _first_image(msg: Message) -> Image | None:
         if isinstance(att, Image) or getattr(att, "type", None) == AttachmentType.IMAGE:
             return att  # type: ignore[return-value]
     return None
+
+
+def _sender_display_name(sender) -> str:
+    """Build the display name: «Имя Фамилия» or the user_id as a string."""
+    if sender is None:
+        return ""
+    first = (sender.first_name or "").strip()
+    last = (sender.last_name or "").strip()
+    return f"{first} {last}".strip() or str(sender.user_id)
+
+
+def _is_greeting(text: str) -> bool:
+    """True for an empty message or a known greeting/command word (case-insensitive)."""
+    return not text or text.lower() in _GREETINGS
 
 
 async def _download_image(image: Image, *, max_bytes: int) -> bytes:
@@ -92,45 +157,73 @@ async def _download_image(image: Image, *, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+async def _send_example(msg: Message) -> None:
+    """Reply with the EXAMPLE photo + caption; fall back to text if asset missing."""
+    if _EXAMPLE_IMAGE_BYTES is None:
+        await msg.answer(text=_GREETING_CAPTION)
+        return
+    photo = InputMediaBuffer(buffer=_EXAMPLE_IMAGE_BYTES, filename="example.jpg")
+    await msg.answer(text=_GREETING_CAPTION, attachments=[photo])
+
+
 def build_router() -> Router:
-    """Build the router with the single message_created handler."""
+    """Build the router: a `/start` handler plus the main message handler."""
     router = Router()
+
+    # ВАЖНО: /start регистрируем первым, чтобы команда не утекла в общий обработчик.
+    @router.message_created(CommandStart())
+    async def on_start(event: MessageCreated) -> None:
+        msg = event.message
+        try:
+            await _send_example(msg)
+        except Exception:  # noqa: BLE001 — poller must never die on one bad message
+            logger.exception(
+                "failed to handle /start mid=%s",
+                getattr(getattr(msg, "body", None), "mid", None),
+            )
+            await _safe_reply(msg)
 
     @router.message_created()
     async def on_message_created(event: MessageCreated) -> None:
         msg = event.message
         try:
             body = msg.body
-            text = (body.text if body else None) or ""
-            text = text.strip()
+            text = ((body.text if body else None) or "").strip()
             mid = body.mid if body else ""
-
-            sender = msg.sender
-            sender_name = ""
-            if sender is not None:
-                first = (sender.first_name or "").strip()
-                last = (sender.last_name or "").strip()
-                sender_name = f"{first} {last}".strip() or str(sender.user_id)
-
+            sender_name = _sender_display_name(msg.sender)
             image = _first_image(msg)
 
-            # Ни текста, ни фото — подсказываем, что прислать.
-            if not text and image is None:
-                await msg.answer(text=_REPLY_NEED_PHOTO)
+            # Приветствие/пустое сообщение без фото → показываем пример.
+            if image is None and _is_greeting(text):
+                await _send_example(msg)
                 return
 
-            photo_bytes_list: list[bytes] = []
+            # Строгая отправка: нужно ФОТО + время «Время ЧЧ:ММ» + непустой адрес.
             if image is not None:
-                photo = await _download_image(image, max_bytes=settings.MAX_PHOTO_BYTES)
-                photo_bytes_list.append(photo)
+                match = _TIME_RE.search(text)
+                if match:
+                    address = text[: match.start()].strip(" \t\r\n.,;")
+                    hour = int(match.group(1))
+                    minute = int(match.group(2))
+                    if address and hour <= 23:
+                        photo = await _download_image(image, max_bytes=settings.MAX_PHOTO_BYTES)
+                        photo_time = (
+                            datetime.now()
+                            .replace(hour=hour, minute=minute, second=0, microsecond=0)
+                            .strftime("%Y-%m-%dT%H:%M")
+                        )
+                        await push_incident(
+                            text=address,
+                            msg_id=str(mid),
+                            sender_name=sender_name,
+                            photo_bytes_list=[photo],
+                            photo_time=photo_time,
+                        )
+                        await msg.answer(text=_REPLY_ACCEPTED)
+                        return
 
-            await push_incident(
-                text=text,
-                msg_id=str(mid),
-                sender_name=sender_name,
-                photo_bytes_list=photo_bytes_list,
-            )
-            await msg.answer(text=_REPLY_ACCEPTED)
+            # Всё остальное (нет фото / нет времени / пустой адрес) — подсказка по формату.
+            await msg.answer(text=_REPLY_INVALID_FORMAT)
 
         except AppError as exc:
             logger.warning(
