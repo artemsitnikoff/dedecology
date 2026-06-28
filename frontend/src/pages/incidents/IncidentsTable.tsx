@@ -1,18 +1,17 @@
 import { memo } from 'react';
-import { Icon } from '@/components/ui/Icon';
 import { STATUS, SOURCE } from '@/lib/status';
-import { formatDate, formatTime, fullAddr, maxLink } from '@/lib/format';
+import { formatDate, formatTime, fullAddr } from '@/lib/format';
 import { thumbUrl } from '@/lib/photo';
 import type { IncidentListItem } from '@/api/aliases';
 import type { SortKey, SortOrder } from '@/api/hooks/useIncidents';
 
 /** Описание колонки заголовка. */
 type Head = {
-  key: SortKey | 'coords' | 'link';
+  key: SortKey | 'coords';
   label: string;
   /** Класс ячейки заголовка (ширина/flex задаётся в CSS на парных cell-классах). */
   thClass: string;
-  /** Не сортируется (Координаты, Чат). */
+  /** Не сортируется (Координаты). */
   nosort?: boolean;
 };
 
@@ -28,7 +27,6 @@ const HEADS: Head[] = [
   { key: 'coords', label: 'Координаты', thClass: 'de-inc-cell-coords', nosort: true },
   { key: 'status', label: 'Статус', thClass: 'de-inc-cell-status' },
   { key: 'source', label: 'Источник', thClass: 'de-inc-cell-source' },
-  { key: 'link', label: 'Чат', thClass: 'de-inc-cell-chat', nosort: true },
 ];
 
 function CheckMark() {
@@ -62,7 +60,6 @@ const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, o
   const sourceMeta = SOURCE[d.source];
   // Превью в строке — уменьшенная версия (thumb) для быстрой загрузки списка.
   const thumb = d.photo_urls[0] ? thumbUrl(d.photo_urls[0]) : undefined;
-  const link = maxLink(d.msg_url);
   // Короткий ID-чип (моно, uppercase); полный uuid — в title.
   const shortId = d.id.slice(0, 8).toUpperCase();
 
@@ -135,20 +132,6 @@ const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, o
           {sourceMeta.label}
         </span>
       </div>
-      <div className="de-inc-cell de-inc-cell-chat">
-        {link && (
-          <a
-            href={link}
-            target="_blank"
-            rel="noreferrer"
-            className="de-inc-chat-link"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Icon name="external-link" size={13} />
-            Макс
-          </a>
-        )}
-      </div>
     </div>
   );
 });
@@ -172,12 +155,12 @@ type Props = {
  * Слева приклеены (sticky) две зоны: чекбокс-колонка (46px, left:0) и единый блок
  * «фото · дата · время · ID» (248px, left:46) с тенью справа — суммарно ровно 294px
  * (совпадает с DRAWER_LEFT_INSET карточки). Остальные 7 колонок (Регион · Город ·
- * Адрес · Координаты · Статус · Источник · Чат) скроллятся горизонтально под
+ * Адрес · Координаты · Статус · Источник) скроллятся горизонтально под
  * замороженным блоком. Заголовок прилипает сверху, его левые зоны — слева.
  *
  * Клик по заголовку сортирует (первый клик — desc, повтор — asc), активная колонка
  * подсвечивается акцентом с индикатором ▲/▼. Замороженный блок сортирует по `date`.
- * Несортируемые: Координаты, Чат. Клик по строке открывает drawer.
+ * Несортируемые: Координаты. Клик по строке открывает drawer.
  */
 export function IncidentsTable({
   rows,
