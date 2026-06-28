@@ -1,6 +1,6 @@
 // ЭкоПульс — корневой компонент (классический React + ReactDOM.createRoot)
 function App() {
-  const { useState, useMemo } = React;
+  const { useState, useMemo, useRef } = React;
 
   const [data, setData] = useState(de.INCIDENTS.map(d => ({ ...d })));
   const [query, setQuery] = useState('');
@@ -13,7 +13,21 @@ function App() {
   const [fTo, setFTo] = useState('');
   const [selected, setSelected] = useState([]);
   const [detailId, setDetailId] = useState(null);
+  const [pulseId, setPulseId] = useState(null);
+  const [detailTop, setDetailTop] = useState(170);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const scrollRef = useRef(null);
   const [lb, setLb] = useState(null); // { id, idx }
+
+  const openDetail = (id) => {
+    const top = scrollRef.current ? Math.round(scrollRef.current.getBoundingClientRect().top) : 170;
+    setDetailTop(top);
+    setDetailLoading(true);
+    setDetailId(id);
+    setPulseId(id);
+    setTimeout(() => setPulseId(p => (p === id ? null : p)), 850);
+    setTimeout(() => setDetailLoading(false), 720);
+  };
 
   const onSort = (key) => {
     setSortDir(prev => (sortKey === key && prev === 'desc') ? 'asc' : 'desc');
@@ -75,10 +89,10 @@ function App() {
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
         {view === 'settings' ? <Settings /> : <React.Fragment>
         {/* Шапка */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 28px 14px', borderBottom: '1px solid #E6E9EC', flex: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 28px 9px', borderBottom: '1px solid #E6E9EC', flex: 'none' }}>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <h1 style={{ margin: 0, fontSize: 21, fontWeight: 600, letterSpacing: '-0.015em' }}>Инциденты</h1>
-            <div style={{ fontSize: 12, color: '#9AA3AE', marginTop: 3 }}>{counterText}</div>
+            <h1 style={{ margin: 0, fontSize: 19, fontWeight: 600, letterSpacing: '-0.015em' }}>Инциденты</h1>
+            <div style={{ fontSize: 12, color: '#9AA3AE', marginTop: 1 }}>{counterText}</div>
           </div>
           <div style={{ flex: 1 }} />
           <button className="de-btn" onClick={exportAll} style={{ height: 34, padding: '0 14px', borderRadius: 7, border: '1px solid #E6E9EC', background: '#fff', color: '#0F1620', font: 'inherit', fontSize: 13, fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
@@ -88,7 +102,7 @@ function App() {
         </div>
 
         {/* Поиск */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 28px', borderBottom: '1px solid #ECEFF2', flex: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 28px', borderBottom: '1px solid #ECEFF2', flex: 'none' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 11px', background: '#F8F9FB', border: '1px solid #E6E9EC', borderRadius: 8, width: 300 }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9AA3AE" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
             <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Поиск по адресу, ФИО, координатам…" style={{ flex: 1, minWidth: 0, border: 0, outline: 0, background: 'transparent', font: 'inherit', fontSize: 13, color: '#0F1620' }} />
@@ -102,7 +116,7 @@ function App() {
 
         {/* Панель массовых действий */}
         {selected.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 28px', background: '#EAF3FE', borderBottom: '1px solid #CFE2FB', flex: 'none', animation: 'deFade .12s ease' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 28px', background: '#EAF3FE', borderBottom: '1px solid #CFE2FB', flex: 'none', animation: 'deFade .12s ease' }}>
             <span style={{ fontSize: 13, color: '#1F7AE0', fontWeight: 600 }}>Выбрано: {selected.length}</span>
             <div style={{ width: 1, height: 16, background: '#CFE2FB' }} />
             <button className="de-btn" onClick={exportSelected} style={{ height: 30, padding: '0 13px', borderRadius: 7, border: 0, background: '#1F8A5B', color: '#fff', font: 'inherit', fontSize: 12.5, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
@@ -116,7 +130,7 @@ function App() {
         )}
 
         {/* Контент */}
-        <div className="de-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#fff' }}>
+        <div ref={scrollRef} className="de-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#fff' }}>
           {filtered.length > 0 ? (
             <IncidentsTable
               rows={filtered}
@@ -127,12 +141,13 @@ function App() {
               allSelected={allSelected}
               onToggleAll={() => setSelected(allSelected ? [] : filtered.map(d => d.id))}
               onToggleSelect={toggleSelect}
-              onOpen={setDetailId}
+              onOpen={openDetail}
+              pulseId={pulseId}
               onPhoto={(id) => setLb({ id, idx: 0 })}
             />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '80px 32px', textAlign: 'center' }}>
-              <div style={{ width: 88, height: 88, borderRadius: '50%', background: '#F4F6F8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38 }}>💚</div>
+              <div style={{ width: 88, height: 88, borderRadius: '50%', background: '#DEF5E5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 44 }}>💚</div>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Ничего не найдено</h3>
               <p style={{ margin: 0, maxWidth: 360, color: '#5B6573', fontSize: 13, lineHeight: 1.5 }}>Под заданные фильтры обращений нет. Попробуйте сбросить фильтры.</p>
               <button className="de-btn" onClick={resetFilters} style={{ height: 32, padding: '0 14px', borderRadius: 7, border: '1px solid #E6E9EC', background: '#fff', font: 'inherit', fontSize: 13, cursor: 'pointer' }}>Сбросить фильтры</button>
@@ -145,7 +160,9 @@ function App() {
       {detail && (
         <DetailDrawer
           incident={detail}
-          onClose={() => setDetailId(null)}
+          top={detailTop}
+          loading={detailLoading}
+          onClose={() => { setDetailId(null); setDetailLoading(false); }}
           onSetStatus={setStatus}
           onPhoto={(id, idx) => setLb({ id, idx })}
         />

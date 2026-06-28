@@ -24,3 +24,12 @@ body {
 .de-btn:hover  { filter: brightness(.97); }
 .de-th:hover   { color: #0F1620 !important; background: rgba(15,22,32,.03); }
 input::placeholder { color: #9AA3AE; }
+
+@keyframes deBeat { 0%,100%{transform:scale(1)} 14%{transform:scale(1.2)} 28%{transform:scale(1)} 42%{transform:scale(1.14)} 56%{transform:scale(1)} }
+@keyframes deHeartPop { 0%{opacity:.95; transform:translate(-50%,-50%) scale(.4)} 55%{opacity:1; transform:translate(-50%,-50%) scale(1.25)} 100%{opacity:0; transform:translate(-50%,-50%) scale(1.75)} }
+@keyframes deSlideL { from{transform:translateX(-100%)} to{transform:translateX(0)} }
+@keyframes deCardIn { from{transform:translateX(22px)} to{transform:translateX(0)} }
+.de-mark-heart { animation: deBeat 1.7s ease-in-out infinite; }
+.de-brand:hover .de-mark-heart { animation-duration: .75s; }
+.de-frozen { transition: background .12s ease; }
+.de-row:hover .de-frozen { background:#F4F6F8 !important; }

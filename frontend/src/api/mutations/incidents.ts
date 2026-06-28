@@ -74,7 +74,10 @@ export function useSetStatus() {
       const res = await api.patch<Incident>(`/incidents/${id}/status`, { status });
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // PATCH возвращает свежий инцидент целиком — кладём его в кеш детали,
+      // чтобы открытая карточка обновила статус мгновенно (без повторного loading).
+      qc.setQueryData(['incident', data.id], data);
       qc.invalidateQueries({ queryKey: ['incidents'] });
       qc.invalidateQueries({ queryKey: ['incidents', 'funnel'] });
     },
@@ -92,6 +95,8 @@ export function useBulkStatus() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['incidents'] });
       qc.invalidateQueries({ queryKey: ['incidents', 'funnel'] });
+      // Открытая карточка могла попасть в выборку — освежим её детали.
+      qc.invalidateQueries({ queryKey: ['incident'] });
     },
   });
 }

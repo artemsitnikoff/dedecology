@@ -536,12 +536,24 @@
 }
 
 .de-inc-row {
+  position: relative;
   display: flex;
   align-items: center;
   min-height: 58px;
   cursor: pointer;
   border-bottom: 1px solid var(--border-2);
   background: var(--bg-1);
+}
+/* пульс-сердце кликнутой строки — всплывает над фото-колонкой и гаснет */
+.de-inc-row-pulse {
+  position: absolute;
+  left: 70px;
+  top: 50%;
+  font-size: 26px;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 4;
+  animation: deHeartPop 0.85s ease-out forwards;
 }
 .de-inc-row:hover {
   background: var(--bg-panel-2);
@@ -727,23 +739,55 @@
 }
 
 /* ---------- DetailDrawer ---------- */
-.de-inc-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  background: rgba(15, 22, 32, 0.4);
-  animation: deFade 0.14s ease;
-  display: flex;
-  justify-content: flex-end;
-}
+/* Карточка — фиксированная панель НАД областью таблицы. top/left задаются inline
+   из геометрии скролл-контейнера (right/bottom — здесь). Не затемняет экран, не
+   закрывает сайдбар, левые колонки (фото·дата·время), воронку и фильтры. */
 .de-inc-drawer {
-  width: 560px;
-  max-width: 100%;
-  height: 100%;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
   background: var(--bg-1);
+  border-left: 1px solid var(--border-1);
+  box-shadow: -18px 0 44px rgba(15, 22, 32, 0.16);
   overflow-y: auto;
-  box-shadow: -16px 0 40px rgba(15, 22, 32, 0.22);
-  animation: deSlide 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: deCardIn 0.24s var(--ease-out);
+}
+.de-inc-drawer-inner {
+  animation: deFade 0.22s ease;
+}
+/* Экран загрузки детали: белый оверлей по центру с пульсом 💚. */
+.de-inc-drawer-loading {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  z-index: 5;
+}
+.de-inc-drawer-loading-mark {
+  font-size: 48px;
+  line-height: 1;
+}
+.de-inc-drawer-loading-text {
+  font-size: 13.5px;
+  color: var(--fg-2);
+  font-weight: 500;
+}
+.de-inc-drawer-error-text {
+  font-size: var(--fs-13);
+  color: var(--error-fg);
+  font-weight: 500;
+}
+/* пульс-сердце (deBeat) — общий для шапки карточки и экрана загрузки */
+.de-mark-heart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: deBeat 1.7s ease-in-out infinite;
 }
 .de-inc-drawer::-webkit-scrollbar {
   width: 10px;
@@ -769,6 +813,22 @@
   align-items: center;
   gap: var(--space-2);
   margin-bottom: 9px;
+  flex-wrap: wrap;
+}
+.de-inc-drawer-head-mark {
+  font-size: 15px;
+  line-height: 1;
+  flex: none;
+}
+/* моно-чип короткого ID обращения (полный — в title) */
+.de-inc-drawer-id {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-11);
+  color: var(--fg-2);
+  background: var(--ark-gray-100);
+  padding: 2px 8px;
+  border-radius: 5px;
 }
 .de-inc-drawer-title {
   margin: 0;
@@ -810,6 +870,12 @@
   cursor: zoom-in;
   background: var(--ark-gray-200);
   position: relative;
+}
+/* одиночное фото НЕ растягиваем на всю ширину карточки (220×156) */
+.de-inc-drawer-photos.single .de-inc-drawer-photo {
+  flex: 0 0 220px;
+  max-width: 220px;
+  height: 156px;
 }
 .de-inc-drawer-photo-img {
   position: absolute;
@@ -860,30 +926,34 @@
   font-size: var(--fs-13);
   font-weight: 600;
 }
+/* блок смены статуса — сразу под шапкой (sticky-зоной), серая полоса */
 .de-inc-drawer-status-row {
   display: flex;
-  gap: var(--space-2);
-  margin-top: 24px;
-  flex-wrap: wrap;
   align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--bg-panel-2);
 }
 .de-inc-drawer-status-label {
-  font-size: var(--fs-12);
+  font-size: 11.5px;
   color: var(--fg-3);
-  align-self: center;
   margin-right: 2px;
 }
-/* статус-чип (как de.chipStyle) внутри drawer */
+/* контекстная кнопка-переход статуса (нейтральная: точка + лейбл целевого статуса) */
 .de-inc-schip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 11px;
-  border-radius: var(--radius-full);
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
   cursor: pointer;
   font: inherit;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
   background: var(--bg-1);
   border: 1px solid var(--border-1);
   color: var(--fg-1);
@@ -891,12 +961,6 @@
 }
 .de-inc-schip:hover:not(:disabled) {
   border-color: var(--ark-gray-400);
-}
-.de-inc-schip.active {
-  font-weight: 600;
-  background: var(--ark-blue-50);
-  border-color: var(--ark-blue-100);
-  color: var(--accent);
 }
 .de-inc-schip:disabled {
   cursor: default;
@@ -986,7 +1050,7 @@
   border-radius: 999px;
 }
 
-/* анимации (локальные копии прототипных deFade/deSlide) */
+/* анимации (локальные копии прототипных deFade/deCardIn/deBeat/deHeartPop) */
 @keyframes deFade {
   from {
     opacity: 0;
@@ -995,11 +1059,46 @@
     opacity: 1;
   }
 }
-@keyframes deSlide {
+/* выезд карточки: лёгкий сдвиг слева-направо (как в прототипе) */
+@keyframes deCardIn {
   from {
-    transform: translateX(100%);
+    transform: translateX(22px);
   }
   to {
     transform: translateX(0);
+  }
+}
+/* пульс сердца (двойное «биение») */
+@keyframes deBeat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  14% {
+    transform: scale(1.2);
+  }
+  28% {
+    transform: scale(1);
+  }
+  42% {
+    transform: scale(1.14);
+  }
+  56% {
+    transform: scale(1);
+  }
+}
+/* всплеск сердца на кликнутой строке: появляется, увеличивается и гаснет */
+@keyframes deHeartPop {
+  0% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+  55% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.75);
   }
 }

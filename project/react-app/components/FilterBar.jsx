@@ -11,7 +11,7 @@ function FilterBar({ fSources, setFSources, fFrom, setFFrom, fTo, setFTo, hasFil
   const Sep = () => <div style={{ width: 1, height: 20, background: '#ECEFF2' }} />;
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', padding: '11px 28px', borderBottom: '1px solid #ECEFF2', background: '#fff', flex: 'none' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', padding: '8px 28px', borderBottom: '1px solid #ECEFF2', background: '#fff', flex: 'none' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Label>Источник</Label>
         {Object.keys(de.SOURCE).map(k => (

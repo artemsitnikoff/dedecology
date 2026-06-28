@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { useIncidents } from '@/api/hooks/useIncidents';
@@ -16,6 +16,14 @@ import './Incidents.css';
 
 /** Допустимые ключи сортировки — для валидации значения из URL. */
 const SORT_KEYS: SortKey[] = ['date', 'time', 'region', 'city', 'address', 'status', 'source'];
+
+/**
+ * Сдвиг левого края карточки внутри области таблицы: ширина «левых» колонок,
+ * которые остаются видимыми при открытом drawer (чекбокс 46 + фото 64 + дата 104 +
+ * время 80). Карточка стартует с колонки «Регион». Аналог left:494 в прототипе
+ * (там это сайдбар + замороженный блок), здесь считаем от края скролл-контейнера.
+ */
+const DRAWER_LEFT_INSET = 46 + 64 + 104 + 80;
 
 function parseSort(value: string | null): SortKey {
   return value && (SORT_KEYS as string[]).includes(value) ? (value as SortKey) : 'date';
@@ -182,7 +190,16 @@ export function IncidentsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Координаты выезда карточки — считаются из скролл-контейнера таблицы при открытии.
+  const [detailPos, setDetailPos] = useState<{ top: number; left: number }>({ top: 170, left: 0 });
+  // Подсветка кликнутой строки (пульс-сердце) на короткое время.
+  const [pulseId, setPulseId] = useState<string | null>(null);
   const [lb, setLb] = useState<{ id: string; idx: number } | null>(null);
+
+  /** Скролл-контейнер таблицы — от его геометрии считаем top/left карточки. */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** Таймер сброса пульса (чистим при повторном открытии/размонтировании). */
+  const pulseTimer = useRef<number | null>(null);
 
   // Стабильная ссылка на выделение для колбэков (сохраняет React.memo строк).
   const selectedRef = useRef(selected);
@@ -213,7 +230,34 @@ export function IncidentsPage() {
     setConfirmingDelete(false);
   }, []);
 
-  const openDetail = useCallback((id: string) => setDetailId(id), []);
+  /**
+   * Открыть карточку: считаем top (верх скролл-контейнера) и left (его левый край +
+   * ширина видимых левых колонок), запускаем drawer и короткий пульс кликнутой строки.
+   */
+  const openDetail = useCallback((id: string) => {
+    const el = scrollRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      setDetailPos({
+        top: Math.round(rect.top),
+        left: Math.round(rect.left + DRAWER_LEFT_INSET),
+      });
+    }
+    setDetailId(id);
+    setPulseId(id);
+    if (pulseTimer.current != null) window.clearTimeout(pulseTimer.current);
+    pulseTimer.current = window.setTimeout(() => {
+      setPulseId((p) => (p === id ? null : p));
+    }, 850);
+  }, []);
+
+  // Чистим таймер пульса при размонтировании страницы.
+  useEffect(() => {
+    return () => {
+      if (pulseTimer.current != null) window.clearTimeout(pulseTimer.current);
+    };
+  }, []);
+
   const openPhoto = useCallback((id: string) => setLb({ id, idx: 0 }), []);
   const openPhotoAt = useCallback((id: string, idx: number) => setLb({ id, idx }), []);
 
@@ -231,9 +275,8 @@ export function IncidentsPage() {
     ? `Показано ${total} из ${grandTotal}`
     : `${grandTotal} обращений · обновлено сегодня`;
 
-  // Инцидент для drawer/lightbox ищем в текущих строках (после смены статуса
-  // список инвалидируется и drawer показывает свежий статус).
-  const detail = detailId ? rows.find((r) => r.id === detailId) : undefined;
+  // Карточка тянет деталь сама (useIncident по detailId). Лайтбокс берёт фото
+  // из строки списка — он всегда открывается для видимой строки.
   const lbInc = lb ? rows.find((r) => r.id === lb.id) : undefined;
 
   const lbStep = useCallback(
@@ -398,7 +441,7 @@ export function IncidentsPage() {
       )}
 
       {/* Контент */}
-      <div className="de-inc-content">
+      <div className="de-inc-content" ref={scrollRef}>
         {incidentsQuery.isLoading ? (
           <div className="de-inc-state">Загрузка…</div>
         ) : incidentsQuery.isError ? (
@@ -410,6 +453,7 @@ export function IncidentsPage() {
             sort={sort}
             order={order}
             allSelected={allSelected}
+            pulseId={pulseId}
             onSort={handleSort}
             onToggleAll={toggleAll}
             onToggleSelect={toggleSelect}
@@ -430,9 +474,11 @@ export function IncidentsPage() {
         )}
       </div>
 
-      {detail && (
+      {detailId && (
         <DetailDrawer
-          incident={detail}
+          id={detailId}
+          top={detailPos.top}
+          left={detailPos.left}
           onClose={() => setDetailId(null)}
           onPhoto={openPhotoAt}
         />

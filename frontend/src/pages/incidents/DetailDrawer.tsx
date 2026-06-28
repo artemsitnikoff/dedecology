@@ -2,32 +2,79 @@ import { Icon } from '@/components/ui/Icon';
 import { STATUS, SOURCE } from '@/lib/status';
 import { formatDate, formatTime, fullAddr, maxLink } from '@/lib/format';
 import { thumbUrl } from '@/lib/photo';
+import { useIncident } from '@/api/hooks/useIncident';
 import { useSetStatus } from '@/api/mutations/incidents';
-import type { IncidentListItem, Status } from '@/api/aliases';
+import type { Incident, Status } from '@/api/aliases';
 
 type Props = {
-  /** Данные строки списка (включая comment — прочую не-адресную инфу). */
-  incident: IncidentListItem;
+  /** id открываемого инцидента — по нему делаем реальный GET /incidents/{id}. */
+  id: string;
+  /** Координаты выезда: top = верх скролл-контейнера таблицы, left = после левых колонок. */
+  top: number;
+  left: number;
   onClose: () => void;
   /** Открыть фото в лайтбоксе по индексу. */
   onPhoto: (id: string, idx: number) => void;
 };
 
-/** Порядок статус-чипов смены статуса (все 4 статуса). */
-const STATUS_KEYS: Status[] = ['new', 'found', 'none', 'exported'];
+/**
+ * Контекстные переходы статуса (из ТЗ): из текущего показываем только осмысленные.
+ * new → [found, none] · found → [new, exported] · none → [new, found] · exported → [found, new].
+ */
+const TRANSITIONS: Record<Status, Status[]> = {
+  new: ['found', 'none'],
+  found: ['new', 'exported'],
+  none: ['new', 'found'],
+  exported: ['found', 'new'],
+};
 
 /**
- * Карточка инцидента — выезжает справа (560px) поверх затемнения.
- * Шапка: пилюли источник+статус, заголовок = полный адрес, ✕.
- * Фото → лайтбокс. Поля по контракту. Для Макса — ссылка на сообщение.
- * Чипы смены статуса (active = текущий) → useSetStatus с live-обновлением.
+ * Карточка инцидента — выезжает справа НАД областью таблицы (position:fixed),
+ * не закрывая сайдбар, левые колонки (фото·дата·время), воронку и фильтры.
+ * При открытии делает реальный запрос детали; пока isLoading — белый экран
+ * с пульсом 💚. Контент: шапка (пилюли+ID+адрес) → контекстная смена статуса →
+ * фото → дашед-поля → ссылка на Макс. Смена статуса — useSetStatus (live-обновление).
  */
-export function DetailDrawer({ incident: d, onClose, onPhoto }: Props) {
+export function DetailDrawer({ id, top, left, onClose, onPhoto }: Props) {
+  const { data, isLoading, isError } = useIncident(id);
+
+  return (
+    <div className="de-inc-drawer" style={{ top, left }}>
+      {isLoading ? (
+        <div className="de-inc-drawer-loading">
+          <span className="de-mark-heart de-inc-drawer-loading-mark">💚</span>
+          <span className="de-inc-drawer-loading-text">Загрузка…</span>
+        </div>
+      ) : isError || !data ? (
+        <div className="de-inc-drawer-loading">
+          <span className="de-inc-drawer-error-text">Не удалось загрузить обращение.</span>
+          <button type="button" className="de-inc-empty-btn" onClick={onClose}>
+            Закрыть
+          </button>
+        </div>
+      ) : (
+        <DrawerContent d={data} onClose={onClose} onPhoto={onPhoto} />
+      )}
+    </div>
+  );
+}
+
+type ContentProps = {
+  d: Incident;
+  onClose: () => void;
+  onPhoto: (id: string, idx: number) => void;
+};
+
+/** Содержимое карточки (рендерится только когда деталь загружена). */
+function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
   const setStatus = useSetStatus();
   const statusMeta = STATUS[d.status];
   const sourceMeta = SOURCE[d.source];
   const link = maxLink(d.msg_url);
   const addr = fullAddr(d);
+  const shortId = d.id.slice(0, 8).toUpperCase();
+  const single = d.photo_urls.length === 1;
+  const actions = TRANSITIONS[d.status];
 
   const fields: Array<[string, string]> = [
     ['Заявитель', d.fio],
@@ -37,99 +84,101 @@ export function DetailDrawer({ incident: d, onClose, onPhoto }: Props) {
     ['Координаты', d.coords],
     ['Дата фотофиксации', formatDate(d.photo_time)],
     ['Время фотофиксации', formatTime(d.photo_time)],
-    ['Фотографий площадки', String(d.photos)],
+    ['Кол-во фото', String(d.photos)],
     ['Источник', sourceMeta.label],
     ['Поступило', `${formatDate(d.received_at)} ${formatTime(d.received_at)}`.trim()],
   ];
 
   return (
-    <div className="de-inc-overlay" onClick={onClose}>
-      <div className="de-inc-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="de-inc-drawer-head">
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="de-inc-drawer-pills">
-              <span className="de-inc-pill" style={{ background: sourceMeta.bg, color: sourceMeta.fg }}>
-                {sourceMeta.label}
-              </span>
-              <span className="de-inc-pill" style={{ background: statusMeta.bg, color: statusMeta.fg }}>
-                <span className="de-inc-pill-dot" style={{ background: statusMeta.dot }} />
-                {statusMeta.label}
-              </span>
-            </div>
-            <h2 className="de-inc-drawer-title">{addr}</h2>
+    <div className="de-inc-drawer-inner">
+      {/* Шапка (sticky): сердце + пилюли + ID + полный адрес + крестик. */}
+      <div className="de-inc-drawer-head">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="de-inc-drawer-pills">
+            <span className="de-mark-heart de-inc-drawer-head-mark">💚</span>
+            <span className="de-inc-pill" style={{ background: sourceMeta.bg, color: sourceMeta.fg }}>
+              {sourceMeta.label}
+            </span>
+            <span className="de-inc-pill" style={{ background: statusMeta.bg, color: statusMeta.fg }}>
+              <span className="de-inc-pill-dot" style={{ background: statusMeta.dot }} />
+              {statusMeta.label}
+            </span>
+            <span className="de-inc-drawer-id" title={d.id}>
+              ID {shortId}
+            </span>
           </div>
-          <button type="button" className="de-inc-drawer-close" aria-label="Закрыть" onClick={onClose}>
-            <Icon name="x" size={18} />
-          </button>
+          <h2 className="de-inc-drawer-title">{addr}</h2>
         </div>
+        <button type="button" className="de-inc-drawer-close" aria-label="Закрыть" onClick={onClose}>
+          <Icon name="x" size={18} />
+        </button>
+      </div>
 
-        <div className="de-inc-drawer-body">
-          {d.photo_urls.length > 0 && (
-            <div className="de-inc-drawer-photos">
-              {d.photo_urls.map((src, i) => (
+      {/* Контекстная смена статуса — сразу под шапкой. */}
+      {actions.length > 0 && (
+        <div className="de-inc-drawer-status-row">
+          <span className="de-inc-drawer-status-label">Сменить статус:</span>
+          {actions.map((k) => {
+            const meta = STATUS[k];
+            return (
+              <button
+                key={k}
+                type="button"
+                className="de-inc-schip"
+                disabled={setStatus.isPending}
+                onClick={() => setStatus.mutate({ id: d.id, status: k })}
+              >
+                <span className="de-inc-pill-dot" style={{ background: meta.dot }} />
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="de-inc-drawer-body">
+        {d.photo_urls.length > 0 && (
+          <div className={`de-inc-drawer-photos ${single ? 'single' : ''}`}>
+            {d.photo_urls.map((src, i) => (
+              <div key={i} className="de-inc-drawer-photo" onClick={() => onPhoto(d.id, i)}>
+                {/* Превью — thumb (быстро); клик открывает лайтбокс с FULL по индексу. */}
                 <div
-                  key={i}
-                  className="de-inc-drawer-photo"
-                  onClick={() => onPhoto(d.id, i)}
-                >
-                  {/* Превью — thumb (быстро); клик открывает лайтбокс с FULL по индексу. */}
-                  <div className="de-inc-drawer-photo-img" style={{ backgroundImage: `url("${thumbUrl(src)}")` }} />
-                  <span className="de-inc-drawer-photo-label">Фото {i + 1}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {fields.map(([k, v]) => (
-              <div key={k} className="de-inc-field">
-                <div className="de-inc-field-key">{k}</div>
-                <div className="de-inc-field-val">{v}</div>
+                  className="de-inc-drawer-photo-img"
+                  style={{ backgroundImage: `url("${thumbUrl(src)}")` }}
+                />
+                <span className="de-inc-drawer-photo-label">Фото {i + 1}</span>
               </div>
             ))}
-            {/* Комментарий — только если непустой; длинный/многострочный текст переносится. */}
-            {!!d.comment?.trim() && (
-              <div className="de-inc-field">
-                <div className="de-inc-field-key">Комментарий</div>
-                <div
-                  className="de-inc-field-val"
-                  style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-                >
-                  {d.comment}
-                </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {fields.map(([k, v]) => (
+            <div key={k} className="de-inc-field">
+              <div className="de-inc-field-key">{k}</div>
+              <div className="de-inc-field-val">{v}</div>
+            </div>
+          ))}
+          {/* Комментарий — только если непустой; длинный/многострочный текст переносится. */}
+          {!!d.comment?.trim() && (
+            <div className="de-inc-field">
+              <div className="de-inc-field-key">Комментарий</div>
+              <div
+                className="de-inc-field-val"
+                style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+              >
+                {d.comment}
               </div>
-            )}
-          </div>
-
-          {link && (
-            <a href={link} target="_blank" rel="noreferrer" className="de-inc-drawer-maxlink">
-              <Icon name="external-link" size={16} />
-              Открыть сообщение в Максе
-            </a>
+            </div>
           )}
-
-          <div className="de-inc-drawer-status-row">
-            <span className="de-inc-drawer-status-label">Сменить статус:</span>
-            {STATUS_KEYS.map((k) => {
-              const meta = STATUS[k];
-              const active = d.status === k;
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  className={`de-inc-schip ${active ? 'active' : ''}`}
-                  disabled={setStatus.isPending}
-                  onClick={() => {
-                    if (!active) setStatus.mutate({ id: d.id, status: k });
-                  }}
-                >
-                  <span className="de-inc-pill-dot" style={{ background: meta.dot }} />
-                  {meta.label}
-                </button>
-              );
-            })}
-          </div>
         </div>
+
+        {link && (
+          <a href={link} target="_blank" rel="noreferrer" className="de-inc-drawer-maxlink">
+            <Icon name="external-link" size={16} />
+            Открыть сообщение в Максе
+          </a>
+        )}
       </div>
     </div>
   );

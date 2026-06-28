@@ -50,13 +50,15 @@ function SortArrows({ on, order }: { on: boolean; order: SortOrder }) {
 type RowProps = {
   d: IncidentListItem;
   selected: boolean;
+  /** Кратковременный пульс кликнутой строки (всплывает 💚) при открытии карточки. */
+  pulse: boolean;
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onPhoto: (id: string) => void;
 };
 
 /** Строка таблицы — мемоизирована, чтобы не перерисовывать весь список при выделении одной. */
-const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, onPhoto }: RowProps) {
+const IncidentRow = memo(function IncidentRow({ d, selected, pulse, onToggle, onOpen, onPhoto }: RowProps) {
   const statusMeta = STATUS[d.status];
   const sourceMeta = SOURCE[d.source];
   // Превью в строке — уменьшенная версия (thumb) для быстрой загрузки списка.
@@ -68,6 +70,8 @@ const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, o
       className={`de-inc-row ${selected ? 'selected' : ''}`}
       onClick={() => onOpen(d.id)}
     >
+      {/* Пульс-сердце при открытии карточки (всплывает над фото и гаснет). */}
+      {pulse && <span className="de-inc-row-pulse">💚</span>}
       <div className="de-inc-row-checkbox">
         <div
           className={`de-inc-check ${selected ? 'checked' : ''}`}
@@ -145,6 +149,8 @@ type Props = {
   sort: SortKey;
   order: SortOrder;
   allSelected: boolean;
+  /** id строки, которую сейчас «пульсим» (открыли карточку), или null. */
+  pulseId: string | null;
   onSort: (key: SortKey) => void;
   onToggleAll: () => void;
   onToggleSelect: (id: string) => void;
@@ -164,6 +170,7 @@ export function IncidentsTable({
   sort,
   order,
   allSelected,
+  pulseId,
   onSort,
   onToggleAll,
   onToggleSelect,
@@ -200,6 +207,7 @@ export function IncidentsTable({
           key={d.id}
           d={d}
           selected={selected.has(d.id)}
+          pulse={pulseId === d.id}
           onToggle={onToggleSelect}
           onOpen={onOpen}
           onPhoto={onPhoto}

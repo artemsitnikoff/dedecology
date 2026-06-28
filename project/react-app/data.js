@@ -13,19 +13,19 @@
   const NOW = new Date('2026-04-26T19:00:00');
 
   const INCIDENTS = [
-    { id:'i01', source:'max',  status:'found', fio:'Громов Сергей Петрович', region:'Самарская область', city:'пгт Усть-Кинельский', street:'Бульварная улица, 18 (Радар №116320)', coords:'53.231410, 50.166820', photoTime:'25.04.2026, 09:14', photos:2, msg:'max-msg-116320', dateRaw:'2026-04-26 08:42' },
-    { id:'i02', source:'form', status:'new',   fio:'Андреева Мария Игоревна', region:'Новгородская область', city:'Великий Новгород', street:'ул. Радужная, 15', coords:'55.859624, 37.663597', photoTime:'26.04.2026, 11:30', photos:3, msg:'', dateRaw:'2026-04-26 11:48' },
-    { id:'i03', source:'max',  status:'new',   fio:'Сидоров Иван Алексеевич', region:'Самарская область', city:'г. Кинель', street:'ул. Маяковского, 41 (Радар №118044)', coords:'53.222900, 50.629100', photoTime:'26.04.2026, 08:05', photos:1, msg:'max-msg-118044', dateRaw:'2026-04-26 08:11' },
-    { id:'i04', source:'form', status:'found', fio:'Кузнецова Ольга Дмитриевна', region:'Москва', city:'Зеленоград', street:'корпус 1462', coords:'55.991400, 37.214700', photoTime:'25.04.2026, 17:22', photos:3, msg:'', dateRaw:'2026-04-25 17:40' },
-    { id:'i05', source:'max',  status:'none',  fio:'Морозов Дмитрий Олегович', region:'Самарская область', city:'с. Сырейка', street:'ул. Центральная, 7 (Радар №115980)', coords:'53.301200, 50.420000', photoTime:'24.04.2026, 14:48', photos:2, msg:'max-msg-115980', dateRaw:'2026-04-24 15:02' },
-    { id:'i06', source:'form', status:'exported', fio:'Петров Алексей Юрьевич', region:'Санкт-Петербург', city:'Санкт-Петербург', street:'пр. Космонавтов, 28', coords:'59.852300, 30.350100', photoTime:'22.04.2026, 10:05', photos:2, msg:'', dateRaw:'2026-04-22 10:20' },
-    { id:'i07', source:'max',  status:'found', fio:'Васильева Наталья Сергеевна', region:'Самарская область', city:'пгт Усть-Кинельский', street:'Спортивная улица, 4 (Радар №116401)', coords:'53.232000, 50.170300', photoTime:'26.04.2026, 07:51', photos:3, msg:'max-msg-116401', dateRaw:'2026-04-26 07:55' },
-    { id:'i08', source:'form', status:'new',   fio:'Орлов Михаил Викторович', region:'Республика Татарстан', city:'Казань', street:'ул. Чистопольская, 61А', coords:'55.821700, 49.111300', photoTime:'26.04.2026, 12:40', photos:1, msg:'', dateRaw:'2026-04-26 12:51' },
-    { id:'i09', source:'max',  status:'exported', fio:'Зайцева Екатерина Павловна', region:'Самарская область', city:'г. Кинель', street:'ул. 27 Партсъезда, 1Б (Радар №117210)', coords:'53.220100, 50.638400', photoTime:'21.04.2026, 16:18', photos:2, msg:'max-msg-117210', dateRaw:'2026-04-21 16:30' },
-    { id:'i10', source:'form', status:'none',  fio:'Лебедев Артём Романович', region:'Нижегородская область', city:'Нижний Новгород', street:'ул. Бекетова, 13', coords:'56.288800, 43.991200', photoTime:'23.04.2026, 09:36', photos:2, msg:'', dateRaw:'2026-04-23 09:50' },
-    { id:'i11', source:'max',  status:'found', fio:'Соколова Анна Витальевна', region:'Самарская область', city:'пос. Алексеевка', street:'ул. Невская, 22 (Радар №116770)', coords:'53.181000, 50.020500', photoTime:'26.04.2026, 06:42', photos:3, msg:'max-msg-116770', dateRaw:'2026-04-26 06:48' },
-    { id:'i12', source:'form', status:'new',   fio:'Никитин Павел Андреевич', region:'Свердловская область', city:'Екатеринбург', street:'ул. Сулимова, 38', coords:'56.851200, 60.617900', photoTime:'25.04.2026, 19:10', photos:2, msg:'', dateRaw:'2026-04-25 19:22' },
-    { id:'i13', source:'max',  status:'exported', fio:'Фёдорова Юлия Олеговна', region:'Самарская область', city:'г. Кинель', street:'ул. Фестивальная, 9 (Радар №117905)', coords:'53.225600, 50.641000', photoTime:'20.04.2026, 13:27', photos:1, msg:'max-msg-117905', dateRaw:'2026-04-20 13:35' },
+    { id:'i01', source:'max',  status:'found', fio:'Громов Сергей Петрович', phone:'+7 927 614-22-08', region:'Самарская область', city:'пгт Усть-Кинельский', street:'Бульварная улица, 18 (Радар №116320)', coords:'53.231410, 50.166820', photoTime:'25.04.2026, 09:14', photos:2, msg:'max-msg-116320', dateRaw:'2026-04-26 08:42' },
+    { id:'i02', source:'form', status:'new',   fio:'Андреева Мария Игоревна', phone:'+7 911 700-31-45', region:'Новгородская область', city:'Великий Новгород', street:'ул. Радужная, 15', coords:'55.859624, 37.663597', photoTime:'26.04.2026, 11:30', photos:3, msg:'', dateRaw:'2026-04-26 11:48' },
+    { id:'i03', source:'max',  status:'new',   fio:'Сидоров Иван Алексеевич', phone:'+7 927 330-18-72', region:'Самарская область', city:'г. Кинель', street:'ул. Маяковского, 41 (Радар №118044)', coords:'53.222900, 50.629100', photoTime:'26.04.2026, 08:05', photos:1, msg:'max-msg-118044', dateRaw:'2026-04-26 08:11' },
+    { id:'i04', source:'form', status:'found', fio:'Кузнецова Ольга Дмитриевна', phone:'+7 916 245-09-63', region:'Москва', city:'Зеленоград', street:'корпус 1462', coords:'55.991400, 37.214700', photoTime:'25.04.2026, 17:22', photos:3, msg:'', dateRaw:'2026-04-25 17:40' },
+    { id:'i05', source:'max',  status:'none',  fio:'Морозов Дмитрий Олегович', phone:'+7 937 512-44-19', region:'Самарская область', city:'с. Сырейка', street:'ул. Центральная, 7 (Радар №115980)', coords:'53.301200, 50.420000', photoTime:'24.04.2026, 14:48', photos:2, msg:'max-msg-115980', dateRaw:'2026-04-24 15:02' },
+    { id:'i06', source:'form', status:'exported', fio:'Петров Алексей Юрьевич', phone:'+7 921 158-77-30', region:'Санкт-Петербург', city:'Санкт-Петербург', street:'пр. Космонавтов, 28', coords:'59.852300, 30.350100', photoTime:'22.04.2026, 10:05', photos:2, msg:'', dateRaw:'2026-04-22 10:20' },
+    { id:'i07', source:'max',  status:'found', fio:'Васильева Наталья Сергеевна', phone:'+7 927 880-15-26', region:'Самарская область', city:'пгт Усть-Кинельский', street:'Спортивная улица, 4 (Радар №116401)', coords:'53.232000, 50.170300', photoTime:'26.04.2026, 07:51', photos:3, msg:'max-msg-116401', dateRaw:'2026-04-26 07:55' },
+    { id:'i08', source:'form', status:'new',   fio:'Орлов Михаил Викторович', phone:'+7 917 390-62-51', region:'Республика Татарстан', city:'Казань', street:'ул. Чистопольская, 61А', coords:'55.821700, 49.111300', photoTime:'26.04.2026, 12:40', photos:1, msg:'', dateRaw:'2026-04-26 12:51' },
+    { id:'i09', source:'max',  status:'exported', fio:'Зайцева Екатерина Павловна', phone:'+7 937 204-88-13', region:'Самарская область', city:'г. Кинель', street:'ул. 27 Партсъезда, 1Б (Радар №117210)', coords:'53.220100, 50.638400', photoTime:'21.04.2026, 16:18', photos:2, msg:'max-msg-117210', dateRaw:'2026-04-21 16:30' },
+    { id:'i10', source:'form', status:'none',  fio:'Лебедев Артём Романович', phone:'+7 920 611-47-95', region:'Нижегородская область', city:'Нижний Новгород', street:'ул. Бекетова, 13', coords:'56.288800, 43.991200', photoTime:'23.04.2026, 09:36', photos:2, msg:'', dateRaw:'2026-04-23 09:50' },
+    { id:'i11', source:'max',  status:'found', fio:'Соколова Анна Витальевна', phone:'+7 927 145-53-67', region:'Самарская область', city:'пос. Алексеевка', street:'ул. Невская, 22 (Радар №116770)', coords:'53.181000, 50.020500', photoTime:'26.04.2026, 06:42', photos:3, msg:'max-msg-116770', dateRaw:'2026-04-26 06:48' },
+    { id:'i12', source:'form', status:'new',   fio:'Никитин Павел Андреевич', phone:'+7 922 776-20-44', region:'Свердловская область', city:'Екатеринбург', street:'ул. Сулимова, 38', coords:'56.851200, 60.617900', photoTime:'25.04.2026, 19:10', photos:2, msg:'', dateRaw:'2026-04-25 19:22' },
+    { id:'i13', source:'max',  status:'exported', fio:'Фёдорова Юлия Олеговна', phone:'+7 937 901-36-58', region:'Самарская область', city:'г. Кинель', street:'ул. Фестивальная, 9 (Радар №117905)', coords:'53.225600, 50.641000', photoTime:'20.04.2026, 13:27', photos:1, msg:'max-msg-117905', dateRaw:'2026-04-20 13:35' },
   ];
 
   function initials(name) { const p = name.split(/\s+/); return ((p[0] || '')[0] || '') + ((p[1] || '')[0] || ''); }
@@ -71,7 +71,9 @@
 
   function toCsv(rows) {
     const cols = [
+      ['ID', d => d.id.toUpperCase()],
       ['ФИО', d => d.fio],
+      ['Телефон', d => d.phone],
       ['Источник', d => SOURCE[d.source].label],
       ['Статус', d => STATUS[d.status].label],
       ['Регион', d => d.region],
