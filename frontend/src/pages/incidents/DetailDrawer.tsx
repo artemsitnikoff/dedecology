@@ -6,6 +6,7 @@ import { useSetStatus } from '@/api/mutations/incidents';
 import type { IncidentListItem, Status } from '@/api/aliases';
 
 type Props = {
+  /** Данные строки списка (включая comment — прочую не-адресную инфу). */
   incident: IncidentListItem;
   onClose: () => void;
   /** Открыть фото в лайтбоксе по индексу. */
@@ -86,6 +87,18 @@ export function DetailDrawer({ incident: d, onClose, onPhoto }: Props) {
                 <div className="de-inc-field-val">{v}</div>
               </div>
             ))}
+            {/* Комментарий — только если непустой; длинный/многострочный текст переносится. */}
+            {!!d.comment?.trim() && (
+              <div className="de-inc-field">
+                <div className="de-inc-field-key">Комментарий</div>
+                <div
+                  className="de-inc-field-val"
+                  style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                >
+                  {d.comment}
+                </div>
+              </div>
+            )}
           </div>
 
           {link && (

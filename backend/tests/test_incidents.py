@@ -45,6 +45,7 @@ def _detail(**kw):
         city="г. Кинель",
         street="ул. Маяковского, 41",
         coords="53.2229, 50.6291",
+        comment="Радар №116434; Баки раздельного сбора отсутствуют",
         photo_time=datetime(2026, 4, 26, 8, 5, tzinfo=timezone.utc),
         photos=1,
         photo_urls=["placeholder://incident-photo/1"],
@@ -145,6 +146,7 @@ async def test_get_incident_by_id(client):
     assert body["id"] == str(detail.id)
     assert body["bins"] is None
     assert body["msg_url"] == "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
+    assert body["comment"] == "Радар №116434; Баки раздельного сбора отсутствуют"
 
 
 @pytest.mark.asyncio

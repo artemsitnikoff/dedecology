@@ -76,6 +76,11 @@ def _build_message(incident: dict) -> str:
     if url.startswith("http"):
         lines.append(f"Сообщение: {url}")
 
+    # Прочая не-адресная инфа из текста обращения (радар, описание проблемы, заметки).
+    comment = (incident.get("comment") or "").strip()
+    if comment:
+        lines.append(f"Комментарий: {comment}")
+
     lines.append("")
     lines.append("Спасибо!")
 

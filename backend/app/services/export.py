@@ -1,4 +1,4 @@
-"""Серверный экспорт инцидентов в .xlsx (openpyxl). 14 колонок в порядке ТЗ §7 + ссылка на фото."""
+"""Серверный экспорт инцидентов в .xlsx (openpyxl). 15 колонок в порядке ТЗ §7 + ссылка на фото + комментарий."""
 
 from io import BytesIO
 from typing import Iterable
@@ -29,6 +29,7 @@ _HEADERS = [
     "Адрес (улица)",
     "Полный адрес",
     "Координаты",
+    "Комментарий",
     "Дата фотофиксации",
     "Время фотофиксации",
     "Кол-во фото",
@@ -96,6 +97,7 @@ def _row(inc: Incident, base_url: str) -> list:
         inc.street,
         _full_addr(inc),
         inc.coords,
+        inc.comment or "",
         _photo_date(inc),
         _photo_time(inc),
         inc.photos,
@@ -106,7 +108,7 @@ def _row(inc: Incident, base_url: str) -> list:
 
 
 def build_xlsx(rows: Iterable[Incident], base_url: str = "") -> bytes:
-    """Строит .xlsx (bytes) из инцидентов. 14 колонок, первая строка — заголовки.
+    """Строит .xlsx (bytes) из инцидентов. 15 колонок, первая строка — заголовки.
 
     base_url (схема+домен, напр. https://ecopulse.reo.ru) — для абсолютных ссылок на фото.
     """

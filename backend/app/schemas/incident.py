@@ -19,6 +19,7 @@ class IncidentListItem(ORMBase):
     city: str
     street: str
     coords: str
+    comment: str | None = None
     photo_time: Optional[datetime]
     photos: int
     photo_urls: list[str]
@@ -37,6 +38,7 @@ class IncidentDetail(ORMBase):
     city: str
     street: str
     coords: str
+    comment: str | None = None
     photo_time: Optional[datetime]
     photos: int
     photo_urls: list[str]
@@ -91,6 +93,7 @@ class PendingNotifyItem(ORMBase):
     city: str
     street: str
     coords: str
+    comment: str | None = None
     photo_time: Optional[datetime]
     photo_urls: list[str]
     msg: Optional[str]

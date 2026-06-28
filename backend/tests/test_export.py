@@ -8,9 +8,11 @@ from openpyxl import load_workbook
 from app.models import Incident
 from app.services.export import build_xlsx
 
-# 0-based индексы колонок (добавлена «Ссылка на фото» между «Кол-во фото» и «Ссылка на сообщение»).
-_PHOTO_LINK_COL = 11  # «Ссылка на фото»
-_MSG_LINK_COL = 12  # «Ссылка на сообщение»
+# 0-based индексы колонок («Комментарий» добавлен после «Координаты» → сдвиг
+# «Ссылка на фото»/«Ссылка на сообщение» на +1).
+_COMMENT_COL = 8  # «Комментарий» (сразу после «Координаты»)
+_PHOTO_LINK_COL = 12  # «Ссылка на фото»
+_MSG_LINK_COL = 13  # «Ссылка на сообщение»
 
 
 def _incident(**kw) -> Incident:
@@ -90,3 +92,33 @@ def test_export_has_photo_link_header():
     headers = [c.value for c in next(ws.iter_rows(max_row=1))]
     assert headers[_PHOTO_LINK_COL] == "Ссылка на фото"
     assert headers[_MSG_LINK_COL] == "Ссылка на сообщение"
+
+
+def _comment_cells(rows: list[Incident]) -> list:
+    """Значения колонки «Комментарий» (без строки заголовков)."""
+    wb = load_workbook(BytesIO(build_xlsx(rows)))
+    ws = wb.active
+    return [row[_COMMENT_COL].value for row in ws.iter_rows(min_row=2)]
+
+
+def test_export_has_comment_header():
+    """Заголовок «Комментарий» на месте — сразу после «Координаты»."""
+    wb = load_workbook(BytesIO(build_xlsx([])))
+    ws = wb.active
+    headers = [c.value for c in next(ws.iter_rows(max_row=1))]
+    assert headers[_COMMENT_COL] == "Комментарий"
+    assert headers[_COMMENT_COL - 1] == "Координаты"
+
+
+def test_export_writes_comment_value():
+    """Непустой comment попадает в колонку «Комментарий» как есть."""
+    inc = _incident(comment="Радар №116434; Баки раздельного сбора отсутствуют")
+    assert _comment_cells([inc]) == [
+        "Радар №116434; Баки раздельного сбора отсутствуют"
+    ]
+
+
+def test_export_blank_comment_writes_empty():
+    """comment=None → пустая колонка (openpyxl отдаёт None для '')."""
+    inc = _incident(comment=None)
+    assert _comment_cells([inc])[0] in (None, "")

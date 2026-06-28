@@ -62,8 +62,8 @@ async def reprocess(session: AsyncSession, *, apply: bool, process_all: bool) ->
     for inc in incidents:
         scanned += 1
         try:
-            old_region, old_city, old_street, old_coords = (
-                inc.region, inc.city, inc.street, inc.coords,
+            old_region, old_city, old_street, old_coords, old_comment = (
+                inc.region, inc.city, inc.street, inc.coords, inc.comment,
             )
             # Восстанавливаем текст адреса из непустых полей.
             text = ", ".join(
@@ -91,32 +91,39 @@ async def reprocess(session: AsyncSession, *, apply: bool, process_all: bool) ->
             new_coords = new_coords[:_COORDS_MAX]
             # coords переписываем ТОЛЬКО если новое непустое (не теряем геокод).
             final_coords = new_coords or old_coords
+            # comment: «прочая» не-адресная инфа из текста (AI). Обновляем ТОЛЬКО
+            # если новый непустой — не затираем существующий пустым.
+            new_comment = _nz(ai.get("comment")) if isinstance(ai, dict) else ""
+            final_comment = new_comment or old_comment
 
-            if (new_region, new_city, new_street, final_coords) == (
-                old_region, old_city, old_street, old_coords,
+            if (new_region, new_city, new_street, final_coords, final_comment) == (
+                old_region, old_city, old_street, old_coords, old_comment,
             ):
                 continue  # без изменений
 
             changed += 1
             logger.info(
-                "%s: было [%s | %s | %s | %s] → стало [%s | %s | %s | %s]",
+                "%s: было [%s | %s | %s | %s | %s] → стало [%s | %s | %s | %s | %s]",
                 inc.id,
-                old_region, old_city, old_street, old_coords,
-                new_region, new_city, new_street, final_coords,
+                old_region, old_city, old_street, old_coords, old_comment,
+                new_region, new_city, new_street, final_coords, final_comment,
             )
 
             if apply:
                 before = {
                     "region": old_region, "city": old_city,
                     "street": old_street, "coords": old_coords,
+                    "comment": old_comment,
                 }
                 inc.region = new_region
                 inc.city = new_city
                 inc.street = new_street
                 inc.coords = final_coords
+                inc.comment = final_comment
                 after = {
                     "region": new_region, "city": new_city,
                     "street": new_street, "coords": final_coords,
+                    "comment": final_comment,
                 }
                 await audit(
                     session,

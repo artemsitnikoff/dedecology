@@ -32,6 +32,10 @@ class Incident(Base, TimestampMixin):
     street: Mapped[str] = mapped_column(String(500), nullable=False, server_default=text("''"))
     # "lat, lon" текстом
     coords: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))
+    # ПРОЧАЯ не-адресная информация из свободного текста обращения: «Радар №…»,
+    # ФИО заявителя (если есть в тексте), описание проблемы («Баки раздельного
+    # сбора отсутствуют»), заметки. Раньше AI это выкидывал; NULL — нет/не извлечено.
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # дата/время фотофиксации (ключ сортировки + фильтра периода)
     photo_time: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     photos: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))

@@ -37,6 +37,8 @@ export interface Incident {
   msg: string | null;
   /** Готовый https-URL сообщения Макс (формат https://max.ru/c/{chat_id}/{web_id}); null/пусто — ссылку не показываем. Строится на бэке, на FE больше не собирается. */
   msg_url: string | null;
+  /** Прочая не-адресная информация из текста обращения (Радар №…, ФИО заявителя, описание проблемы, заметки); null/пусто — не показываем. */
+  comment: string | null;
   /** Форма «баки раздельного сбора»; null для Макса. Скрыто в таблице (ТЗ §11), есть в модели. */
   bins: boolean | null;
   /** ISO-строка — «поступило». */
@@ -62,6 +64,8 @@ export interface IncidentListItem {
   msg: string | null;
   /** Готовый https-URL сообщения Макс; null/пусто — ссылку не показываем. */
   msg_url: string | null;
+  /** Прочая не-адресная инфа (Радар №…, ФИО из текста, описание проблемы). */
+  comment: string | null;
   received_at: string;
 }
 

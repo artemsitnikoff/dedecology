@@ -370,6 +370,10 @@ async def create_incident_from_max(
 
     region, city, street, coords = await resolve_address(raw_text, ai=ai)
 
+    # ПРОЧАЯ не-адресная информация из текста («Радар №…», ФИО, описание проблемы):
+    # AI собирает её в comment, раньше выкидывалась. Пусто/нет AI → NULL.
+    comment = (_clean_str(ai.get("comment")) or None) if ai else None
+
     # Отсекаем текст до ширины колонок БД.
     fio = fio[: _FIELD_LIMITS["fio"]]
     region = region[: _FIELD_LIMITS["region"]]
@@ -392,6 +396,7 @@ async def create_incident_from_max(
         city=city,
         street=street,
         coords=coords or "",
+        comment=comment,
         photo_time=parsed_photo_time,
         photos=0,
         photo_urls=[],

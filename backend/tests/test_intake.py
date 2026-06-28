@@ -1013,6 +1013,59 @@ async def test_max_service_ai_time_sets_photo_time(fake_session):
 
 
 @pytest.mark.asyncio
+async def test_max_service_saves_comment_from_ai(fake_session):
+    """AI вернул comment (прочая не-адресная инфа) → сохраняется на инциденте."""
+    _max_session(fake_session)
+    ai = {
+        "region": "Краснодарский край",
+        "city": "Сочи",
+        "street": "Олимпийская улица, 38/9",
+        "coords": "",
+        "time": "",
+        "comment": "Бахтин Владимир Вадимович; Радар №116434; Баки раздельного сбора отсутствуют",
+    }
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="Бахтин ... Краснодарский край Г.Сочи Олимпийская улица 38/9 (Радар №116434) ...",
+            msg_id="m-comment",
+            sender_name="Бахтин",
+            photo_files=[],
+        )
+
+    assert incident.comment == (
+        "Бахтин Владимир Вадимович; Радар №116434; Баки раздельного сбора отсутствуют"
+    )
+    # Прочая инфа осталась ВНЕ адреса.
+    assert incident.street == "Олимпийская улица, 38/9"
+
+
+@pytest.mark.asyncio
+async def test_max_service_empty_comment_is_none(fake_session):
+    """AI дал пустой/отсутствующий comment → incident.comment = None (не '')."""
+    _max_session(fake_session)
+    ai = {"region": "", "city": "", "street": "", "coords": "", "time": "", "comment": ""}
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="Самарская область, г. Кинель, ул. Маяковского, 41",
+            msg_id="m-nc",
+            sender_name="Иван",
+            photo_files=[],
+        )
+
+    assert incident.comment is None
+
+
+@pytest.mark.asyncio
 async def test_max_service_saves_msg_url(fake_session):
     """Непустой msg_url сохраняется на инциденте КАК ЕСТЬ (полный https-URL)."""
     _max_session(fake_session)
@@ -1070,7 +1123,8 @@ async def test_ai_parse_incident_extracts_fenced_json():
     raw = (
         "```json\n"
         '{"region": "Нижегородская область", "city": "Нижний Новгород", '
-        '"street": "ул. Есенина, 38", "coords": "", "time": "10:28"}\n'
+        '"street": "ул. Есенина, 38", "coords": "", "time": "10:28", '
+        '"comment": "Радар №116495; Баки раздельного сбора отсутствуют"}\n'
         "```"
     )
     with patch(
@@ -1085,6 +1139,7 @@ async def test_ai_parse_incident_extracts_fenced_json():
         "street": "ул. Есенина, 38",
         "coords": "",
         "time": "10:28",
+        "comment": "Радар №116495; Баки раздельного сбора отсутствуют",
     }
 
 
@@ -1106,6 +1161,7 @@ async def test_ai_parse_incident_prose_and_missing_keys():
         "street": "",
         "coords": "",
         "time": "",
+        "comment": "",
     }
 
 
@@ -1409,6 +1465,7 @@ def _pending_incident() -> Incident:
         city="г Кинель",
         street="ул Маяковского, д 41",
         coords="53.2, 50.6",
+        comment="Радар №116434; Баки раздельного сбора отсутствуют",
         photo_time=None,
         photos=1,
         photo_urls=["/api/v1/intake/photo/x/0.jpg"],
@@ -1447,6 +1504,8 @@ async def test_pending_notify_returns_unnotified(client, monkeypatch):
     assert item["msg"] == "msg-1"
     # Готовый https-URL сообщения отдаётся боту для ссылки в группе (как есть).
     assert item["msg_url"] == "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
+    # comment отдаётся боту для строки «Комментарий: …» в уведомлении группы.
+    assert item["comment"] == "Радар №116434; Баки раздельного сбора отсутствуют"
     assert item["quote"] == "«цитата» — Автор"
     assert item["photo_time"] is None
     lister.assert_awaited_once()
