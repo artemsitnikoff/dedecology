@@ -493,13 +493,27 @@
   color: var(--accent);
 }
 
-.de-inc-th-checkbox,
-.de-inc-row-checkbox {
+/* Заголовочный чекбокс «выбрать всё» — sticky сверху (в thead) И слева (left:0). */
+.de-inc-th-checkbox {
   width: 46px;
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--bg-panel-2);
+}
+/* Заголовок замороженного блока «Дата · время · ID» — sticky слева (left:46) + тень. */
+.de-inc-th-frozen {
+  width: 248px;
+  flex: none;
+  position: sticky;
+  left: 46px;
+  z-index: 3;
+  background: var(--bg-panel-2);
+  box-shadow: 10px 0 10px -8px rgba(15, 22, 32, 0.12);
 }
 
 .de-inc-sortarr {
@@ -544,15 +558,15 @@
   border-bottom: 1px solid var(--border-2);
   background: var(--bg-1);
 }
-/* пульс-сердце кликнутой строки — всплывает над фото-колонкой и гаснет */
+/* пульс-сердце кликнутой строки — всплывает над фото (внутри замороженного блока) и гаснет */
 .de-inc-row-pulse {
   position: absolute;
-  left: 70px;
+  left: 35px;
   top: 50%;
   font-size: 26px;
   line-height: 1;
   pointer-events: none;
-  z-index: 4;
+  z-index: 5;
   animation: deHeartPop 0.85s ease-out forwards;
 }
 .de-inc-row:hover {
@@ -561,24 +575,85 @@
 .de-inc-row.selected {
   background: var(--ark-blue-50);
 }
+/* Замороженные ячейки повторяют фон строки (порядок: selected перекрывает hover). */
+.de-inc-row:hover .de-inc-frozen {
+  background: var(--bg-panel-2);
+}
+.de-inc-row.selected .de-inc-frozen {
+  background: var(--ark-blue-50);
+}
 
 .de-inc-cell {
   padding: 0 10px;
   flex: none;
 }
-.de-inc-cell-photo {
-  width: 64px;
+
+/* ---------- Замороженный левый блок строки (sticky слева) ---------- */
+/* Чекбокс (left:0) + блок «фото·дата·время·ID» (left:46) = ровно 294px,
+   совпадает с DRAWER_LEFT_INSET. Фон копирует фон строки и перекрывает
+   проезжающие под блоком колонки при горизонтальном скролле. */
+.de-inc-frozen {
+  position: sticky;
+  z-index: 1;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  background: var(--bg-1);
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.de-inc-cell-date {
-  width: 104px;
+.de-inc-frozen-check {
+  width: 46px;
+  flex: none;
+  left: 0;
+  justify-content: center;
+}
+/* Единый блок «фото · [дата+время] · [ID]» — 248px, тень справа отделяет «заморозку». */
+.de-inc-frozen-main {
+  width: 248px;
+  flex: none;
+  left: 46px;
+  gap: 11px;
+  padding: 0 12px;
+  box-shadow: 10px 0 10px -8px rgba(15, 22, 32, 0.12);
+}
+.de-inc-frozen-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.3;
+}
+.de-inc-frozen-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.de-inc-frozen-date {
   font-size: 12.5px;
+  font-weight: 600;
   color: var(--fg-1);
 }
-.de-inc-cell-time {
-  width: 80px;
-  font-size: 12.5px;
+.de-inc-frozen-time {
+  font-size: 11.5px;
   color: var(--fg-2);
 }
+.de-inc-frozen-line2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* моно-чип короткого ID (полный uuid — в title) */
+.de-inc-frozen-id {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-2);
+  background: var(--ark-gray-100);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
 .de-inc-cell-region {
   width: 150px;
   font-size: var(--fs-13);

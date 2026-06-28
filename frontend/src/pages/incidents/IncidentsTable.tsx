@@ -8,19 +8,20 @@ import type { SortKey, SortOrder } from '@/api/hooks/useIncidents';
 
 /** Описание колонки заголовка. */
 type Head = {
-  key: SortKey | 'photo' | 'coords' | 'link';
+  key: SortKey | 'coords' | 'link';
   label: string;
   /** Класс ячейки заголовка (ширина/flex задаётся в CSS на парных cell-классах). */
   thClass: string;
-  /** Не сортируется (Фото, Координаты, Чат). */
+  /** Не сортируется (Координаты, Чат). */
   nosort?: boolean;
 };
 
-/** 10 колонок в ТОЧНОМ порядке (BUILD-SPEC §7). */
+/**
+ * Колонки после замороженного блока, в ТОЧНОМ порядке (BUILD-SPEC §7).
+ * Первый «столбец» — единый замороженный блок (фото · дата · время · ID), он
+ * рендерится отдельно и сортируется по ключу `date`. Здесь — остальные 7.
+ */
 const HEADS: Head[] = [
-  { key: 'photo', label: 'Фото', thClass: 'de-inc-cell-photo', nosort: true },
-  { key: 'date', label: 'Дата', thClass: 'de-inc-cell-date' },
-  { key: 'time', label: 'Время', thClass: 'de-inc-cell-time' },
   { key: 'region', label: 'Регион', thClass: 'de-inc-cell-region' },
   { key: 'city', label: 'Город', thClass: 'de-inc-cell-city' },
   { key: 'address', label: 'Адрес', thClass: 'de-inc-cell-address' },
@@ -64,15 +65,16 @@ const IncidentRow = memo(function IncidentRow({ d, selected, pulse, onToggle, on
   // Превью в строке — уменьшенная версия (thumb) для быстрой загрузки списка.
   const thumb = d.photo_urls[0] ? thumbUrl(d.photo_urls[0]) : undefined;
   const link = maxLink(d.msg_url);
+  // Короткий ID-чип (моно, uppercase); полный uuid — в title.
+  const shortId = d.id.slice(0, 8).toUpperCase();
 
   return (
     <div
       className={`de-inc-row ${selected ? 'selected' : ''}`}
       onClick={() => onOpen(d.id)}
     >
-      {/* Пульс-сердце при открытии карточки (всплывает над фото и гаснет). */}
-      {pulse && <span className="de-inc-row-pulse">💚</span>}
-      <div className="de-inc-row-checkbox">
+      {/* Чекбокс — заморожен слева (left:0). */}
+      <div className="de-inc-frozen de-inc-frozen-check">
         <div
           className={`de-inc-check ${selected ? 'checked' : ''}`}
           onClick={(e) => {
@@ -84,7 +86,10 @@ const IncidentRow = memo(function IncidentRow({ d, selected, pulse, onToggle, on
         </div>
       </div>
 
-      <div className="de-inc-cell de-inc-cell-photo">
+      {/* Единый замороженный блок: фото · [дата+время] · [ID] (left:46, тень справа). */}
+      <div className="de-inc-frozen de-inc-frozen-main">
+        {/* Пульс-сердце при открытии карточки (всплывает над фото и гаснет). */}
+        {pulse && <span className="de-inc-row-pulse">💚</span>}
         <div
           className="de-inc-thumb"
           onClick={(e) => {
@@ -97,10 +102,19 @@ const IncidentRow = memo(function IncidentRow({ d, selected, pulse, onToggle, on
           )}
           {d.photos > 1 && <span className="de-inc-thumb-badge de-inc-mono">{d.photos}</span>}
         </div>
+        <div className="de-inc-frozen-text">
+          <span className="de-inc-frozen-line1">
+            <span className="de-inc-frozen-date">{formatDate(d.photo_time)}</span>
+            <span className="de-inc-frozen-time de-inc-mono">{formatTime(d.photo_time)}</span>
+          </span>
+          <span className="de-inc-frozen-line2">
+            <span className="de-inc-frozen-id de-inc-mono" title={d.id}>
+              {shortId}
+            </span>
+          </span>
+        </div>
       </div>
 
-      <div className="de-inc-cell de-inc-cell-date">{formatDate(d.photo_time)}</div>
-      <div className="de-inc-cell de-inc-cell-time de-inc-mono">{formatTime(d.photo_time)}</div>
       <div className="de-inc-cell de-inc-cell-region" title={d.region}>
         {d.region}
       </div>
@@ -159,10 +173,17 @@ type Props = {
 };
 
 /**
- * Таблица инцидентов. 10 колонок в фиксированном порядке + чекбокс-колонка.
- * Клик по заголовку сортирует (первый клик — desc, повтор — asc), активная
- * колонка подсвечивается акцентом с индикатором ▲/▼. Несортируемые: Фото,
- * Координаты, Чат. Клик по строке открывает drawer.
+ * Таблица инцидентов с ЗАМОРОЖЕННЫМ левым блоком.
+ *
+ * Слева приклеены (sticky) две зоны: чекбокс-колонка (46px, left:0) и единый блок
+ * «фото · дата · время · ID» (248px, left:46) с тенью справа — суммарно ровно 294px
+ * (совпадает с DRAWER_LEFT_INSET карточки). Остальные 7 колонок (Регион · Город ·
+ * Адрес · Координаты · Статус · Источник · Чат) скроллятся горизонтально под
+ * замороженным блоком. Заголовок прилипает сверху, его левые зоны — слева.
+ *
+ * Клик по заголовку сортирует (первый клик — desc, повтор — asc), активная колонка
+ * подсвечивается акцентом с индикатором ▲/▼. Замороженный блок сортирует по `date`.
+ * Несортируемые: Координаты, Чат. Клик по строке открывает drawer.
  */
 export function IncidentsTable({
   rows,
@@ -177,9 +198,11 @@ export function IncidentsTable({
   onOpen,
   onPhoto,
 }: Props) {
+  const frozenOn = sort === 'date';
   return (
     <div className="de-inc-table">
       <div className="de-inc-thead">
+        {/* Чекбокс «выбрать всё» — заморожен слева (left:0). */}
         <div className="de-inc-th-checkbox">
           <div
             className={`de-inc-check ${allSelected ? 'checked' : ''}`}
@@ -187,6 +210,14 @@ export function IncidentsTable({
           >
             {allSelected && <CheckMark />}
           </div>
+        </div>
+        {/* Заголовок замороженного блока — сортирует по `date` (left:46, тень). */}
+        <div
+          className={`de-inc-th de-inc-th-frozen sortable ${frozenOn ? 'on' : ''}`}
+          onClick={() => onSort('date')}
+        >
+          Дата · время · ID
+          <SortArrows on={frozenOn} order={order} />
         </div>
         {HEADS.map((h) => {
           const on = !h.nosort && sort === h.key;
