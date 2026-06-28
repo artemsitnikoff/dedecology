@@ -164,3 +164,17 @@ docker compose -f docker-compose.prod.yml run --rm backend python -m app.seed
 - `... logs backend` — нет ошибок подключения к БД? (проверь, что `DATABASE_URL` пароль == `POSTGRES_PASSWORD`).
 - 502 на `/api/...` — backend ещё поднимается или упал; смотри его логи.
 - Логин не держится / сразу разлогинивает — убедись, что `SESSION_COOKIE_SECURE=False` при заходе по HTTP.
+
+## 9. Бэкап БД
+Скрипты в `scripts/` (приезжают на сервер через `git pull`), запускать на VPS из `/var/www/dedecology`:
+```bash
+# сделать бэкап (pg_dump -Fc → backups/dedecolog_<дата>.dump, ротация — 14 последних)
+bash scripts/backup-db.sh
+
+# восстановить из дампа (⚠️ перезапишет данные, спросит подтверждение)
+bash scripts/restore-db.sh backups/dedecolog_ГГГГММДД_ЧЧММСС.dump
+```
+- Дампы лежат в `backups/` (исключён из git — внутри ПДн). Скопируй их с сервера в надёжное место
+  (`scp`/облако) — на том же диске это НЕ резервная копия.
+- Авто-расписание (ежедневно 3:30) — добавь в `crontab -e`:
+  `30 3 * * * bash /var/www/dedecology/scripts/backup-db.sh >> /var/www/dedecology/backups/backup.log 2>&1`
