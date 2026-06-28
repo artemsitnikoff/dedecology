@@ -20,7 +20,7 @@ from ..config import settings
 from ..core.errors import ValidationError
 from ..models import Incident
 from .audit import audit
-from .dadata import clean_address
+from .dadata import clean_address, geocode_address
 from . import parse_log
 from .incident_parse import ai_parse_incident
 
@@ -222,9 +222,10 @@ async def resolve_address(
 
     Единая логика, переиспользуемая приёмом из Макс-бота и командой reprocess:
       1. AI (ai_parse_incident) извлекает регион/город/улицу/координаты;
-      2. если AI дал адрес → склейка региона+города+улицы и стандартизация через
-         DaData Clean (clean_address): её поля и координаты (геокод) авторитетны;
-         если DaData недоступна — берём поля AI как есть (+ координаты из AI);
+      2. если AI дал адрес → склейка региона+города+улицы и геокод через
+         бесплатные Подсказки (geocode_address): её поля и координаты авторитетны;
+         Clean (clean_address) — платный фолбэк, если geocode не дал результата;
+         если DaData недоступна совсем — берём поля AI как есть (+ координаты из AI);
       3. если AI ничего не дал → clean_address(raw); недоступна → эвристика
          _parse_address (coords пустые).
 
@@ -268,7 +269,11 @@ async def resolve_address(
                 )
                 if p
             )
-            cleaned = await clean_address(addr)
+            # Бесплатные Подсказки (geocode_address) для координат; платный Clean —
+            # фолбэк, если вдруг подключат услугу «Стандартизация».
+            cleaned = await geocode_address(addr)
+            if cleaned is None:
+                cleaned = await clean_address(addr)
             if cleaned:
                 # DaData авторитетна: стандартизированные поля + геокод.
                 region = _clean_str(cleaned.get("region"))

@@ -219,6 +219,88 @@ async def test_suggest_address_short_query_returns_empty(monkeypatch):
     assert await dadata_service.suggest_address("ab") == []
 
 
+# --------------------------------------------------------------------------- #
+# geocode_address — бесплатный геокод через Подсказки (suggest top-hit)        #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_geocode_address_top_hit_includes_house():
+    """geocode_address берёт ТОП-подсказку: улица склеивается с домом, coords проброшены."""
+    from app.services import dadata as dadata_service
+
+    top = {
+        "value": "г Самара, Виноградный пер, д 6А",
+        "region": "Самарская обл",
+        "city": "г Самара",
+        "street": "Виноградный переулок",
+        "house": "6А",
+        "coords": "53.20, 50.15",
+        "geo_lat": "53.20",
+        "geo_lon": "50.15",
+    }
+    # Мокаем suggest_address — реальная сеть НЕ дёргается.
+    with patch(
+        "app.services.dadata.suggest_address", new=AsyncMock(return_value=[top])
+    ) as fake_suggest:
+        result = await dadata_service.geocode_address("Самара Виноградный 6А")
+
+    assert result == {
+        "region": "Самарская обл",
+        "city": "г Самара",
+        "street": "Виноградный переулок, 6А",  # дом НЕ потерян
+        "coords": "53.20, 50.15",
+        "geo_lat": "53.20",
+        "geo_lon": "50.15",
+    }
+    # Запрашиваем только одну (топовую) подсказку.
+    fake_suggest.assert_awaited_once()
+    assert fake_suggest.await_args.kwargs.get("count") == 1
+
+
+@pytest.mark.asyncio
+async def test_geocode_address_no_suggestions_returns_none():
+    """suggest_address → [] → geocode_address возвращает None (graceful)."""
+    from app.services import dadata as dadata_service
+
+    with patch(
+        "app.services.dadata.suggest_address", new=AsyncMock(return_value=[])
+    ):
+        assert await dadata_service.geocode_address("ничего похожего") is None
+
+
+@pytest.mark.asyncio
+async def test_geocode_address_house_only_keeps_number():
+    """Только дом без улицы (street пуст) → street = номер дома (дом не теряется)."""
+    from app.services import dadata as dadata_service
+
+    top = {
+        "region": "Самарская обл",
+        "city": "г Самара",
+        "street": "",
+        "house": "10",
+        "coords": "53.0, 50.0",
+        "geo_lat": "53.0",
+        "geo_lon": "50.0",
+    }
+    with patch(
+        "app.services.dadata.suggest_address", new=AsyncMock(return_value=[top])
+    ):
+        result = await dadata_service.geocode_address("Самара дом 10")
+
+    assert result["street"] == "10"
+    assert result["coords"] == "53.0, 50.0"
+
+
+@pytest.mark.asyncio
+async def test_geocode_address_no_key_no_network(monkeypatch):
+    """Без DADATA_API_KEY suggest отдаёт [] ДО httpx → geocode None, сеть не трогается."""
+    from app.services import dadata as dadata_service
+
+    monkeypatch.setattr(settings, "DADATA_API_KEY", None)
+    assert await dadata_service.geocode_address("Самара, улица 1") is None
+
+
 @pytest.mark.asyncio
 async def test_suggest_address_route_too_short(client):
     """GET /suggest/address с q<3 → {"suggestions": []}, DaData не вызывается."""
@@ -688,6 +770,8 @@ async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tm
     # ai_parse_incident → None: проверяем именно путь DaData Clean (без shell-out CLI).
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=fake_clean), patch(
         "app.api.v1.intake.quotes_service.nature_quote", new=quote
     ):
@@ -772,6 +856,8 @@ async def test_max_intake_falls_back_to_heuristic(client, fake_session, monkeypa
     # ai_parse_incident → None: разбор уходит в DaData Clean → эвристику.
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=fake_clean), patch(
         "app.api.v1.intake.quotes_service.nature_quote", new=quote
     ):
@@ -827,8 +913,8 @@ async def test_max_service_ai_address_dadata_wins_coords(fake_session):
     fake_ai = AsyncMock(return_value=ai)
     fake_clean = AsyncMock(return_value=cleaned)
     with patch("app.services.intake.ai_parse_incident", new=fake_ai), patch(
-        "app.services.intake.clean_address", new=fake_clean
-    ):
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=fake_clean):
         incident = await create_incident_from_max(
             fake_session,
             text="Нижегородская область, г. Нижний Новгород, улица Сергея Есенина, 38",
@@ -862,6 +948,8 @@ async def test_max_service_ai_address_no_dadata_uses_ai(fake_session):
     }
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
         incident = await create_incident_from_max(
             fake_session,
@@ -883,6 +971,8 @@ async def test_max_service_ai_none_falls_back_heuristic(fake_session):
     _max_session(fake_session)
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
         incident = await create_incident_from_max(
             fake_session,
@@ -905,6 +995,8 @@ async def test_max_service_ai_time_sets_photo_time(fake_session):
     ai = {"region": "", "city": "", "street": "", "coords": "", "time": "10:28"}
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
         incident = await create_incident_from_max(
             fake_session,
@@ -927,6 +1019,8 @@ async def test_max_service_saves_msg_url(fake_session):
     url = "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
         incident = await create_incident_from_max(
             fake_session,
@@ -947,6 +1041,8 @@ async def test_max_service_blank_msg_url_is_none(fake_session):
     _max_session(fake_session)
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
         incident = await create_incident_from_max(
             fake_session,
@@ -1095,8 +1191,8 @@ async def test_resolve_address_dirty_text_ai_dadata():
     fake_ai = AsyncMock(return_value=ai)
     fake_clean = AsyncMock(return_value=cleaned)
     with patch("app.services.intake.ai_parse_incident", new=fake_ai), patch(
-        "app.services.intake.clean_address", new=fake_clean
-    ):
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=fake_clean):
         region, city, street, coords = await intake.resolve_address(dirty)
 
     # ФИО/дата/описание из текста НЕ просочились — регион/город разделены.
@@ -1126,6 +1222,8 @@ async def test_resolve_address_ai_only_when_dadata_down():
     }
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
         region, city, street, coords = await intake.resolve_address("грязный текст")
 
@@ -1151,8 +1249,8 @@ async def test_resolve_address_ai_none_dadata_raw():
     fake_ai = AsyncMock(return_value=None)
     fake_clean = AsyncMock(return_value=cleaned)
     with patch("app.services.intake.ai_parse_incident", new=fake_ai), patch(
-        "app.services.intake.clean_address", new=fake_clean
-    ):
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=fake_clean):
         region, city, street, coords = await intake.resolve_address(
             "Самарская область, г. Кинель, ул. Маяковского, 41"
         )
@@ -1170,6 +1268,8 @@ async def test_resolve_address_all_none_heuristic():
 
     with patch(
         "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
     ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
         region, city, street, coords = await intake.resolve_address(
             "Самарская область, г. Кинель, ул. Маяковского, 41"
@@ -1195,14 +1295,57 @@ async def test_resolve_address_reuses_provided_ai():
     }
     fake_ai = AsyncMock(return_value=ai)
     with patch("app.services.intake.ai_parse_incident", new=fake_ai), patch(
-        "app.services.intake.clean_address", new=AsyncMock(return_value=None)
-    ):
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
         region, city, street, coords = await intake.resolve_address(
             "грязный текст", ai=ai
         )
 
     assert (region, city, street) == ("Краснодарский край", "Сочи", "Олимпийская улица, 38/9")
     fake_ai.assert_not_awaited()  # ai отдан готовым → CLI не вызывался
+
+
+@pytest.mark.asyncio
+async def test_resolve_address_uses_geocode_coords():
+    """AI дал адрес → бесплатный geocode_address даёт координаты/поля; Clean НЕ нужен.
+
+    geocode (Подсказки) возвращает результат → платный clean_address как фолбэк
+    НЕ вызывается. street из geocode уже с домом — проброшен как есть.
+    """
+    from app.services import intake
+
+    ai = {
+        "region": "Самарская область",
+        "city": "Кинель",
+        "street": "Маяковского, 41",
+        "coords": "",
+        "time": "",
+    }
+    geocoded = {
+        "region": "Самарская обл",
+        "city": "г Кинель",
+        "street": "ул Маяковского, 41",
+        "coords": "53.22, 50.63",
+        "geo_lat": "53.22",
+        "geo_lon": "50.63",
+    }
+    fake_geocode = AsyncMock(return_value=geocoded)
+    fake_clean = AsyncMock(return_value=None)
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch("app.services.intake.geocode_address", new=fake_geocode), patch(
+        "app.services.intake.clean_address", new=fake_clean
+    ):
+        region, city, street, coords = await intake.resolve_address(
+            "Самарская область, Кинель, Маяковского 41"
+        )
+
+    assert region == "Самарская обл"  # geocode (Подсказки)
+    assert city == "г Кинель"
+    assert street == "ул Маяковского, 41"  # дом сохранён
+    assert coords == "53.22, 50.63"  # геокод из бесплатных Подсказок
+    fake_geocode.assert_awaited_once()
+    fake_clean.assert_not_awaited()  # geocode дал результат → платный Clean не нужен
 
 
 @pytest.mark.asyncio

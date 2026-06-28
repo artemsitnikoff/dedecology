@@ -92,6 +92,7 @@ async def suggest_address(
                     or ""
                 ),
                 "street": d.get("street_with_type") or "",
+                "house": d.get("house") or "",
                 "coords": coords,
                 "geo_lat": geo_lat,
                 "geo_lon": geo_lon,
@@ -102,6 +103,45 @@ async def suggest_address(
             }
         )
     return out
+
+
+async def geocode_address(query: str) -> dict | None:
+    """Геокод адреса через БЕСПЛАТНЫЕ Подсказки (suggest/address), а не платный Clean.
+
+    Берёт ТОП-подсказку DaData по строке адреса и возвращает её координаты +
+    стандартизированные поля. Улица собирается ВМЕСТЕ С ДОМОМ (street_with_type +
+    house), чтобы номер дома не терялся:
+      - есть и улица, и дом → "<улица>, <дом>";
+      - только дом → "<дом>";
+      - только улица → "<улица>".
+
+    Graceful (наследует от suggest_address): None, если ключ не задан, совпадений
+    нет или DaData недоступна — вызывающий код деградирует на платный Clean/эвристику.
+
+    Returns: {region, city, street, coords, geo_lat, geo_lon} или None.
+    """
+    hits = await suggest_address(query, count=1)
+    if not hits:
+        return None
+    top = hits[0]
+
+    street = (top.get("street") or "").strip()
+    house = (top.get("house") or "").strip()
+    if street and house:
+        street_full = f"{street}, {house}"
+    elif house:
+        street_full = house
+    else:
+        street_full = street
+
+    return {
+        "region": top.get("region") or "",
+        "city": top.get("city") or "",
+        "street": street_full,
+        "coords": top.get("coords") or "",
+        "geo_lat": top.get("geo_lat") or "",
+        "geo_lon": top.get("geo_lon") or "",
+    }
 
 
 async def clean_address(raw: str) -> dict | None:
