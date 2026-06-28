@@ -1038,6 +1038,174 @@ async def test_ai_parse_incident_cli_unavailable_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_ai_parse_incident_uses_parse_model(monkeypatch):
+    """ai_parse_incident дёргает CLI с settings.CLAUDE_PARSE_MODEL (не QUOTE)."""
+    from app.services import incident_parse
+
+    monkeypatch.setattr(settings, "CLAUDE_PARSE_MODEL", "sonnet")
+    monkeypatch.setattr(settings, "CLAUDE_QUOTE_MODEL", "haiku")
+
+    fake_cli = AsyncMock(
+        return_value='{"region": "Москва", "city": "Москва", "street": "", '
+        '"coords": "", "time": ""}'
+    )
+    with patch("app.services.incident_parse.claude_cli_complete", new=fake_cli):
+        result = await incident_parse.ai_parse_incident("Москва, какой-то адрес")
+
+    assert result is not None
+    fake_cli.assert_awaited_once()
+    # Модель разбора — CLAUDE_PARSE_MODEL (sonnet), НЕ цитатная haiku.
+    assert fake_cli.await_args.kwargs["model"] == "sonnet"
+    assert fake_cli.await_args.kwargs["model"] != settings.CLAUDE_QUOTE_MODEL
+
+
+# --------------------------------------------------------------------------- #
+# resolve_address — единый конвейер разбора адреса (мок ai + clean_address)    #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_resolve_address_dirty_text_ai_dadata():
+    """Грязный текст (ФИО+дата+описание) → AI чистит, DaData стандартизирует.
+
+    AI извлёк регион/город/улицу из мусора; resolve_address склеивает их и
+    отдаёт в clean_address; результат DaData (поля + геокод) авторитетен.
+    """
+    from app.services import intake
+
+    dirty = (
+        "Бахтин Владимир Вадимович Краснодарский край Г.Сочи "
+        "27.06.2026 19:06 Олимпийская улица 38/9 Баки раздельного сбора отсутствуют"
+    )
+    ai = {
+        "region": "Краснодарский край",
+        "city": "Сочи",
+        "street": "Олимпийская улица, 38/9",
+        "coords": "",
+        "time": "19:06",
+    }
+    cleaned = {
+        "region": "Краснодарский край",
+        "city": "г Сочи",
+        "street": "ул Олимпийская, д 38/9",
+        "coords": "43.40, 39.95",
+        "geo_lat": "43.40",
+        "geo_lon": "39.95",
+    }
+    fake_ai = AsyncMock(return_value=ai)
+    fake_clean = AsyncMock(return_value=cleaned)
+    with patch("app.services.intake.ai_parse_incident", new=fake_ai), patch(
+        "app.services.intake.clean_address", new=fake_clean
+    ):
+        region, city, street, coords = await intake.resolve_address(dirty)
+
+    # ФИО/дата/описание из текста НЕ просочились — регион/город разделены.
+    assert region == "Краснодарский край"
+    assert city == "г Сочи"
+    assert street == "ул Олимпийская, д 38/9"
+    assert coords == "43.40, 39.95"
+    fake_ai.assert_awaited_once()  # ai не передан → парсится внутри
+    fake_clean.assert_awaited_once()
+    addr_arg = fake_clean.call_args.args[0]
+    assert "Краснодарский край" in addr_arg
+    assert "Сочи" in addr_arg
+    assert "Бахтин" not in addr_arg  # ФИО заявителя не попало в адрес
+
+
+@pytest.mark.asyncio
+async def test_resolve_address_ai_only_when_dadata_down():
+    """AI дал адрес, DaData недоступна (None) → поля AI + координаты AI."""
+    from app.services import intake
+
+    ai = {
+        "region": "Краснодарский край",
+        "city": "Сочи",
+        "street": "Олимпийская улица, 38/9",
+        "coords": "43.40, 39.95",
+        "time": "",
+    }
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=ai)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        region, city, street, coords = await intake.resolve_address("грязный текст")
+
+    assert region == "Краснодарский край"
+    assert city == "Сочи"
+    assert street == "Олимпийская улица, 38/9"
+    assert coords == "43.40, 39.95"  # координаты AI как фолбэк
+
+
+@pytest.mark.asyncio
+async def test_resolve_address_ai_none_dadata_raw():
+    """AI → None, но clean_address(raw) разбирает текст → поля DaData."""
+    from app.services import intake
+
+    cleaned = {
+        "region": "Самарская обл",
+        "city": "г Кинель",
+        "street": "ул Маяковского, д 41",
+        "coords": "53.2, 50.6",
+        "geo_lat": "53.2",
+        "geo_lon": "50.6",
+    }
+    fake_ai = AsyncMock(return_value=None)
+    fake_clean = AsyncMock(return_value=cleaned)
+    with patch("app.services.intake.ai_parse_incident", new=fake_ai), patch(
+        "app.services.intake.clean_address", new=fake_clean
+    ):
+        region, city, street, coords = await intake.resolve_address(
+            "Самарская область, г. Кинель, ул. Маяковского, 41"
+        )
+
+    assert region == "Самарская обл"
+    assert city == "г Кинель"
+    assert street == "ул Маяковского, д 41"
+    assert coords == "53.2, 50.6"
+
+
+@pytest.mark.asyncio
+async def test_resolve_address_all_none_heuristic():
+    """AI → None и DaData → None → эвристика _parse_address (coords='')."""
+    from app.services import intake
+
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        region, city, street, coords = await intake.resolve_address(
+            "Самарская область, г. Кинель, ул. Маяковского, 41"
+        )
+
+    assert region == "Самарская область"
+    assert city == "г. Кинель"
+    assert street == "ул. Маяковского, 41"
+    assert coords == ""
+
+
+@pytest.mark.asyncio
+async def test_resolve_address_reuses_provided_ai():
+    """ai передан явно → resolve_address НЕ дёргает CLI повторно (один вызов)."""
+    from app.services import intake
+
+    ai = {
+        "region": "Краснодарский край",
+        "city": "Сочи",
+        "street": "Олимпийская улица, 38/9",
+        "coords": "",
+        "time": "",
+    }
+    fake_ai = AsyncMock(return_value=ai)
+    with patch("app.services.intake.ai_parse_incident", new=fake_ai), patch(
+        "app.services.intake.clean_address", new=AsyncMock(return_value=None)
+    ):
+        region, city, street, coords = await intake.resolve_address(
+            "грязный текст", ai=ai
+        )
+
+    assert (region, city, street) == ("Краснодарский край", "Сочи", "Олимпийская улица, 38/9")
+    fake_ai.assert_not_awaited()  # ai отдан готовым → CLI не вызывался
+
+
+@pytest.mark.asyncio
 async def test_ai_parse_incident_empty_text_skips_cli():
     """Пустой текст → None, CLI вообще не вызывается."""
     from app.services import incident_parse

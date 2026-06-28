@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     CLAUDE_CLI_PATH: str = "claude"
     CLAUDE_QUOTE_MODEL: str = "haiku"
     CLAUDE_QUOTE_TIMEOUT: int = 20
+    # Отдельная модель для РАЗБОРА адреса из свободного текста Макс-обращения.
+    # Мощнее haiku (разбор грязного текста с ФИО/датой/описанием — нетривиален);
+    # цитаты остаются на CLAUDE_QUOTE_MODEL.
+    CLAUDE_PARSE_MODEL: str = "sonnet"
 
     @property
     def cors_origins_list(self) -> list[str]:

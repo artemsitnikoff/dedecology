@@ -209,6 +209,108 @@ async def create_incident_from_form(
     return incident
 
 
+# Сентинел «ai не передан» — отличает «парсить самим» от «передали None
+# (AI-разбор не дал результата) — повторно НЕ дёргать CLI».
+_AI_UNSET: object = object()
+
+
+async def resolve_address(
+    text: str, ai: "dict | None | object" = _AI_UNSET
+) -> tuple[str, str, str, str]:
+    """Разбор адреса из свободного текста → (region, city, street, coords).
+
+    Единая логика, переиспользуемая приёмом из Макс-бота и командой reprocess:
+      1. AI (ai_parse_incident) извлекает регион/город/улицу/координаты;
+      2. если AI дал адрес → склейка региона+города+улицы и стандартизация через
+         DaData Clean (clean_address): её поля и координаты (геокод) авторитетны;
+         если DaData недоступна — берём поля AI как есть (+ координаты из AI);
+      3. если AI ничего не дал → clean_address(raw); недоступна → эвристика
+         _parse_address (coords пустые).
+
+    Приоритет координат: DaData Clean > координаты AI > "".
+
+    `ai` можно передать готовым — create_incident_from_max парсит его один раз
+    (тот же ai нужен и для photo_time) и отдаёт сюда, чтобы НЕ дёргать CLI
+    повторно. По умолчанию (`_AI_UNSET`) разбор делается здесь. Логирует, КАКОЙ
+    путь сработал (ai+dadata / ai-only / dadata-raw / heuristic) — диагностика в
+    проде «жива ли нейронка». Любой сбой AI/DaData деградирует на фолбэк и
+    НИКОГДА не бросает исключений.
+    """
+    raw_text = _clean_str(text)
+
+    if ai is _AI_UNSET:
+        try:
+            ai = await ai_parse_incident(raw_text)
+        except Exception as e:  # noqa: BLE001 — AI не должен ронять разбор
+            logger.warning(
+                "[resolve_address] ai_parse_incident сбой: %s: %s", type(e).__name__, e
+            )
+            ai = None
+
+    ai_dict: dict | None = ai if isinstance(ai, dict) else None
+
+    region = city = street = coords = ""
+    resolved = False
+    try:
+        if ai_dict and (
+            _clean_str(ai_dict.get("region"))
+            or _clean_str(ai_dict.get("city"))
+            or _clean_str(ai_dict.get("street"))
+        ):
+            addr = ", ".join(
+                p
+                for p in (
+                    _clean_str(ai_dict.get("region")),
+                    _clean_str(ai_dict.get("city")),
+                    _clean_str(ai_dict.get("street")),
+                )
+                if p
+            )
+            cleaned = await clean_address(addr)
+            if cleaned:
+                # DaData авторитетна: стандартизированные поля + геокод.
+                region = _clean_str(cleaned.get("region"))
+                city = _clean_str(cleaned.get("city"))
+                street = _clean_str(cleaned.get("street"))
+                coords = _clean_str(cleaned.get("coords")) or _clean_str(
+                    ai_dict.get("coords")
+                )
+                logger.info("[resolve_address] путь=ai+dadata")
+            else:
+                # DaData недоступна → поля AI как есть (+ координаты из текста).
+                region = _clean_str(ai_dict.get("region"))
+                city = _clean_str(ai_dict.get("city"))
+                street = _clean_str(ai_dict.get("street"))
+                coords = _clean_str(ai_dict.get("coords"))
+                logger.info("[resolve_address] путь=ai-only (DaData недоступна)")
+            resolved = True
+    except Exception as e:  # noqa: BLE001 — DaData/разбор не должны ронять приём
+        logger.warning("[resolve_address] AI-адрес сбой: %s: %s", type(e).__name__, e)
+        resolved = False
+
+    if not resolved:
+        # Фолбэк без AI: DaData Clean(text) → эвристика.
+        try:
+            cleaned = await clean_address(raw_text)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "[resolve_address] clean_address сбой: %s: %s", type(e).__name__, e
+            )
+            cleaned = None
+        if cleaned:
+            region = _clean_str(cleaned.get("region"))
+            city = _clean_str(cleaned.get("city"))
+            street = _clean_str(cleaned.get("street"))
+            coords = _clean_str(cleaned.get("coords"))
+            logger.info("[resolve_address] путь=dadata-raw")
+        else:
+            region, city, street = _parse_address(raw_text)
+            coords = ""
+            logger.info("[resolve_address] путь=heuristic")
+
+    return region, city, street, coords
+
+
 async def create_incident_from_max(
     session: AsyncSession,
     *,
@@ -244,7 +346,9 @@ async def create_incident_from_max(
     # Готовый https-URL сообщения (Message.url); для лички с ботом обычно пуст → None.
     msg_url_clean = _clean_str(msg_url) or None
 
-    # AI-разбор свободного текста (graceful: любой сбой → None).
+    # AI-разбор свободного текста (graceful: любой сбой → None). Парсим здесь
+    # ОДИН раз: ai нужен и для адреса (resolve_address), и для времени (ai.time);
+    # отдаём готовый ai в resolve_address, чтобы не дёргать CLI повторно.
     ai: dict | None = None
     try:
         ai = await ai_parse_incident(raw_text)
@@ -252,56 +356,7 @@ async def create_incident_from_max(
         logger.warning("[intake.max] ai_parse_incident сбой: %s: %s", type(e).__name__, e)
         ai = None
 
-    region = city = street = coords = ""
-    resolved = False
-    try:
-        if ai and (
-            _clean_str(ai.get("region"))
-            or _clean_str(ai.get("city"))
-            or _clean_str(ai.get("street"))
-        ):
-            addr = ", ".join(
-                p
-                for p in (
-                    _clean_str(ai.get("region")),
-                    _clean_str(ai.get("city")),
-                    _clean_str(ai.get("street")),
-                )
-                if p
-            )
-            cleaned = await clean_address(addr)
-            if cleaned:
-                # DaData авторитетна: стандартизированные поля + геокод.
-                region = _clean_str(cleaned.get("region"))
-                city = _clean_str(cleaned.get("city"))
-                street = _clean_str(cleaned.get("street"))
-                coords = _clean_str(cleaned.get("coords")) or _clean_str(ai.get("coords"))
-            else:
-                # DaData недоступна → поля AI как есть (+ координаты из текста).
-                region = _clean_str(ai.get("region"))
-                city = _clean_str(ai.get("city"))
-                street = _clean_str(ai.get("street"))
-                coords = _clean_str(ai.get("coords"))
-            resolved = True
-    except Exception as e:  # noqa: BLE001 — DaData/разбор не должны ронять приём
-        logger.warning("[intake.max] AI-адрес сбой: %s: %s", type(e).__name__, e)
-        resolved = False
-
-    if not resolved:
-        # Фолбэк без AI: текущий путь DaData Clean(text) → эвристика.
-        try:
-            cleaned = await clean_address(raw_text)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[intake.max] clean_address сбой: %s: %s", type(e).__name__, e)
-            cleaned = None
-        if cleaned:
-            region = _clean_str(cleaned.get("region"))
-            city = _clean_str(cleaned.get("city"))
-            street = _clean_str(cleaned.get("street"))
-            coords = _clean_str(cleaned.get("coords"))
-        else:
-            region, city, street = _parse_address(raw_text)
-            coords = ""
+    region, city, street, coords = await resolve_address(raw_text, ai=ai)
 
     # Отсекаем текст до ширины колонок БД.
     fio = fio[: _FIELD_LIMITS["fio"]]
