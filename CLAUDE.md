@@ -9,7 +9,11 @@
 ---
 
 ## 0. Как здесь работают
-Реализацию ведут субагенты `fastapi-expert` (бэк) и `react-expert` (фронт) + `code-reviewer`.
+**ПРАВИЛО: реализацию фич ВЕДЁМ субагентами** `fastapi-expert` (бэк) и `react-expert` (фронт) —
+через Agent/Workflow с **обязательным `model` override** (см. грабли #2). Не писать крупные/кросс-
+слойные фичи руками: декомпозировать и отдавать этим агентам (кросс-слойные — параллельным Workflow
+с единым контрактом backend↔frontend↔maxbot). Напрямую (без агентов) — только мелочь: доки, конфиг,
+промпты, деплой, version-bump, точечные правки в 1–2 строки. `code-reviewer` — по желанию.
 Принцип glafira №1: **ВЕРИТЬ `pytest`/`tsc`/`build`/`grep`, НЕ верить отчётам агента.** После
 каждого агента — независимая проверка (прогон тестов/сборки, чтение диффа, греп на фейки).
 
@@ -50,46 +54,62 @@ docker-compose.yml / docker-compose.prod.yml / .env.example / .gitignore
 nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
 
 ## 4. Модель данных (UUID PK `gen_random_uuid()`, `TIMESTAMP(timezone=True)` = UTC)
-- **users:** id, email (unique), password_hash, fio, role `admin|user`, status `active|invited`
-  (флипается `invited→active` при первом успешном входе), is_active, failed_login_attempts,
-  locked_until, created_at/updated_at.
+- **users:** id, email (unique), password_hash, fio, role `admin|user`, **is_superadmin** (bool —
+  защищённый главный админ `pulse@reo.ru`: нельзя удалить/разжаловать/сбросить ему пароль чужими
+  руками), status `active|invited` (новых юзеров создаём сразу `active` — инвайт/temp_password убран),
+  is_active, failed_login_attempts, locked_until, created_at/updated_at.
 - **incidents:** id, source `max|form`, status `new|found|none|exported` (деф. `new`), fio, region,
-  city, street, coords (текст «lat, lon»), photo_time (фотофиксация, ключ сортировки/периода),
-  photos (1..3), photo_urls (JSONB list), msg (id сообщения Макса, nullable), bins (Форма «баки»,
-  nullable, скрыто в таблице по ТЗ §11), received_at («поступило»), created_at/updated_at.
+  city, street, coords (текст «lat, lon»), **comment** (прочая НЕ-адресная инфа: «Радар №…» / ФИО из
+  текста / описание проблемы — AI кладёт сюда, чтобы не терять), photo_time (фотофиксация, ключ
+  сортировки/периода), photos (1..3), photo_urls (JSONB list), msg (id сообщения Макса, nullable),
+  **msg_url** (готовый веб-URL сообщения Макс для ссылки), **notified_at** (момент отправки в
+  Макс-группу), **quote** (сохранённая цитата), bins (Форма «баки», nullable, скрыто в таблице по
+  ТЗ §11), received_at («поступило»), created_at/updated_at.
 - **audit_log:** id, action, entity_type, entity_id, changes (JSONB before/after), actor_type
   `human|system`, actor_user_id (FK users SET NULL), created_at. Пишется на каждое изменение статуса/
   массовое изменение/создание/удаление пользователя/смену профиля.
-- Миграция одна: `alembic/versions/0001_initial.py` (сначала `CREATE EXTENSION pgcrypto`).
+- Миграции: `0001_initial` (сначала `CREATE EXTENSION pgcrypto`) · `0002` notified_at+quote ·
+  `0003` msg_url · `0004` is_superadmin (бэкфилл = старейший admin = pulse@reo.ru) · `0005` comment.
 
 ## 5. API (`/api/v1`, конверт ошибок `{error:{code,message,details}}`)
 - **auth:** `POST /auth/login` → `{access_token,token_type}` + HttpOnly refresh-cookie (path
   `/api/v1/auth/refresh`); `POST /auth/refresh`; `POST /auth/logout`; `GET /auth/me` → UserMe.
-- **incidents:** `GET /incidents` (фильтры search/source[]/status[]/date_from/date_to + sort
+- **incidents:** `GET /incidents` (фильтры search/source[]/status[]/**region**/date_from/date_to + sort
   `date|time|region|city|address|status|source` + order + page/page_size → `Paginated[IncidentListItem]`);
-  `GET /incidents/funnel` (счётчики `{all,new,found,none,exported}`, честят search/source/period БЕЗ
-  status); `GET /incidents/export` (.xlsx по фильтру) + `POST /incidents/export {ids}` (.xlsx выбранных);
-  `POST /incidents/bulk-status {ids,status}`; `GET /incidents/{id}` → IncidentDetail;
-  `PATCH /incidents/{id}/status {status}`. Статичные роуты объявлены ДО `/{id}`.
-- **users** (только admin): `GET /users`; `POST /users {fio,email,role}` → `{...,status:'invited',
-  temp_password}` (письмо НЕ шлётся — честно показываем временный пароль); `DELETE /users/{id}`
-  (нельзя удалить admin-роль и себя).
+  `GET /incidents/funnel` (честят search/source/**region**/period БЕЗ status); `GET /incidents/regions`
+  (DISTINCT регионы → дропдаун фильтра); `GET /incidents/export` (.xlsx по фильтру, **полные** URL фото) +
+  `POST /incidents/export {ids}`; `POST /incidents/bulk-status {ids,status}`; `POST /incidents/bulk-delete
+  {ids}`; `GET /incidents/{id}` → IncidentDetail; `PATCH /incidents/{id}/status {status}`. Статичные роуты
+  (funnel/regions/export/bulk-*) объявлены ДО `/{id}`.
+- **intake** (приём; заголовок `X-Intake-Token`): `POST /intake/max` (Макс-бот: фото+текст), `POST
+  /intake/form` (публичная форма `/form`), `GET /intake/suggest/address` (DaData-Подсказки, прокси),
+  `GET /intake/photo/{id}/{file}` (ПУБЛИЧНАЯ отдача фото), `GET /intake/pending-notify` + `POST
+  /intake/mark-notified` (для уведомлений maxbot в группу). Свободный текст бота разбирает AI
+  (`ai_parse_incident`, claude `-p`, model `CLAUDE_PARSE_MODEL=sonnet`) → region/city/street/coords/time/
+  **comment** (Радар/ФИО/описание — в comment, НЕ в адрес); координаты — БЕСПЛАТНЫМИ Подсказками
+  (`geocode_address`), платный DaData Clean — фолбэк (в проде 403). Лог — `storage/logs/parse.log`;
+  переразбор старых — `python -m app.reprocess [--apply] [--all]`.
+- **users** (только admin): `GET /users` (отдаёт is_superadmin); `POST /users {fio,email,role,password}`
+  → юзер сразу `active` (инвайт/temp_password УБРАН — пароль задаёт админ, 6..128); `POST
+  /users/{id}/password {new_password}` — сброс пароля (ЗАПРЕЩЁН для супер-админа); `DELETE /users/{id}`
+  (нельзя удалить супер-админа, admin-роль и себя).
 - **profile** (self): `PATCH /profile {fio}`; `POST /profile/password {new_password}` (без ввода
   текущего, по ТЗ §9.1; min 6 / max 128).
-- **.xlsx-выгрузка** — 14 колонок в порядке ТЗ §7: Заявитель · Источник · Статус · Регион · Город/н.п. ·
-  Адрес(улица) · Полный адрес · Координаты · Дата фотофиксации(ДД.ММ.ГГГГ) · Время(ЧЧ:ММ) ·
-  Кол-во фото · Ссылка на фото · Ссылка на сообщение(Макс) · Поступило.
+- **.xlsx-выгрузка** — 15 колонок: Заявитель · Источник · Статус · Регион · Город/н.п. · Адрес(улица) ·
+  Полный адрес · Координаты · **Комментарий** · Дата фотофиксации(ДД.ММ.ГГГГ) · Время(ЧЧ:ММ) · Кол-во
+  фото · Ссылка на фото(полные URL) · Ссылка на сообщение(Макс) · Поступило.
 
 ## 6. Экраны (фронт)
 - **/login** — форма входа (useLogin → /auth/login + /auth/me, redirect /incidents).
 - **/incidents** — главный. Шапка (заголовок + счётчик «N обращений…» / «Показано X из N»,
   «Выгрузить всё»), поиск, **воронка** (одиночный выбор статуса, счётчики из /funnel), **фильтры**
-  (источник мульти-чипы + период «с—по»), **bulk-бар** (выгрузить выбранные / пометить «Выгружен» /
+  (источник мульти-чипы + **регион**-дропдаун + период «с—по»), **bulk-бар** (выгрузить выбранные / пометить «Выгружен» /
   снять), **таблица** 10 колонок (Фото·Дата·Время·Регион·Город·Адрес·Координаты·Статус·Источник·Чат),
   сортировка по клику на заголовок (**первый клик — убывание**, повтор — возрастание, ▲/▼), чекбоксы,
-  пустое состояние 💚. Строка → **drawer** (карточка + смена статуса). Миниатюра → **lightbox**.
+  пустое состояние 💚. Строка → **drawer** (карточка вкл. «Комментарий» + смена статуса). Миниатюра → **lightbox**.
 - **/settings** — профиль (Заявитель / email readonly / смена пароля) + блок «Пользователи» (только admin:
-  список, бейджи роли/статуса, инвайт с честным temp_password, удаление/замок для admin).
+  список, бейджи роли/статуса + «Супер-админ», создание юзера С ПАРОЛЕМ (сразу active, без temp_password),
+  кнопка «Задать пароль» у каждого, удаление; у супер-админа удаление/сброс скрыты).
 - Фильтры/сортировка живут в URL (`useSearchParams`); строки `React.memo`; CSS скоупится под
   `.de-inc-*` / `.de-set-*`; цвета только через `--ark-*` токены; бренд — эко-зелёный `--de-brand`.
 
@@ -97,7 +117,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
 **Backend** (локально есть `.venv` python3.14 для проверок; прод — Docker python:3.12):
 ```bash
 cd backend
-.venv/bin/python -m pytest -q          # тесты (оффлайн, без внешней БД) — сейчас 23/23 зелёные
+.venv/bin/python -m pytest -q          # тесты (оффлайн, без внешней БД) — сейчас 116/116 зелёные
 .venv/bin/python -m compileall -q app  # синтаксис
 # в Docker/проде: alembic upgrade head ; python -m app.seed
 ```
@@ -120,9 +140,14 @@ npm run dev            # дев-сервер :5173 (нужен бэк на VITE_
   Секреты репозитория: `SSH_HOST`/`SSH_USER`/`SSH_PRIVATE_KEY`. Первый деплой (clone + .env + seed) —
   вручную. ⚠️ `.github/workflows/*` пушится только токеном со scope `workflow`.
 - **Dev:** `cp .env.example .env && docker compose up --build` (фронт :8080, бек :8000, postgres :5432).
-- **Замечание о среде разработки:** локального Docker/Postgres в этой машине нет — сквозной смоук-тест
-  (логин→таблица→статусы→.xlsx) ещё НЕ прогонялся вживую; «компилируется/тесты/сборка зелёные» ≠
-  «прогнан end-to-end». Первый запуск — на сервере по `DEPLOY.md`.
+- **Прод сейчас (актуальное):** ЖИВ на **`ecopulse.reo.ru`** (HTTPS, Caddy → :8888). claude CLI — токен
+  через `CLAUDE_CODE_OAUTH_TOKEN` в серверном `.env` (**`CLAUDE_TOKEN_FILE` ПУСТОЙ** — файловая шара из
+  ArkadyJarvis протухала 401); нужен и для цитат, и для AI-разбора (sonnet). DaData: Подсказки
+  (бесплатно) работают, Clean (платный) → 403, не подключён (геокод через Подсказки). maxbot — профиль
+  `--profile maxbot`, уведомляет в Макс-группу (`MAX_GROUP_CHAT_ID`). Бэкап БД — `scripts/backup-db.sh` /
+  `scripts/restore-db.sh` (см. DEPLOY.md §9).
+- **Замечание о среде разработки:** локального Docker/Postgres в ЭТОЙ машине нет — здесь только
+  `pytest`/`tsc`/`build`/`grep`; сквозной прогон идёт на сервере (уже работает вживую).
 
 ## 9. Правило №1: НЕТ фейковых заглушек
 Контрол либо работает по-настоящему, либо честно отключён/подписан. Запрещено: `console.log`/
@@ -130,10 +155,16 @@ npm run dev            # дев-сервер :5173 (нужен бэк на VITE_
 тесты против несуществующих эндпоинтов. Пример честности: инвайт возвращает реальный временный
 пароль и подписан «письмо НЕ отправлено» — не утверждать, что письмо ушло.
 
-## 10. Отложенная фаза (НЕ реализуется сейчас — выбор «оператор-админка сначала»)
-Приём из Макса и Яндекс-Формы (webhooks), геокодер адресов, реальные письма (invite/reset). Модель
-данных под них готова (`source`, `msg`, `coords`, `bins`, `status='invited'`), ингестию/почту строим
-отдельным поздним этапом.
+## 10. Что сделано сверх скаффолда / что отложено
+**СДЕЛАНО и в проде:** публичная форма `/form` (DaData-автокомплит + клиентское сжатие фото + серверный
+ресайз), **Макс-бот** (`maxbot/`, long-polling, фото+адрес → инцидент, цитата, уведомления в группу;
+в группе бот молчит на не-фото — принимает только фото+подпись), **AI-разбор адреса** (claude `-p`
+sonnet) + бесплатный геокод через Подсказки, супер-админ + ручные пароли (инвайт убран), фильтр
+региона, поле «Комментарий», ссылки на фото в .xlsx, мотивирующие цитаты (рандомизация промпта),
+бэкап-скрипты, домен+HTTPS.
+**Отложено/заброшено:** Яндекс-Форма webhook — ЗАБРОШЕН (нужен IPv6, VPS IPv4-only → сделали свою
+форму, `/intake/yandex` остался неиспользуемым); реальные письма (invite/reset) — НЕ нужны (пароли
+задаём руками); DaData Clean (платный) — не подключаем (геокод бесплатными Подсказками).
 
 ## 11. Известные мелкие хвосты (low, отложены осознанно)
 - `auth.py`: при истёкшем локауте сброс счётчика не персистится, если затем юзер оказался inactive
