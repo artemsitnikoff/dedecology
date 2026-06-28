@@ -22,13 +22,13 @@
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  padding: 16px 28px 14px;
+  padding: 10px 28px 9px;
   border-bottom: 1px solid var(--border-1);
   flex: none;
 }
 .de-inc-title {
   margin: 0;
-  font-size: 21px;
+  font-size: 19px;
   font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--fg-1);
@@ -36,7 +36,7 @@
 .de-inc-subtitle {
   font-size: var(--fs-12);
   color: var(--fg-3);
-  margin-top: 3px;
+  margin-top: 1px;
 }
 .de-inc-spacer {
   flex: 1;
@@ -557,17 +557,6 @@
   cursor: pointer;
   border-bottom: 1px solid var(--border-2);
   background: var(--bg-1);
-}
-/* пульс-сердце кликнутой строки — всплывает над фото (внутри замороженного блока) и гаснет */
-.de-inc-row-pulse {
-  position: absolute;
-  left: 35px;
-  top: 50%;
-  font-size: 26px;
-  line-height: 1;
-  pointer-events: none;
-  z-index: 5;
-  animation: deHeartPop 0.85s ease-out forwards;
 }
 .de-inc-row:hover {
   background: var(--bg-panel-2);
@@ -1125,7 +1114,7 @@
   border-radius: 999px;
 }
 
-/* анимации (локальные копии прототипных deFade/deCardIn/deBeat/deHeartPop) */
+/* анимации (локальные копии прототипных deFade/deCardIn/deBeat) */
 @keyframes deFade {
   from {
     opacity: 0;
@@ -1160,20 +1149,5 @@
   }
   56% {
     transform: scale(1);
-  }
-}
-/* всплеск сердца на кликнутой строке: появляется, увеличивается и гаснет */
-@keyframes deHeartPop {
-  0% {
-    opacity: 0.95;
-    transform: translate(-50%, -50%) scale(0.4);
-  }
-  55% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.25);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(1.75);
   }
 }

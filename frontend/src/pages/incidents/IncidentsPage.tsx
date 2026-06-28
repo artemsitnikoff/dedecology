@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { useIncidents } from '@/api/hooks/useIncidents';
@@ -192,14 +192,10 @@ export function IncidentsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   // Координаты выезда карточки — считаются из скролл-контейнера таблицы при открытии.
   const [detailPos, setDetailPos] = useState<{ top: number; left: number }>({ top: 170, left: 0 });
-  // Подсветка кликнутой строки (пульс-сердце) на короткое время.
-  const [pulseId, setPulseId] = useState<string | null>(null);
   const [lb, setLb] = useState<{ id: string; idx: number } | null>(null);
 
   /** Скролл-контейнер таблицы — от его геометрии считаем top/left карточки. */
   const scrollRef = useRef<HTMLDivElement>(null);
-  /** Таймер сброса пульса (чистим при повторном открытии/размонтировании). */
-  const pulseTimer = useRef<number | null>(null);
 
   // Стабильная ссылка на выделение для колбэков (сохраняет React.memo строк).
   const selectedRef = useRef(selected);
@@ -232,7 +228,7 @@ export function IncidentsPage() {
 
   /**
    * Открыть карточку: считаем top (верх скролл-контейнера) и left (его левый край +
-   * ширина видимых левых колонок), запускаем drawer и короткий пульс кликнутой строки.
+   * ширина видимых левых колонок) и запускаем drawer.
    */
   const openDetail = useCallback((id: string) => {
     const el = scrollRef.current;
@@ -244,18 +240,6 @@ export function IncidentsPage() {
       });
     }
     setDetailId(id);
-    setPulseId(id);
-    if (pulseTimer.current != null) window.clearTimeout(pulseTimer.current);
-    pulseTimer.current = window.setTimeout(() => {
-      setPulseId((p) => (p === id ? null : p));
-    }, 850);
-  }, []);
-
-  // Чистим таймер пульса при размонтировании страницы.
-  useEffect(() => {
-    return () => {
-      if (pulseTimer.current != null) window.clearTimeout(pulseTimer.current);
-    };
   }, []);
 
   const openPhoto = useCallback((id: string) => setLb({ id, idx: 0 }), []);
@@ -453,7 +437,6 @@ export function IncidentsPage() {
             sort={sort}
             order={order}
             allSelected={allSelected}
-            pulseId={pulseId}
             onSort={handleSort}
             onToggleAll={toggleAll}
             onToggleSelect={toggleSelect}
