@@ -159,18 +159,16 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
               <div className="de-inc-field-val">{v}</div>
             </div>
           ))}
-          {/* Комментарий — только если непустой; длинный/многострочный текст переносится. */}
-          {!!d.comment?.trim() && (
-            <div className="de-inc-field">
-              <div className="de-inc-field-key">Комментарий</div>
-              <div
-                className="de-inc-field-val"
-                style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-              >
-                {d.comment}
-              </div>
+          {/* Комментарий — поле показываем ВСЕГДА (пустое = «—»); многострочный текст переносится. */}
+          <div className="de-inc-field">
+            <div className="de-inc-field-key">Комментарий</div>
+            <div
+              className="de-inc-field-val"
+              style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+            >
+              {d.comment?.trim() || '—'}
             </div>
-          )}
+          </div>
         </div>
 
         {link && (
