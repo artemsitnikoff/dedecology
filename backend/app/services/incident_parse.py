@@ -16,6 +16,7 @@ import logging
 import re
 
 from ..config import settings
+from . import parse_log
 from .claude_cli import claude_cli_complete
 
 logger = logging.getLogger(__name__)
@@ -102,22 +103,29 @@ async def ai_parse_incident(text: str) -> dict | None:
     if not cleaned:
         return None
 
+    model = settings.CLAUDE_PARSE_MODEL
+    prompt = _PROMPT_PREFIX + cleaned + _PROMPT_SUFFIX
     try:
         raw = await claude_cli_complete(
-            prompt=_PROMPT_PREFIX + cleaned + _PROMPT_SUFFIX,
-            model=settings.CLAUDE_PARSE_MODEL,
+            prompt=prompt,
+            model=model,
             timeout=settings.CLAUDE_QUOTE_TIMEOUT,
         )
     except Exception as e:  # noqa: BLE001 — CLI не должен ронять приём
         logger.warning("[incident_parse] сбой claude CLI: %s: %s", type(e).__name__, e)
+        parse_log.log_ai(cleaned, model, prompt, f"(ошибка CLI: {type(e).__name__})", None)
         return None
 
     if not raw:
+        parse_log.log_ai(cleaned, model, prompt, None, None)
         return None
 
     data = _extract_json(raw)
     if data is None:
         logger.warning("[incident_parse] не удалось извлечь JSON из ответа CLI")
+        parse_log.log_ai(cleaned, model, prompt, raw, None)
         return None
 
-    return {key: _as_str(data.get(key)) for key in _KEYS}
+    result = {key: _as_str(data.get(key)) for key in _KEYS}
+    parse_log.log_ai(cleaned, model, prompt, raw, result)
+    return result

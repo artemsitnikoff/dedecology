@@ -21,6 +21,7 @@ from ..core.errors import ValidationError
 from ..models import Incident
 from .audit import audit
 from .dadata import clean_address
+from . import parse_log
 from .incident_parse import ai_parse_incident
 
 logger = logging.getLogger(__name__)
@@ -250,6 +251,7 @@ async def resolve_address(
     ai_dict: dict | None = ai if isinstance(ai, dict) else None
 
     region = city = street = coords = ""
+    path = "—"
     resolved = False
     try:
         if ai_dict and (
@@ -275,6 +277,7 @@ async def resolve_address(
                 coords = _clean_str(cleaned.get("coords")) or _clean_str(
                     ai_dict.get("coords")
                 )
+                path = "ai+dadata"
                 logger.info("[resolve_address] путь=ai+dadata")
             else:
                 # DaData недоступна → поля AI как есть (+ координаты из текста).
@@ -282,6 +285,7 @@ async def resolve_address(
                 city = _clean_str(ai_dict.get("city"))
                 street = _clean_str(ai_dict.get("street"))
                 coords = _clean_str(ai_dict.get("coords"))
+                path = "ai-only"
                 logger.info("[resolve_address] путь=ai-only (DaData недоступна)")
             resolved = True
     except Exception as e:  # noqa: BLE001 — DaData/разбор не должны ронять приём
@@ -302,12 +306,15 @@ async def resolve_address(
             city = _clean_str(cleaned.get("city"))
             street = _clean_str(cleaned.get("street"))
             coords = _clean_str(cleaned.get("coords"))
+            path = "dadata-raw"
             logger.info("[resolve_address] путь=dadata-raw")
         else:
             region, city, street = _parse_address(raw_text)
             coords = ""
+            path = "heuristic"
             logger.info("[resolve_address] путь=heuristic")
 
+    parse_log.log_resolved(raw_text, path, region, city, street, coords)
     return region, city, street, coords
 
 
