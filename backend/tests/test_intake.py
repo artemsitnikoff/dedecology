@@ -1425,24 +1425,49 @@ async def test_ai_parse_incident_empty_text_skips_cli():
 
 
 @pytest.mark.asyncio
-async def test_nature_quote_returns_curated_real_quote():
-    """nature_quote отдаёт ПОДЛИННУЮ цитату строго из выверенного списка (без CLI/фабрикации)."""
+async def test_nature_quote_uses_valid_cli_result():
+    """CLI вернул валидную цитату («…» — Автор) → используется (схлопнута в одну строку)."""
     from app.services import quotes as quotes_service
 
-    quote = await quotes_service.nature_quote()
-    assert isinstance(quote, str)
-    assert quote.strip()
-    assert quote in quotes_service._QUOTES
+    with patch(
+        "app.services.quotes.claude_cli_complete",
+        new=AsyncMock(return_value="  «Берегите природу — она одна.»\n  — Иван Петров  "),
+    ):
+        q = await quotes_service.nature_quote()
+    assert q == "«Берегите природу — она одна.» — Иван Петров"
 
 
 @pytest.mark.asyncio
-async def test_nature_quote_always_from_list_and_safe():
-    """Любой вызов → непустая строка строго из _QUOTES; не бросает (50 прогонов)."""
+async def test_nature_quote_refusal_falls_back_to_list():
+    """CLI отказался («Я не могу придумывать…») → фолбэк на список, отказ НЕ попадает в ответ."""
     from app.services import quotes as quotes_service
 
-    for _ in range(50):
+    refusal = "Я не могу придумывать цитаты и приписывать их реальным людям."
+    with patch("app.services.quotes.claude_cli_complete", new=AsyncMock(return_value=refusal)):
         q = await quotes_service.nature_quote()
-        assert q in quotes_service._QUOTES
+    assert q in quotes_service._QUOTES
+    assert "не могу" not in q.lower()
+
+
+@pytest.mark.asyncio
+async def test_nature_quote_none_falls_back_to_list():
+    """CLI недоступен (None) → непустая подлинная цитата из выверенного списка."""
+    from app.services import quotes as quotes_service
+
+    with patch("app.services.quotes.claude_cli_complete", new=AsyncMock(return_value=None)):
+        q = await quotes_service.nature_quote()
+    assert q in quotes_service._QUOTES
+
+
+def test_clean_quote_validation():
+    """_clean_quote: валидную пропускает, отказ/прозу/слишком длинное — отбрасывает (None)."""
+    from app.services.quotes import _clean_quote
+
+    assert _clean_quote("  «Цитата.»\n — Автор  ") == "«Цитата.» — Автор"
+    assert _clean_quote("Я не могу придумывать цитаты.") is None
+    assert _clean_quote("Просто текст без кавычек и автора") is None
+    assert _clean_quote(None) is None
+    assert _clean_quote("«" + "д" * 400 + "» — Автор") is None
 
 
 # --------------------------------------------------------------------------- #
