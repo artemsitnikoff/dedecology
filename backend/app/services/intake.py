@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..core.errors import ValidationError
 from ..models import Incident
+from .addr_norm import normalize_city, normalize_region
 from .audit import audit
 from .dadata import clean_address, geocode_address
 from . import parse_log
@@ -176,6 +177,10 @@ async def create_incident_from_form(
     fio = _clean_str(params.get("fio"))
 
     region, city, street = _parse_address(full_address)
+    # Регион/город могут прийти в сокращённой DaData-форме внутри full_address —
+    # унифицируем ТИП субъекта к полной форме (как и в Макс-боте/reprocess).
+    region = normalize_region(region)
+    city = normalize_city(city)
     bins = _parse_bins(params.get("bins"))
     photo_time = _parse_photo_time(params.get("photo_time"))
     photo_urls = _parse_photo_urls(params.get("photos"))
@@ -318,6 +323,14 @@ async def resolve_address(
             coords = ""
             path = "heuristic"
             logger.info("[resolve_address] путь=heuristic")
+
+    # Единая нормализация ТИПА региона (и лёгкая — города) к полной канонической
+    # форме, общая для ВСЕХ путей выше (ai+dadata / ai-only / dadata-raw /
+    # heuristic): сокращённый region_with_type DaData («Самарская обл», «Респ
+    # Татарстан», «г Москва») приводится к полной форме AI/сида («Самарская
+    # область», …), иначе фильтр/группировка дробит один регион на два значения.
+    region = normalize_region(region)
+    city = normalize_city(city)
 
     parse_log.log_resolved(raw_text, path, region, city, street, coords)
     return region, city, street, coords
@@ -574,6 +587,12 @@ async def create_incident_from_public_form(
 
     if not (region or city or street):
         region, city, street = _parse_address(full_address)
+
+    # region/city приходят из DaData-автокомплита фронта (region_with_type в
+    # сокращённой форме) — унифицируем ТИП субъекта к полной канонической форме,
+    # как и в остальных путях приёма.
+    region = normalize_region(region)
+    city = normalize_city(city)
 
     # Отсекаем текст до ширины колонок БД (после вывода region/city/street).
     fio = fio[: _FIELD_LIMITS["fio"]]

@@ -801,7 +801,9 @@ async def test_max_intake_creates_incident(client, fake_session, monkeypatch, tm
     assert incident.msg == "msg-123"
     # Готовый https-URL сообщения проброшен из формы и сохранён как есть.
     assert incident.msg_url == "https://max.ru/c/-75787158905457/AZ8DNeZnbkM"
-    assert incident.region == "Самарская обл"
+    # ТИП региона нормализован к полной форме («обл» → «область»); город DaData
+    # «г Кинель» оставлен как есть (унификация типа пункта неоднозначна).
+    assert incident.region == "Самарская область"
     assert incident.city == "г Кинель"
     assert incident.street == "ул Маяковского, д 41"
     assert incident.coords == "53.2, 50.6"
@@ -924,8 +926,9 @@ async def test_max_service_ai_address_dadata_wins_coords(fake_session):
         )
 
     assert incident.source == "max"
-    assert incident.region == "Нижегородская обл"  # DaData
-    assert incident.city == "г Нижний Новгород"  # DaData
+    # DaData отдала «Нижегородская обл» → нормализовано к полной форме «область».
+    assert incident.region == "Нижегородская область"
+    assert incident.city == "г Нижний Новгород"  # DaData (тип пункта не трогаем)
     assert incident.street == "ул Сергея Есенина, д 38"  # DaData
     assert incident.coords == "56.23, 44.05"  # DaData геокод авторитетен
     fake_ai.assert_awaited_once()
@@ -1311,7 +1314,7 @@ async def test_resolve_address_ai_none_dadata_raw():
             "Самарская область, г. Кинель, ул. Маяковского, 41"
         )
 
-    assert region == "Самарская обл"
+    assert region == "Самарская область"  # «обл» нормализовано к полной форме
     assert city == "г Кинель"
     assert street == "ул Маяковского, д 41"
     assert coords == "53.2, 50.6"
@@ -1396,7 +1399,8 @@ async def test_resolve_address_uses_geocode_coords():
             "Самарская область, Кинель, Маяковского 41"
         )
 
-    assert region == "Самарская обл"  # geocode (Подсказки)
+    # geocode (Подсказки) дал «Самарская обл» → нормализовано к полной форме.
+    assert region == "Самарская область"
     assert city == "г Кинель"
     assert street == "ул Маяковского, 41"  # дом сохранён
     assert coords == "53.22, 50.63"  # геокод из бесплатных Подсказок
