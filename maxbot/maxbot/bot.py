@@ -254,10 +254,10 @@ def build_router() -> Router:
                     if isinstance(result, dict):
                         quote = (result.get("quote") or "").strip()
                     reply = _REPLY_ACCEPTED + (f"\n\n{quote}" if quote else "")
-                    # В личке отвечаем волонтёру; в группе молчим (туда уведомление
-                    # отправит notify_loop отдельной карточкой).
-                    if not is_group:
-                        await msg.answer(text=reply)
+                    # Отвечаем в ТОМ ЖЕ чате, где пришло сообщение: личка → в личку,
+                    # группа → в группу. Отдельную карточку в группу для max-обращений
+                    # больше НЕ шлём (notify-карточка осталась только для формы).
+                    await msg.answer(text=reply)
                     return
 
             # Невалидно (нет фото / пустой текст) — МОЛЧИМ, в чат ничего не пишем (по требованию).

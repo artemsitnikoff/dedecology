@@ -207,7 +207,7 @@ async def list_pending_notify(session: AsyncSession, limit: int = 20) -> list[In
     """
     stmt = (
         select(Incident)
-        .where(Incident.notified_at.is_(None))
+        .where(Incident.notified_at.is_(None), Incident.source == "form")
         .order_by(asc(Incident.created_at), asc(Incident.id))
         .limit(limit)
     )

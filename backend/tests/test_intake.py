@@ -1425,33 +1425,24 @@ async def test_ai_parse_incident_empty_text_skips_cli():
 
 
 @pytest.mark.asyncio
-async def test_nature_quote_falls_back_when_cli_none():
-    """claude_cli_complete → None: nature_quote отдаёт непустую цитату из фолбэка."""
+async def test_nature_quote_returns_curated_real_quote():
+    """nature_quote отдаёт ПОДЛИННУЮ цитату строго из выверенного списка (без CLI/фабрикации)."""
     from app.services import quotes as quotes_service
 
-    with patch(
-        "app.services.quotes.claude_cli_complete",
-        new=AsyncMock(return_value=None),
-    ):
-        quote = await quotes_service.nature_quote()
-
+    quote = await quotes_service.nature_quote()
     assert isinstance(quote, str)
     assert quote.strip()
-    assert quote in quotes_service._FALLBACK
+    assert quote in quotes_service._QUOTES
 
 
 @pytest.mark.asyncio
-async def test_nature_quote_uses_cli_result_cleaned():
-    """Ответ CLI схлопывается в одну строку и используется как есть."""
+async def test_nature_quote_always_from_list_and_safe():
+    """Любой вызов → непустая строка строго из _QUOTES; не бросает (50 прогонов)."""
     from app.services import quotes as quotes_service
 
-    with patch(
-        "app.services.quotes.claude_cli_complete",
-        new=AsyncMock(return_value="  «Береги природу»\n  — Иван Иванов  "),
-    ):
-        quote = await quotes_service.nature_quote()
-
-    assert quote == "«Береги природу» — Иван Иванов"
+    for _ in range(50):
+        q = await quotes_service.nature_quote()
+        assert q in quotes_service._QUOTES
 
 
 # --------------------------------------------------------------------------- #
