@@ -1,6 +1,8 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { useFunnelCounts } from '@/api/hooks/useFunnelCounts';
+import { useMno } from '@/api/hooks/mno';
+import { useRegionsDirectory } from '@/api/hooks/regions';
 import { api } from '@/api/client';
 import { Avatar } from './ui/Avatar';
 import { Icon, type IconName } from './ui/Icon';
@@ -22,9 +24,11 @@ export function Sidebar() {
   const user = useAuthStore((s) => s.user);
   const clearAuth = useAuthStore((s) => s.logout);
 
-  // Реальный нефильтрованный итог инцидентов (тот же queryKey, что и на экране
-  // «Инциденты» → дедуп). Пока грузится — число не задаём (без фейков).
+  // Реальные нефильтрованные итоги (те же queryKey, что и на экранах → дедуп).
+  // Пока грузится — count undefined, бейдж не рисуется (без фейков).
   const incidentsCount = useFunnelCounts({}).data?.all;
+  const mnoCount = useMno({}).data?.length;
+  const regionsCount = useRegionsDirectory({}).data?.length;
 
   const handleLogout = async () => {
     // Гасим refresh-cookie на сервере; даже если запрос упал — разлогиниваем локально.
@@ -40,20 +44,40 @@ export function Sidebar() {
   const getActiveSection = () => {
     const path = location.pathname;
     if (path.startsWith('/incidents') || path === '/') return 'incidents';
+    if (path.startsWith('/mno')) return 'mno';
+    if (path.startsWith('/regions')) return 'regions';
     if (path.startsWith('/settings')) return 'settings';
     return '';
   };
 
   const activeSection = getActiveSection();
 
-  // Бейдж счётчика инцидентов — реальный нефильтрованный all из useFunnelCounts.
-  // Пока грузится (incidentsCount === undefined) — бейдж не рисуется (без фейков).
-  const nav: NavItem[] = [
+  // Основная навигация (до группы «Справочники»).
+  const mainNav: NavItem[] = [
     { id: 'incidents', label: 'Инциденты', icon: 'incidents', count: incidentsCount },
-    { id: 'settings', label: 'Настройки', icon: 'settings' },
+    { id: 'mno', label: 'МНО', icon: 'pin', count: mnoCount },
+  ];
+  // Справочники.
+  const refNav: NavItem[] = [
+    { id: 'regions', label: 'Регионы', icon: 'map', count: regionsCount },
   ];
 
   const roleLabel = user?.role === 'admin' ? 'Администратор' : 'Пользователь';
+
+  const renderNav = (n: NavItem) => {
+    const isActive = activeSection === n.id;
+    return (
+      <button
+        key={n.id}
+        className={`nav-row ${isActive ? 'active' : ''}`}
+        onClick={() => navigate(`/${n.id}`)}
+      >
+        <Icon name={n.icon} size={18} className="nav-row-icon" />
+        <span className="nav-row-label">{n.label}</span>
+        {typeof n.count === 'number' && <span className="nav-row-count">{n.count}</span>}
+      </button>
+    );
+  };
 
   return (
     <aside className="sidebar-wide">
@@ -71,20 +95,14 @@ export function Sidebar() {
       </div>
 
       <div className="nav-wide">
-        {nav.map((n) => {
-          const isActive = activeSection === n.id;
-          return (
-            <button
-              key={n.id}
-              className={`nav-row ${isActive ? 'active' : ''}`}
-              onClick={() => navigate(`/${n.id}`)}
-            >
-              <Icon name={n.icon} size={18} className="nav-row-icon" />
-              <span className="nav-row-label">{n.label}</span>
-              {typeof n.count === 'number' && <span className="nav-row-count">{n.count}</span>}
-            </button>
-          );
-        })}
+        {mainNav.map(renderNav)}
+
+        <div className="nav-group-label">Справочники</div>
+        {refNav.map(renderNav)}
+
+        <div className="nav-spacer" />
+
+        {renderNav({ id: 'settings', label: 'Настройки', icon: 'settings' })}
       </div>
 
       <div className="user-card-wide">

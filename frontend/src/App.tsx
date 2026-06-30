@@ -14,6 +14,10 @@ const IncidentsPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import('@/pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage }))
 );
+const MnoPage = lazy(() => import('@/pages/mno/MnoPage').then((m) => ({ default: m.MnoPage })));
+const RegionsPage = lazy(() =>
+  import('@/pages/regions/RegionsPage').then((m) => ({ default: m.RegionsPage }))
+);
 const NotFoundPage = lazy(() =>
   import('@/pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage }))
 );
@@ -82,6 +86,8 @@ export default function App() {
       >
         <Route index element={<Navigate to="/incidents" replace />} />
         <Route path="incidents" element={<IncidentsPage />} />
+        <Route path="mno" element={<MnoPage />} />
+        <Route path="regions" element={<RegionsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />

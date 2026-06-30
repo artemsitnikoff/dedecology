@@ -28,6 +28,49 @@
     { id:'i13', source:'max',  status:'exported', fio:'Фёдорова Юлия Олеговна', phone:'+7 937 901-36-58', region:'Самарская область', city:'г. Кинель', street:'ул. Фестивальная, 9 (Радар №117905)', coords:'53.225600, 50.641000', photoTime:'20.04.2026, 13:27', photos:1, msg:'max-msg-117905', dateRaw:'2026-04-20 13:35' },
   ];
 
+  // ===== Справочник: федеральные округа (нумерация как в ФГИС) =====
+  const FED = {
+    1: { code: 'ЦФО',  name: 'Центральный' },
+    2: { code: 'СЗФО', name: 'Северо-Западный' },
+    3: { code: 'ЮФО',  name: 'Южный' },
+    4: { code: 'СКФО', name: 'Северо-Кавказский' },
+    5: { code: 'ПФО',  name: 'Приволжский' },
+    6: { code: 'УФО',  name: 'Уральский' },
+    7: { code: 'СФО',  name: 'Сибирский' },
+    8: { code: 'ДФО',  name: 'Дальневосточный' },
+  };
+
+  // ===== Справочник: Регионы (субъекты РФ). code = код субъекта = regionId в ФГИС =====
+  const REGIONS = [
+    { code:'63', name:'Самарская область',    fed:5, operators:['ЭкоСтройРесурс'], active:true, lastSync:'2026-04-26 06:30' },
+    { code:'77', name:'Москва',               fed:1, operators:['ГБУ «Экотехпром»','МКМ-Логистика','Хартия','МСК-НТ'], active:true, lastSync:'2026-04-25 07:00' },
+    { code:'78', name:'Санкт-Петербург',      fed:2, operators:['Невский экологический оператор'], active:true, lastSync:'2026-04-22 09:00' },
+    { code:'16', name:'Республика Татарстан', fed:5, operators:['УК «ПЖКХ»','Гринта'], active:true, lastSync:'2026-04-24 08:00' },
+    { code:'52', name:'Нижегородская область',fed:5, operators:['«Нижэкология-НН»','Реал-Кстово','МСК-НТ'], active:true, lastSync:'2026-04-23 08:00' },
+    { code:'66', name:'Свердловская область', fed:6, operators:['«Спецавтобаза»','Рифей','ТБО «Экосервис»'], active:true, lastSync:'2026-04-25 10:00' },
+    { code:'53', name:'Новгородская область', fed:2, operators:['«Спецавтохозяйство»'], active:true, lastSync:'2026-04-20 06:00' },
+    { code:'73', name:'Ульяновская область',  fed:5, operators:[], active:false, lastSync:'' },
+  ];
+
+  // ===== МНО — места накопления отходов (слой 5 ФГИС) =====
+  const MNO = [
+    { id:'m01', reg:'63-04-001162', name:'Контейнерная площадка, ул. Бульварная, 18',    regionCode:'63', city:'пгт Усть-Кинельский', address:'Бульварная улица, 18',    coords:'53.231410, 50.166820', synced:true,  syncDate:'2026-04-26 06:30', incidents:1, fgisId:'02e29deb-1aa8-4949-a1c2-8db71252acb6' },
+    { id:'m02', reg:'63-04-001180', name:'Контейнерная площадка, ул. Маяковского, 41',    regionCode:'63', city:'г. Кинель',          address:'ул. Маяковского, 41',    coords:'53.222900, 50.629100', synced:true,  syncDate:'2026-04-26 06:30', incidents:1, fgisId:'1b6f3c20-7d11-4a8e-9f02-2c44a1e6b730' },
+    { id:'m03', reg:'63-04-000159', name:'Контейнерная площадка, ул. Центральная, 7',     regionCode:'63', city:'с. Сырейка',         address:'ул. Центральная, 7',     coords:'53.301200, 50.420000', synced:true,  syncDate:'2026-04-26 06:30', incidents:1, fgisId:'9c7a44e1-0b53-4f6d-8a21-6e9d0c12fa84' },
+    { id:'m04', reg:'63-04-001164', name:'Контейнерная площадка, ул. Спортивная, 4',      regionCode:'63', city:'пгт Усть-Кинельский', address:'Спортивная улица, 4',    coords:'53.232000, 50.170300', synced:false, syncDate:'',                 incidents:1, fgisId:'4d2e8810-5a6b-4c3d-b1f7-7a0e9d551c22' },
+    { id:'m05', reg:'63-04-001172', name:'Контейнерная площадка, ул. 27 Партсъезда, 1Б',  regionCode:'63', city:'г. Кинель',          address:'ул. 27 Партсъезда, 1Б',  coords:'53.220100, 50.638400', synced:true,  syncDate:'2026-04-26 06:30', incidents:1, fgisId:'7f10a3b9-2c84-49e1-a6d3-0b5f8e44d910' },
+    { id:'m06', reg:'63-04-001167', name:'Контейнерная площадка, ул. Невская, 22',        regionCode:'63', city:'пос. Алексеевка',    address:'ул. Невская, 22',        coords:'53.181000, 50.020500', synced:true,  syncDate:'2026-04-26 06:30', incidents:1, fgisId:'a3c91f57-6d20-4b8a-9e14-3f7c2d60ab85' },
+    { id:'m07', reg:'63-04-001179', name:'Контейнерная площадка, ул. Фестивальная, 9',    regionCode:'63', city:'г. Кинель',          address:'ул. Фестивальная, 9',    coords:'53.225600, 50.641000', synced:true,  syncDate:'2026-04-26 06:30', incidents:1, fgisId:'c5e07b42-8a19-4d63-b2f0-1e9a4c87d536' },
+    { id:'m08', reg:'63-04-001181', name:'Контейнерная площадка, ул. Украинская, 3',      regionCode:'63', city:'г. Кинель',          address:'ул. Украинская, 3',      coords:'53.228000, 50.632000', synced:true,  syncDate:'2026-04-26 06:30', incidents:0, fgisId:'e81d2a64-3f57-4c90-a7b1-5d0e6b29f413' },
+    { id:'m09', reg:'63-04-001165', name:'Контейнерная площадка, ул. Шоссейная, 12',      regionCode:'63', city:'пгт Усть-Кинельский', address:'Шоссейная улица, 12',    coords:'53.236000, 50.158000', synced:true,  syncDate:'2026-04-26 06:30', incidents:0, fgisId:'6b4f9c07-1e83-42da-90c5-8a2d7f015e6b' },
+    { id:'m10', reg:'77-18-004521', name:'Контейнерная площадка, корпус 1462',            regionCode:'77', city:'Зеленоград',         address:'корпус 1462',            coords:'55.991400, 37.214700', synced:true,  syncDate:'2026-04-25 07:00', incidents:1, fgisId:'d7a3e510-9b26-4f81-8c04-2e6b1a93c7d8' },
+    { id:'m11', reg:'78-06-002210', name:'Контейнерная площадка, пр. Космонавтов, 28',    regionCode:'78', city:'Санкт-Петербург',    address:'пр. Космонавтов, 28',    coords:'59.852300, 30.350100', synced:true,  syncDate:'2026-04-22 09:00', incidents:1, fgisId:'0f5c8b21-7a40-4e63-9d12-4b8e0a6f3c95' },
+    { id:'m12', reg:'16-01-003344', name:'Контейнерная площадка, ул. Чистопольская, 61А', regionCode:'16', city:'Казань',            address:'ул. Чистопольская, 61А', coords:'55.821700, 49.111300', synced:false, syncDate:'',                 incidents:1, fgisId:'b29d4e76-5c81-403a-8f25-7a1c6d09e482' },
+    { id:'m13', reg:'52-01-002901', name:'Контейнерная площадка, ул. Бекетова, 13',       regionCode:'52', city:'Нижний Новгород',    address:'ул. Бекетова, 13',       coords:'56.288800, 43.991200', synced:true,  syncDate:'2026-04-23 08:00', incidents:1, fgisId:'38e1c9a0-6b47-4d52-91f8-0c5a2e74b613' },
+    { id:'m14', reg:'66-01-005012', name:'Контейнерная площадка, ул. Сулимова, 38',       regionCode:'66', city:'Екатеринбург',      address:'ул. Сулимова, 38',       coords:'56.851200, 60.617900', synced:true,  syncDate:'2026-04-25 10:00', incidents:1, fgisId:'5a0b7f33-2d68-4c19-a8e4-9f1d6037b285' },
+    { id:'m15', reg:'53-01-000412', name:'Контейнерная площадка, ул. Радужная, 15',       regionCode:'53', city:'Великий Новгород',   address:'ул. Радужная, 15',       coords:'58.521800, 31.275000', synced:false, syncDate:'',                 incidents:1, fgisId:'91c46de8-0a72-4b35-86f1-3d8e2a5c049b' },
+  ];
+
   function initials(name) { const p = name.split(/\s+/); return ((p[0] || '')[0] || '') + ((p[1] || '')[0] || ''); }
   function dateShort(raw) { const a = raw.split(' '); const d = a[0].split('-'); return d[2] + '.' + d[1] + ' · ' + a[1]; }
   function photoParts(pt) {
@@ -101,9 +144,42 @@
     document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // ---- МНО / регионы ----
+  function regionName(code) { const r = REGIONS.find(x => x.code === code); return r ? r.name : code; }
+  function mnoToCsv(rows) {
+    const cols = [
+      ['Реестровый номер', m => m.reg],
+      ['Наименование', m => m.name],
+      ['Регион', m => regionName(m.regionCode)],
+      ['Город / н.п.', m => m.city],
+      ['Адрес', m => m.address],
+      ['Координаты', m => m.coords],
+      ['ФГИС-ID', m => m.fgisId || ''],
+      ['Синхронизация', m => m.synced ? ('ФГИС, ' + m.syncDate) : 'Добавлено вручную'],
+      ['Обращений по МНО', m => String(m.incidents)],
+    ];
+    const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
+    const head = cols.map(c => esc(c[0])).join(';');
+    const body = rows.map(r => cols.map(c => esc(c[1](r))).join(';')).join('\r\n');
+    return '\uFEFF' + head + '\r\n' + body;
+  }
+  function downloadMno(rows, name) {
+    if (!rows.length) return;
+    const blob = new Blob([mnoToCsv(rows)], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function nowStr() {
+    const d = NOW, p = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
   window.de = {
-    STATUS, SOURCE, INCIDENTS, NOW,
+    STATUS, SOURCE, INCIDENTS, NOW, FED, REGIONS, MNO,
     initials, dateShort, photoParts, inPeriod, regionOf, fullAddr, messageLink, photoSrcs,
-    dot, pillStatus, pillSource, chipStyle, checkStyle, download,
+    regionName, nowStr,
+    dot, pillStatus, pillSource, chipStyle, checkStyle, download, mnoToCsv, downloadMno,
   };
 })();

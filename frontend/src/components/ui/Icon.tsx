@@ -31,6 +31,9 @@ import {
   Mail,
   AlertCircle,
   Leaf,
+  Map,
+  List,
+  Building2,
 } from 'lucide-react';
 
 /**
@@ -78,6 +81,9 @@ const iconMap = {
   mail: Mail,
   'alert-circle': AlertCircle,
   leaf: Leaf,
+  map: Map,
+  list: List,
+  building: Building2,
 } as const;
 
 export type IconName = keyof typeof iconMap;

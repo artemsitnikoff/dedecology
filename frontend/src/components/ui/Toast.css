@@ -1,0 +1,40 @@
+/* Тост — фиксирован снизу по центру, поверх drawer'ов и модалок. */
+.de-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 560px;
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: var(--fg-1);
+  color: var(--ark-white);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  line-height: 1.4;
+  box-shadow: var(--shadow-lg);
+  animation: deToastUp 0.18s var(--ease-out);
+}
+.de-toast-mark {
+  font-size: 16px;
+  line-height: 1;
+  flex: none;
+}
+.de-toast-text {
+  min-width: 0;
+}
+
+@keyframes deToastUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

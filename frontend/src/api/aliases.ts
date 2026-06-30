@@ -117,6 +117,99 @@ export interface UserCreate {
   password: string;
 }
 
+/* ============================================================
+   МНО (места накопления отходов) и Регионы (справочник субъектов РФ).
+   Заглушки интеграций ФГИС/карт — данные реальные (сиды на бэке), интеграции нет.
+   ============================================================ */
+
+/** Федеральный округ (справочник GET /federal-districts, нумерация ФГИС). */
+export interface FederalDistrict {
+  /** Числовой id округа (1..8 по контракту). */
+  id: number;
+  /** Краткий код («ЦФО», «СЗФО», …). */
+  code: string;
+  /** Полное название («Центральный», «Северо-Западный», …). */
+  name: string;
+}
+
+/** Строка списка МНО (GET /mno) и деталь (GET /mno/{id}) — поля совпадают. */
+export interface MnoListItem {
+  id: string;
+  /** Реестровый № («63-04-001162»). */
+  reg: string;
+  name: string;
+  /** Код субъекта РФ (= Region.code, напр. «63»). */
+  region_code: string;
+  /** Имя субъекта РФ (резолвится бэком по region_code). */
+  region_name: string;
+  city: string;
+  address: string;
+  /** «широта, долгота» текстом. */
+  coords: string;
+  /** ID в ФГИС; null/пусто — добавлено вручную, ещё не синхронизировано. */
+  fgis_id: string | null;
+  /** Синхронизировано ли с ФГИС. */
+  synced: boolean;
+  /** ISO-дата синхронизации или null. */
+  sync_date: string | null;
+  /** Кол-во обращений по МНО (сидовое/хранимое значение). */
+  incidents: number;
+}
+
+/** Деталь МНО (GET /mno/{id}) — те же поля, что и в списке. */
+export type MnoDetail = MnoListItem;
+
+/** Тело создания МНО (POST /mno). Обязательны name+coords; synced=false, fgis_id=null. */
+export interface MnoCreate {
+  name: string;
+  reg: string;
+  region_code: string;
+  city: string;
+  address: string;
+  coords: string;
+}
+
+/** Результат заглушки синхронизации (POST /mno/sync). */
+export interface MnoSyncResult {
+  /** Сколько МНО помечено synced в этом вызове. */
+  synced: number;
+  /** Всего МНО в реестре. */
+  total: number;
+}
+
+/** Строка списка регионов (GET /regions) и деталь (GET /regions/{code}). */
+export interface RegionListItem {
+  /** Код субъекта (= regionId ФГИС, напр. «63»). */
+  code: string;
+  name: string;
+  /** id федерального округа. */
+  fed: number;
+  /** Краткий код округа («ПФО»). */
+  fed_code: string;
+  /** Название округа («Приволжский»). */
+  fed_name: string;
+  /** Региональные операторы по ТКО (несколько). */
+  operators: string[];
+  active: boolean;
+  /** ISO-дата последней синхронизации или null. */
+  last_sync: string | null;
+  /** Число МНО региона. */
+  mno_count: number;
+  /** Число обращений (Incident.region == Region.name). */
+  incidents_count: number;
+}
+
+/** Деталь региона (GET /regions/{code}) — те же поля. */
+export type RegionDetail = RegionListItem;
+
+/** Тело создания региона (POST /regions). Создаётся active=true. */
+export interface RegionCreate {
+  code: string;
+  name: string;
+  fed: number;
+  operators: string[];
+}
+
 /** Конверт ошибки API: { error: { code, message, details } }. */
 export interface ApiError {
   error: {

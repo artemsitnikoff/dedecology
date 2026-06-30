@@ -3,10 +3,13 @@ function App() {
   const { useState, useMemo, useRef } = React;
 
   const [data, setData] = useState(de.INCIDENTS.map(d => ({ ...d })));
+  const [mno, setMno] = useState(de.MNO.map(m => ({ ...m })));
+  const [regions, setRegions] = useState(de.REGIONS.map(r => ({ ...r, operators: r.operators.slice() })));
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
   const [view, setView] = useState('incidents');
+  const [fRegion, setFRegion] = useState('');
   const [fSources, setFSources] = useState([]);
   const [fStatuses, setFStatuses] = useState([]);
   const [fFrom, setFFrom] = useState('');
@@ -18,6 +21,15 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const scrollRef = useRef(null);
   const [lb, setLb] = useState(null); // { id, idx }
+  const [toast, setToast] = useState('');
+  const toastTimer = useRef(null);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(''), 4200);
+  };
+  const nav = (v) => { setView(v); setDetailId(null); setLb(null); };
 
   const openDetail = (id) => {
     const top = scrollRef.current ? Math.round(scrollRef.current.getBoundingClientRect().top) : 170;
@@ -36,10 +48,13 @@ function App() {
   const toggleSelect = (id) => setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const setStatus = (id, status) => setData(prev => prev.map(d => d.id === id ? { ...d, status } : d));
 
+  const regionOptions = useMemo(() => Array.from(new Set(data.map(d => d.region))).sort((a, b) => a.localeCompare(b, 'ru')), [data]);
+
   const filtered = useMemo(() => {
     let list = data.slice();
     const q = query.trim().toLowerCase();
     if (q) list = list.filter(d => (d.fio + ' ' + d.region + ' ' + d.city + ' ' + d.street + ' ' + d.coords + ' ' + d.msg).toLowerCase().includes(q));
+    if (fRegion) list = list.filter(d => d.region === fRegion);
     if (fSources.length) list = list.filter(d => fSources.includes(d.source));
     if (fStatuses.length) list = list.filter(d => fStatuses.includes(d.status));
     if (fFrom) { const from = new Date(fFrom + 'T00:00:00').getTime(); list = list.filter(d => de.photoParts(d.photoTime).ts >= from); }
@@ -58,12 +73,12 @@ function App() {
       return 0;
     });
     return list;
-  }, [data, query, fSources, fStatuses, fFrom, fTo, sortKey, sortDir]);
+  }, [data, query, fRegion, fSources, fStatuses, fFrom, fTo, sortKey, sortDir]);
 
-  const filterCount = (fSources.length ? 1 : 0) + (fStatuses.length ? 1 : 0) + ((fFrom || fTo) ? 1 : 0);
+  const filterCount = (fRegion ? 1 : 0) + (fSources.length ? 1 : 0) + (fStatuses.length ? 1 : 0) + ((fFrom || fTo) ? 1 : 0);
   const hasFilters = filterCount > 0;
   const allSelected = filtered.length > 0 && filtered.every(d => selected.includes(d.id));
-  const resetFilters = () => { setFSources([]); setFStatuses([]); setFFrom(''); setFTo(''); };
+  const resetFilters = () => { setFRegion(''); setFSources([]); setFStatuses([]); setFFrom(''); setFTo(''); };
   const detail = detailId ? data.find(d => d.id === detailId) : null;
   const lbInc = lb ? data.find(d => d.id === lb.id) : null;
 
@@ -84,10 +99,13 @@ function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', minWidth: 1100, overflow: 'hidden', background: '#fff' }}>
-      <Sidebar total={data.length} view={view} onNav={setView} />
+      <Sidebar total={data.length} mnoCount={mno.length} regionsCount={regions.length} view={view} onNav={nav} />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {view === 'settings' ? <Settings /> : <React.Fragment>
+        {view === 'settings' ? <Settings />
+        : view === 'mno' ? <MnoView mno={mno} setMno={setMno} onToast={showToast} />
+        : view === 'regions' ? <RegionsView regions={regions} setRegions={setRegions} mno={mno} incidents={data} onToast={showToast} />
+        : <React.Fragment>
         {/* Шапка */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 28px 9px', borderBottom: '1px solid #E6E9EC', flex: 'none' }}>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -112,7 +130,7 @@ function App() {
         </div>
 
         <Funnel fStatuses={fStatuses} setFStatuses={setFStatuses} incidents={data} />
-        <FilterBar fSources={fSources} setFSources={setFSources} fFrom={fFrom} setFFrom={setFFrom} fTo={fTo} setFTo={setFTo} hasFilters={hasFilters} onReset={resetFilters} />
+        <FilterBar fRegion={fRegion} setFRegion={setFRegion} regionOptions={regionOptions} fSources={fSources} setFSources={setFSources} fFrom={fFrom} setFFrom={setFFrom} fTo={fTo} setFTo={setFTo} hasFilters={hasFilters} onReset={resetFilters} />
 
         {/* Панель массовых действий */}
         {selected.length > 0 && (
@@ -175,6 +193,18 @@ function App() {
           onPrev={() => lbStep(-1)}
           onNext={() => lbStep(1)}
         />
+      )}
+
+      {toast && (
+        <div style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 120, display: 'flex', alignItems: 'center', gap: 10, maxWidth: 420, padding: '12px 14px', background: '#0F1620', color: '#fff', borderRadius: 10, boxShadow: '0 12px 32px rgba(15,22,32,.28)', animation: 'deUp .18s ease' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: '50%', background: '#1F8A5B', flex: 'none' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5 9-11" /></svg>
+          </span>
+          <span style={{ flex: 1, fontSize: 13, lineHeight: 1.45 }}>{toast}</span>
+          <button onClick={() => setToast('')} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: 'rgba(255,255,255,.6)', display: 'flex', padding: 2, flex: 'none' }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
       )}
     </div>
   );

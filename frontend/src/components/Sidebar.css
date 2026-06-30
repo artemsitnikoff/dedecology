@@ -86,6 +86,22 @@
   color: var(--fg-3);
 }
 
+/* Заголовок группы «Справочники» */
+.sidebar-wide .nav-group-label {
+  margin: 14px 11px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-4);
+}
+
+/* Распорка, прижимающая «Настройки» к низу навигации */
+.sidebar-wide .nav-spacer {
+  flex: 1;
+  min-height: 8px;
+}
+
 .sidebar-wide .nav-row {
   display: flex;
   align-items: center;
