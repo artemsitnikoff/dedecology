@@ -103,7 +103,7 @@ const RegionRow = memo(function RegionRow({ r, active, onOpen }: RowProps) {
    ============================================================ */
 export function RegionsPage() {
   const [query, setQuery] = useState('');
-  const [fFed, setFFed] = useState<number[]>([]);
+  const [fFed, setFFed] = useState<string>(''); // '' = все округа (одиночный выбор)
   const [sortKey, setSortKey] = useState<RegionSortKey>('code');
   const [sortDir, setSortDir] = useState<SortOrder>('asc');
   const [detailCode, setDetailCode] = useState<string | null>(null);
@@ -118,16 +118,6 @@ export function RegionsPage() {
   const regions = useMemo(() => regionsQuery.data ?? [], [regionsQuery.data]);
   const districts = districtsQuery.data ?? [];
 
-  // Чипы округов — округа, реально присутствующие в справочнике (как в прототипе).
-  const fedChips = useMemo(() => {
-    const seen = new Map<number, string>();
-    for (const r of regions) if (!seen.has(r.fed)) seen.set(r.fed, r.fed_code);
-    return Array.from(seen, ([id, code]) => ({ id, code })).sort((a, b) => a.id - b.id);
-  }, [regions]);
-
-  const toggleFed = (id: number) =>
-    setFFed((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-
   const filtered = useMemo(() => {
     let list = regions.slice();
     const q = query.trim().toLowerCase();
@@ -135,7 +125,7 @@ export function RegionsPage() {
       list = list.filter((r) =>
         `${r.code} ${r.name} ${r.operators.join(' ')} ${r.fed_name}`.toLowerCase().includes(q)
       );
-    if (fFed.length) list = list.filter((r) => fFed.includes(r.fed));
+    if (fFed) list = list.filter((r) => String(r.fed) === fFed);
     const dir = sortDir === 'asc' ? 1 : -1;
     list.sort((a, b) => {
       const av = sortValue(a, sortKey);
@@ -152,7 +142,7 @@ export function RegionsPage() {
     setSortKey(key);
   };
 
-  const filterCount = fFed.length ? 1 : 0;
+  const filterCount = fFed ? 1 : 0;
   const isFiltered = filterCount > 0 || !!query;
   const counterText = isFiltered
     ? `Показано ${filtered.length} из ${regions.length}`
@@ -200,20 +190,22 @@ export function RegionsPage() {
         <div className="de-reg-filter-sep" />
         <div className="de-reg-filter-group">
           <span className="de-reg-filter-label">Округ</span>
-          {fedChips.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              className={`de-reg-chip ${fFed.includes(f.id) ? 'active' : ''}`}
-              onClick={() => toggleFed(f.id)}
-            >
-              {f.code}
-            </button>
-          ))}
+          <select
+            className="de-reg-select"
+            value={fFed}
+            onChange={(e) => setFFed(e.target.value)}
+          >
+            <option value="">Все округа</option>
+            {districts.map((d) => (
+              <option key={d.id} value={String(d.id)}>
+                {d.code} · {d.name}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="de-reg-spacer" />
         {filterCount > 0 && (
-          <button type="button" className="de-reg-btn de-reg-btn-reset" onClick={() => setFFed([])}>
+          <button type="button" className="de-reg-btn de-reg-btn-reset" onClick={() => setFFed('')}>
             Сбросить
           </button>
         )}
@@ -230,7 +222,7 @@ export function RegionsPage() {
             <h3>Регионы не найдены</h3>
             <p>Под заданные фильтры субъектов нет.</p>
             {filterCount > 0 && (
-              <button type="button" className="de-reg-empty-btn" onClick={() => setFFed([])}>
+              <button type="button" className="de-reg-empty-btn" onClick={() => setFFed('')}>
                 Сбросить фильтры
               </button>
             )}

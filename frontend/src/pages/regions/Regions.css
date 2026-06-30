@@ -127,28 +127,25 @@
   color: var(--fg-3);
   font-weight: 600;
 }
-.de-reg-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 11px;
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 500;
-  background: var(--bg-1);
+/* Одиночный выбор округа — дропдаун (зеркало .de-mno-select из МНО). */
+.de-reg-select {
+  height: 32px;
   border: 1px solid var(--border-1);
+  border-radius: 7px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--fs-13);
   color: var(--fg-1);
-  transition: all var(--dur-fast) var(--ease-out);
+  background: var(--bg-1);
+  outline: none;
+  min-width: 210px;
+  cursor: pointer;
 }
-.de-reg-chip:hover {
+.de-reg-select:hover {
   border-color: var(--ark-gray-400);
 }
-.de-reg-chip.active {
-  font-weight: 600;
-  background: var(--ark-blue-50);
-  border-color: var(--ark-blue-100);
-  color: var(--accent);
+.de-reg-select:focus {
+  border-color: var(--accent);
 }
 
 /* ---------- Контент / таблица ---------- */
