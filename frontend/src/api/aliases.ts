@@ -295,6 +295,8 @@ export interface MnoSyncStatus {
   fetched: number;
   /** Записано (upsert) в таблицу mno; накопительно при scope==='all'. */
   upserted: number;
+  /** Пропущено (уже были в БД, детали не тянулись заново); накопительно. */
+  skipped: number;
   /** Текст ошибки при state==='error', иначе null. */
   error: string | null;
   /** ISO-момент старта. */

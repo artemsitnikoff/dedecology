@@ -12,6 +12,7 @@
 объектов, массив ids полный) либо не упрёмся в MAX_Z.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -47,6 +48,7 @@ START_Z = 4
 MAX_Z = 13
 CLUSTER_LIMIT = 100        # массив ids в кластере обрезан на 100
 TILE_REQUEST_LIMIT = 6000  # общий гард на число tile-запросов за обход
+TILE_CONCURRENCY = 6       # одновременных tile-запросов (ФГИС медленный → параллелим обход)
 
 # JSONP-обёртка: callback({...});  → group(1) = JSON внутри.
 _JSONP_RE = re.compile(r"^callback\((.*)\);?\s*$", re.DOTALL)
@@ -331,30 +333,38 @@ async def enumerate_region_mno_ids(
                 "часть МНО могла не попасть в выборку"
             )
             break
-        bbox, z = queue.popleft()
-        tile_requests += 1
-        features = await fetch_tile(filter_id, bbox, z)
-        for f in features:
-            p = f.get("properties") or {}
-            if "ids" in p:  # кластер
-                total = _safe_int(p.get("iconContent"))
-                if total <= CLUSTER_LIMIT:
-                    for cid in p.get("ids") or []:
-                        _add(cid)
-                elif z >= MAX_Z:
-                    for cid in p.get("ids") or []:
-                        _add(cid)
-                    truncated += 1
-                else:
-                    next_z = min(z + 2, MAX_Z)
-                    for sub in split_bbox_2x2(bbox):
-                        queue.append((sub, next_z))
-            else:  # одиночный объект
-                _add(p.get("id"))
+        # Берём пачку ячеек и запрашиваем их ПАРАЛЛЕЛЬНО: ФГИС медленный, обход по одной
+        # ячейке тормозит «рывками» — параллель ускоряет ~в TILE_CONCURRENCY раз. Разбор
+        # результатов и флаш on_batch остаются СЕРИАЛЬНЫМИ (общий set/сессия БД).
+        cells: list[tuple[tuple[float, float, float, float], int]] = []
+        while queue and len(cells) < TILE_CONCURRENCY:
+            cells.append(queue.popleft())
+        tile_requests += len(cells)
+        results = await asyncio.gather(
+            *(fetch_tile(filter_id, bbox, z) for bbox, z in cells)
+        )
+        for (bbox, z), features in zip(cells, results):
+            for f in features:
+                p = f.get("properties") or {}
+                if "ids" in p:  # кластер
+                    total = _safe_int(p.get("iconContent"))
+                    if total <= CLUSTER_LIMIT:
+                        for cid in p.get("ids") or []:
+                            _add(cid)
+                    elif z >= MAX_Z:
+                        for cid in p.get("ids") or []:
+                            _add(cid)
+                        truncated += 1
+                    else:
+                        next_z = min(z + 2, MAX_Z)
+                        for sub in split_bbox_2x2(bbox):
+                            queue.append((sub, next_z))
+                else:  # одиночный объект
+                    _add(p.get("id"))
         if on_progress is not None:
             on_progress(len(seen))
-        # Потоковый флаш: пока накоплено >= batch_size новых id — сразу отдаём батч,
-        # не дожидаясь конца обхода региона (данные копятся непрерывно, переживают обрыв).
+        # Потоковый флаш (СЕРИАЛЬНО, после параллельного раунда): пока накоплено >= batch_size
+        # новых id — отдаём батч, не дожидаясь конца региона (данные копятся, переживают обрыв).
         if on_batch is not None:
             while len(pending) >= batch_size:
                 await on_batch(pending[:batch_size])

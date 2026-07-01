@@ -1163,13 +1163,14 @@ async def test_crawl_region_skips_existing_fgis_ids(monkeypatch):
     monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=2))
 
     session = AsyncMock()
-    prog = {"discovered": 0, "fetched": 0, "upserted": 0}
+    prog = {"discovered": 0, "fetched": 0, "upserted": 0, "skipped": 0}
     # FakeRedis: is_cancelled в _on_batch читает redis.get → отмены нет (None), батч идёт.
     await mno_worker._crawl_region(FakeRedis(), "job-1", prog, session, 22)
 
     assert cluster_calls == [["b", "d"]]  # только новые id
     assert prog["fetched"] == 2
     assert prog["upserted"] == 2
+    assert prog["skipped"] == 2  # "a","c" уже были в БД — пропущены
     assert prog["discovered"] == 4  # обнаружено считаются ВСЕ (для прогресса)
 
 

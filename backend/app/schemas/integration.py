@@ -76,6 +76,7 @@ class MnoSyncStatus(BaseModel):
     discovered: int
     fetched: int
     upserted: int
+    skipped: int = 0  # уже были в БД (id-level skip) — пропущены, не тянулись заново
     error: Optional[str] = None
     started_at: datetime
     finished_at: Optional[datetime] = None

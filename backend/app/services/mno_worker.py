@@ -65,6 +65,7 @@ async def _crawl_region(redis, job_id, prog, session, region_id: int) -> None:
         # Пропускаем уже записанные МНО (fgis_id в БД) — детали тянем ТОЛЬКО для новых.
         # Так возобновление после обрыва/деплоя дёшево: регион промотывается мимо сделанного.
         existing = await _existing_fgis_ids(session, batch)
+        prog["skipped"] += len(existing)  # уже были в БД — видимый прогресс на re-скане
         fresh = [mno_id for mno_id in batch if mno_id not in existing]
         if fresh:
             objs = await fgis.cluster_details(fresh, region_id)

@@ -388,6 +388,10 @@ export function IntegrationPage() {
                     <span>
                       записано <b>{status.upserted}</b>
                     </span>
+                    <span className="de-intg-counters-sep">·</span>
+                    <span>
+                      пропущено <b>{status.skipped}</b>
+                    </span>
                   </div>
                   {status.scope === 'all' && status.regions_failed > 0 && (
                     <div className="de-intg-failed">

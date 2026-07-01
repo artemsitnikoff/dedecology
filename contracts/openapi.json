@@ -3491,6 +3491,11 @@
             "type": "integer",
             "title": "Upserted"
           },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped",
+            "default": 0
+          },
           "error": {
             "anyOf": [
               {
