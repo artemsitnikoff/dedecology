@@ -1,3 +1,6 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError, HTTPException
@@ -12,6 +15,47 @@ from .core.errors import (
     http_exception_handler,
     generic_exception_handler,
 )
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Жизненный цикл: на старте ПЫТАЕМСЯ поднять arq-пул для enqueue фоновых задач.
+
+    Redis может быть недоступен на старте — приложение ОБЯЗАНО подняться в любом случае
+    (веб отдаёт инциденты, справочники и т.д. без очереди). Тогда app.state.arq_pool=None,
+    а эндпоинты синхронизации МНО честно вернут 503 QUEUE_UNAVAILABLE вместо падения.
+    Импорт arq — ленивый (внутри), чтобы модуль импортировался и там, где arq не стоит.
+    """
+    app.state.arq_pool = None
+    try:
+        from arq import create_pool
+        from arq.connections import RedisSettings
+
+        app.state.arq_pool = await create_pool(
+            RedisSettings.from_dsn(settings.REDIS_URL)
+        )
+        logger.info("arq-пул подключён к Redis (%s)", settings.REDIS_URL)
+    except Exception as e:  # noqa: BLE001 — Redis/arq недоступны → работаем без очереди
+        logger.warning(
+            "arq-пул недоступен на старте (%s): %s — синхронизация МНО отдаст 503",
+            settings.REDIS_URL, e,
+        )
+    try:
+        yield
+    finally:
+        pool = getattr(app.state, "arq_pool", None)
+        if pool is not None:
+            try:
+                await pool.aclose()
+            except AttributeError:  # старые redis: .close() вместо .aclose()
+                try:
+                    await pool.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            except Exception:  # noqa: BLE001 — закрытие пула не должно ронять shutdown
+                pass
 
 # Разделы Swagger (`/docs`) — порядок в списке задаёт порядок групп в интерфейсе.
 # Русские названия разделов = разделы документации для мобильного приложения.
@@ -105,6 +149,7 @@ app = FastAPI(
     ),
     openapi_tags=openapi_tags,
     redirect_slashes=False,
+    lifespan=lifespan,
 )
 
 # CORS для фронтенда (origins из env CORS_ORIGINS, comma-separated)

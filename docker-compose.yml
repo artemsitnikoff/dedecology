@@ -21,12 +21,26 @@ services:
       timeout: 3s
       retries: 5
 
+  # Redis — очередь фоновой синхронизации МНО (arq) + общий прогресс задач между воркерами.
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build: ./backend
     env_file: .env
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       # Bind-mount исходников для --reload в dev.
       - ./backend:/app
@@ -35,12 +49,31 @@ services:
       - ${CLAUDE_TOKEN_DIR:-/data}:/app/claude-auth:ro
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-dedecolog}:${POSTGRES_PASSWORD:-dedecolog}@db:5432/dedecolog
+      - REDIS_URL=redis://redis:6379/0
     ports:
       - "8000:8000"
     command: >
       sh -c "alembic upgrade head &&
              python -m app.seed &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # arq-воркер фоновой синхронизации МНО. Тот же образ/код, что и backend (bind-mount),
+  # но команда — `arq app.worker.WorkerSettings`. Миграции/сид делает backend.
+  worker:
+    build: ./backend
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+      - backend_storage:/app/storage
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-dedecolog}:${POSTGRES_PASSWORD:-dedecolog}@db:5432/dedecolog
+      - REDIS_URL=redis://redis:6379/0
+    command: arq app.worker.WorkerSettings
 
   frontend:
     build:
@@ -68,3 +101,4 @@ services:
 volumes:
   dedecolog_pgdata:
   backend_storage:
+  redis_data:

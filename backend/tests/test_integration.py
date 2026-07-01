@@ -1,4 +1,4 @@
-"""Тесты раздела «Интеграция ФГИС» — офлайн (httpx/сессия мокаются).
+"""Тесты раздела «Интеграция ФГИС» — офлайн (httpx/сессия/Redis мокаются).
 
 Покрытие:
   - JSONP-парсер (снятие обёртки, пустой/битый ответ);
@@ -8,9 +8,15 @@
   - REGION_FED (значения 1..8, типовые коды);
   - sync_regions (id→code, сохранение operators/active при update);
   - require_superadmin (ForbiddenError для не-суперадмина);
-  - эндпоинты /integration с замоканным сервисом.
+  - хранилище прогресса в Redis (mno_jobs) на FakeRedis: round-trip типов, указатели,
+    дедуп, done-set для resume;
+  - воркер (mno_worker) на FakeRedis + мок fgis/сессии: один регион, все регионы,
+    resume (skip done), per-region ошибка;
+  - эндпоинты /integration (мок сервиса/Redis/arq-пула): overview, regions/sync,
+    mno/sync (+404/503/дедуп), mno/sync-all (+400/503/дедуп), status (+404).
 """
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -19,6 +25,7 @@ import pytest
 
 from app.core.errors import AppError, ForbiddenError
 from app.core.permissions import require_superadmin
+from app.main import app
 from app.models import Region, User
 from app.schemas.integration import (
     IntegrationOverview,
@@ -27,9 +34,76 @@ from app.schemas.integration import (
     RegionsOverview,
     RegionsSyncResult,
 )
-from app.services import fgis, mno_sync
+from app.services import fgis, mno_jobs, mno_sync, mno_worker
 from app.services.fgis import parse_jsonp, split_bbox_2x2
 from app.services.region_fed import REGION_FED, region_fed
+
+
+# --- FakeRedis: минимальный async-Redis на dict (офлайн, без сети) -------------
+
+
+class FakeRedis:
+    """Поддельный redis.asyncio-клиент (decode_responses=True) на обычных dict.
+
+    Хранит строки — как реальный Redis с decode_responses=True; mno_jobs сам
+    восстанавливает типы при чтении."""
+
+    def __init__(self):
+        self.hashes: dict[str, dict[str, str]] = {}
+        self.strings: dict[str, str] = {}
+        self.sets: dict[str, set[str]] = {}
+
+    async def hset(self, name, mapping=None, **kwargs):
+        h = self.hashes.setdefault(name, {})
+        if mapping:
+            h.update(mapping)
+        h.update(kwargs)
+        return len(h)
+
+    async def hgetall(self, name):
+        return dict(self.hashes.get(name, {}))
+
+    async def expire(self, name, ttl):
+        return True
+
+    async def set(self, name, value):
+        self.strings[name] = value
+        return True
+
+    async def get(self, name):
+        return self.strings.get(name)
+
+    async def sadd(self, name, *values):
+        s = self.sets.setdefault(name, set())
+        before = len(s)
+        s.update(values)
+        return len(s) - before
+
+    async def sismember(self, name, value):
+        return 1 if value in self.sets.get(name, set()) else 0
+
+    async def smembers(self, name):
+        return set(self.sets.get(name, set()))
+
+    async def delete(self, *names):
+        removed = 0
+        for name in names:
+            for store in (self.hashes, self.strings, self.sets):
+                if name in store:
+                    del store[name]
+                    removed += 1
+        return removed
+
+
+@pytest.fixture(autouse=True)
+def _reset_arq_pool():
+    """Каждый тест стартует без arq-пула (lifespan в ASGI-тестах не поднимается).
+
+    Тесты, которым нужен пул, ставят app.state.arq_pool сами; здесь только чистим,
+    чтобы состояние не протекало между тестами."""
+    app.state.arq_pool = None
+    yield
+    app.state.arq_pool = None
 
 
 # --- JSONP-парсер --------------------------------------------------------------
@@ -324,7 +398,262 @@ async def test_require_superadmin_allows_super():
     assert await require_superadmin(_user(is_superadmin=True)) is None
 
 
-# --- Эндпоинты (мок сервиса) ---------------------------------------------------
+# --- Хранилище прогресса в Redis (mno_jobs) на FakeRedis -----------------------
+
+
+@pytest.mark.asyncio
+async def test_mno_jobs_write_read_roundtrip():
+    """write_progress → read_progress восстанавливает типы (int/datetime/None)."""
+    fake = FakeRedis()
+    prog = mno_jobs.initial_progress("j1", "51", "Мурманская область")
+    prog["discovered"] = 10
+    prog["fetched"] = 8
+    prog["upserted"] = 7
+    prog["state"] = "done"
+    prog["finished_at"] = mno_jobs.utcnow()
+    await mno_jobs.write_progress(fake, "j1", prog)
+
+    out = await mno_jobs.read_progress(fake, "j1")
+    assert out is not None
+    # int-поля восстановлены как int.
+    assert out["discovered"] == 10 and isinstance(out["discovered"], int)
+    assert out["upserted"] == 7
+    # datetime-поля восстановлены из isoformat.
+    assert isinstance(out["started_at"], datetime)
+    assert isinstance(out["finished_at"], datetime)
+    # None ↔ "" ↔ None (error пустой).
+    assert out["error"] is None
+    assert out["state"] == "done"
+    assert out["region_code"] == "51"
+    # dict годится для MnoSyncStatus(**...).
+    status = MnoSyncStatus(**out)
+    assert status.upserted == 7 and status.state == "done"
+
+
+@pytest.mark.asyncio
+async def test_mno_jobs_read_missing_is_none():
+    fake = FakeRedis()
+    assert await mno_jobs.read_progress(fake, "nope") is None
+
+
+@pytest.mark.asyncio
+async def test_mno_jobs_pointer():
+    fake = FakeRedis()
+    await mno_jobs.set_pointer(fake, "51", "j1")
+    assert await mno_jobs.get_pointer(fake, "51") == "j1"
+    assert await mno_jobs.get_pointer(fake, "63") is None
+
+
+@pytest.mark.asyncio
+async def test_mno_jobs_get_running_job():
+    """running → снимок; завершённая/отсутствующая → None (для дедупа запусков)."""
+    fake = FakeRedis()
+    prog = mno_jobs.initial_progress("j1", "51", "Мурманская область")
+    await mno_jobs.write_progress(fake, "j1", prog)
+    await mno_jobs.set_pointer(fake, "51", "j1")
+
+    running = await mno_jobs.get_running_job(fake, "51")
+    assert running is not None and running["job_id"] == "j1"
+
+    # Задача завершилась → get_running_job больше не отдаёт её.
+    prog["state"] = "done"
+    prog["finished_at"] = mno_jobs.utcnow()
+    await mno_jobs.write_progress(fake, "j1", prog)
+    assert await mno_jobs.get_running_job(fake, "51") is None
+
+    # Нет указателя → None.
+    assert await mno_jobs.get_running_job(fake, "63") is None
+
+
+@pytest.mark.asyncio
+async def test_mno_jobs_done_set():
+    """mark_region_done / is_region_done — основа resume прогона «все регионы»."""
+    fake = FakeRedis()
+    assert await mno_jobs.is_region_done(fake, "j1", "51") is False
+    await mno_jobs.mark_region_done(fake, "j1", "51")
+    assert await mno_jobs.is_region_done(fake, "j1", "51") is True
+    assert await mno_jobs.is_region_done(fake, "j1", "63") is False
+
+
+# --- Воркер (mno_worker) на FakeRedis + мок fgis/сессии ------------------------
+
+
+class _FakeDBSession:
+    """Поддельная AsyncSessionLocal(): async-контекст-менеджер с awaitable commit."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def commit(self):
+        return None
+
+
+def _mock_fgis_ok(monkeypatch, *, upserted=3, ids=("a", "b", "c")):
+    """Общий мок ФГИС/upsert: один потоковый батч на регион, N объектов."""
+    monkeypatch.setattr(mno_worker, "AsyncSessionLocal", lambda: _FakeDBSession())
+    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value="filter-uuid"))
+
+    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+        if on_progress:
+            on_progress(len(ids))
+        if on_batch:
+            await on_batch(list(ids))
+        return set(ids), []
+
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
+    monkeypatch.setattr(
+        fgis, "cluster_details", AsyncMock(return_value=[{"id": i} for i in ids])
+    )
+    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=upserted))
+
+
+@pytest.mark.asyncio
+async def test_run_sync_region_done_and_progress_in_redis(monkeypatch):
+    """run_sync_region: state=done, счётчики суммированы, прогресс записан в Redis."""
+    _mock_fgis_ok(monkeypatch, upserted=3)
+
+    fake = FakeRedis()
+    await mno_worker.run_sync_region(fake, "j1", "51", "Мурманская область")
+
+    prog = await mno_jobs.read_progress(fake, "j1")
+    assert prog is not None
+    assert prog["state"] == "done"
+    assert prog["scope"] == "region"
+    assert prog["discovered"] == 3
+    assert prog["fetched"] == 3
+    assert prog["upserted"] == 3
+    assert prog["finished_at"] is not None
+    assert prog["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_sync_region_error_captured(monkeypatch):
+    """Сбой краула → state=error, текст ошибки в прогрессе, задача закрыта (finished_at)."""
+    monkeypatch.setattr(mno_worker, "AsyncSessionLocal", lambda: _FakeDBSession())
+    monkeypatch.setattr(
+        fgis, "create_filter", AsyncMock(side_effect=RuntimeError("ФГИС недоступна"))
+    )
+
+    fake = FakeRedis()
+    await mno_worker.run_sync_region(fake, "j-err", "51", "Мурманская область")
+
+    prog = await mno_jobs.read_progress(fake, "j-err")
+    assert prog["state"] == "error"
+    assert "ФГИС недоступна" in prog["error"]
+    assert prog["finished_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_run_sync_all_sums_across_regions(monkeypatch):
+    """Прогон по 2 регионам: scope=all, счётчики СУММИРУЮТСЯ, оба в done-set, done."""
+    _mock_fgis_ok(monkeypatch, upserted=3)
+
+    fake = FakeRedis()
+    await mno_worker.run_sync_all(
+        fake, "all-1", [["51", "Мурманская область"], ["63", "Самарская область"]]
+    )
+
+    prog = await mno_jobs.read_progress(fake, "all-1")
+    assert prog["scope"] == "all"
+    assert prog["state"] == "done"
+    assert prog["regions_total"] == 2
+    assert prog["regions_done"] == 2
+    assert prog["regions_failed"] == 0
+    # Накопительно по двум регионам: 3 + 3.
+    assert prog["discovered"] == 6
+    assert prog["fetched"] == 6
+    assert prog["upserted"] == 6
+    # Оба региона отмечены пройденными (для resume).
+    assert await mno_jobs.is_region_done(fake, "all-1", "51")
+    assert await mno_jobs.is_region_done(fake, "all-1", "63")
+
+
+@pytest.mark.asyncio
+async def test_run_sync_all_resume_skips_done_region(monkeypatch):
+    """RESUME: регион уже в done-set (ретрай воркера) → пропущен, НЕ краулится повторно."""
+    monkeypatch.setattr(mno_worker, "AsyncSessionLocal", lambda: _FakeDBSession())
+
+    crawled: list[int] = []
+
+    async def fake_create_filter(region_id):
+        crawled.append(region_id)
+        return "f"
+
+    monkeypatch.setattr(fgis, "create_filter", fake_create_filter)
+
+    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+        if on_batch:
+            await on_batch(["a"])
+        return {"a"}, []
+
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
+    monkeypatch.setattr(fgis, "cluster_details", AsyncMock(return_value=[{"id": "a"}]))
+    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=1))
+
+    fake = FakeRedis()
+    # 51 УЖЕ пройден в этом прогоне (эмуляция ретрая после падения воркера).
+    await mno_jobs.mark_region_done(fake, "all-r", "51")
+
+    await mno_worker.run_sync_all(
+        fake, "all-r", [["51", "Мурманская область"], ["63", "Самарская область"]]
+    )
+
+    # 51 пропущен (create_filter для него не звался), краулился только 63.
+    assert crawled == [63]
+    prog = await mno_jobs.read_progress(fake, "all-r")
+    # 51 засчитан по done-set + 63 обойдён = 2.
+    assert prog["regions_done"] == 2
+    assert prog["state"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_run_sync_all_per_region_error_does_not_abort(monkeypatch):
+    """Сбой ОДНОГО региона не роняет прогон: regions_failed=1, state=done, done-set без него."""
+    monkeypatch.setattr(mno_worker, "AsyncSessionLocal", lambda: _FakeDBSession())
+    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value="f"))
+
+    # 1-й регион — ок (батч записан); 2-й — краулер падает.
+    calls = {"n": 0}
+
+    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("краулер упал")
+        if on_progress:
+            on_progress(3)
+        if on_batch:
+            await on_batch(["a", "b", "c"])
+        return {"a", "b", "c"}, []
+
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
+    monkeypatch.setattr(
+        fgis, "cluster_details", AsyncMock(return_value=[{"id": "a"}, {"id": "b"}, {"id": "c"}])
+    )
+    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=3))
+
+    fake = FakeRedis()
+    await mno_worker.run_sync_all(
+        fake, "all-2", [["51", "Мурманская область"], ["63", "Самарская область"]]
+    )
+
+    prog = await mno_jobs.read_progress(fake, "all-2")
+    assert prog["regions_done"] == 1
+    assert prog["regions_failed"] == 1
+    assert prog["state"] == "done"  # прогон завершён, а не «error»
+    assert "Самарская область" in prog["error"]  # ошибка помечена именем региона
+    # Первый регион успел записаться до сбоя второго.
+    assert prog["discovered"] == 3
+    assert prog["fetched"] == 3
+    assert prog["upserted"] == 3
+    # В done-set только успешный регион (упавший при ретрае будет перепройден).
+    assert await mno_jobs.is_region_done(fake, "all-2", "51")
+    assert await mno_jobs.is_region_done(fake, "all-2", "63") is False
+
+
+# --- Эндпоинты (мок сервиса / Redis / arq-пула) --------------------------------
 
 
 @pytest.mark.asyncio
@@ -360,20 +689,53 @@ async def test_regions_sync_endpoint(client, fake_session):
 
 @pytest.mark.asyncio
 async def test_start_mno_sync_endpoint(client):
+    """POST /mno/sync: пишет прогресс+указатель в Redis и ставит sync_region_task в очередь."""
     region = Region(code="51", name="Мурманская область", fed=2, operators=[], active=True)
-    job = mno_sync.MnoSyncJob(job_id="job-123", region_code="51", region_name="Мурманская область")
+    fake = FakeRedis()
+    pool = AsyncMock()
+    app.state.arq_pool = pool
     with patch(
         "app.api.v1.integration.mno_sync.get_region_or_404",
         new=AsyncMock(return_value=region),
-    ), patch(
-        "app.api.v1.integration.mno_sync.start_mno_sync",
-        return_value=job,
-    ) as start_spy:
+    ), patch("app.api.v1.integration.get_redis", return_value=fake):
         resp = await client.post("/api/v1/integration/mno/sync", json={"region_code": "51"})
+
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"job_id": "job-123", "region_code": "51", "state": "running"}
-    start_spy.assert_called_once_with("51", "Мурманская область")
+    assert body["region_code"] == "51"
+    assert body["state"] == "running"
+    # Задача поставлена ровно раз именно как sync_region_task.
+    pool.enqueue_job.assert_awaited_once()
+    assert pool.enqueue_job.await_args.args[0] == "sync_region_task"
+    # Указатель по региону ведёт на созданный job.
+    assert await fake.get("mno:ptr:51") == body["job_id"]
+    # Прогресс сразу читается из Redis (running).
+    prog = await mno_jobs.read_progress(fake, body["job_id"])
+    assert prog["state"] == "running" and prog["region_code"] == "51"
+
+
+@pytest.mark.asyncio
+async def test_start_mno_sync_dedup_returns_running(client):
+    """Дедуп: по региону уже идёт задача → вернуть её без нового enqueue."""
+    region = Region(code="51", name="Мурманская область", fed=2, operators=[], active=True)
+    fake = FakeRedis()
+    prog = mno_jobs.initial_progress("running-51", "51", "Мурманская область")
+    await mno_jobs.write_progress(fake, "running-51", prog)
+    await mno_jobs.set_pointer(fake, "51", "running-51")
+
+    pool = AsyncMock()
+    app.state.arq_pool = pool
+    with patch(
+        "app.api.v1.integration.mno_sync.get_region_or_404",
+        new=AsyncMock(return_value=region),
+    ), patch("app.api.v1.integration.get_redis", return_value=fake):
+        resp = await client.post("/api/v1/integration/mno/sync", json={"region_code": "51"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"] == "running-51"
+    assert body["state"] == "running"
+    pool.enqueue_job.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -388,18 +750,32 @@ async def test_start_mno_sync_unknown_region_404(client):
 
 
 @pytest.mark.asyncio
-async def test_mno_sync_status_by_job_id(client):
-    status = MnoSyncStatus(
-        job_id="job-123", region_code="51", region_name="Мурманская область",
-        state="done", discovered=42, fetched=42, upserted=40,
-        error=None, started_at="2026-07-01T10:00:00Z", finished_at="2026-07-01T10:05:00Z",
-    )
-    job = mno_sync.MnoSyncJob(job_id="job-123", region_code="51", region_name="Мурманская область")
+async def test_start_mno_sync_queue_unavailable_503(client):
+    """Redis/очередь недоступны (arq_pool=None) → 503 QUEUE_UNAVAILABLE, а не 500."""
+    region = Region(code="51", name="Мурманская область", fed=2, operators=[], active=True)
+    app.state.arq_pool = None  # пул не поднят (Redis лежит)
     with patch(
-        "app.api.v1.integration.mno_sync.get_job", return_value=job
-    ), patch(
-        "app.api.v1.integration.mno_sync.job_to_status", return_value=status
+        "app.api.v1.integration.mno_sync.get_region_or_404",
+        new=AsyncMock(return_value=region),
     ):
+        resp = await client.post("/api/v1/integration/mno/sync", json={"region_code": "51"})
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "QUEUE_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_mno_sync_status_by_job_id(client):
+    """GET status?job_id читает снимок из Redis."""
+    fake = FakeRedis()
+    prog = mno_jobs.initial_progress("job-123", "51", "Мурманская область")
+    prog["state"] = "done"
+    prog["discovered"] = 42
+    prog["fetched"] = 42
+    prog["upserted"] = 40
+    prog["finished_at"] = mno_jobs.utcnow()
+    await mno_jobs.write_progress(fake, "job-123", prog)
+
+    with patch("app.api.v1.integration.get_redis", return_value=fake):
         resp = await client.get("/api/v1/integration/mno/sync/status?job_id=job-123")
     assert resp.status_code == 200
     body = resp.json()
@@ -409,167 +785,34 @@ async def test_mno_sync_status_by_job_id(client):
 
 
 @pytest.mark.asyncio
+async def test_mno_sync_status_by_region_code_via_pointer(client):
+    """GET status?region_code=__all__ находит последнюю задачу через указатель."""
+    fake = FakeRedis()
+    prog = mno_jobs.initial_progress(
+        "all-9", "__all__", "Все регионы", scope="all", regions_total=3
+    )
+    await mno_jobs.write_progress(fake, "all-9", prog)
+    await mno_jobs.set_pointer(fake, "__all__", "all-9")
+
+    with patch("app.api.v1.integration.get_redis", return_value=fake):
+        resp = await client.get("/api/v1/integration/mno/sync/status?region_code=__all__")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"] == "all-9"
+    assert body["scope"] == "all"
+    assert body["regions_total"] == 3
+
+
+@pytest.mark.asyncio
 async def test_mno_sync_status_not_found_404(client):
-    with patch("app.api.v1.integration.mno_sync.get_job", return_value=None):
+    fake = FakeRedis()
+    with patch("app.api.v1.integration.get_redis", return_value=fake):
         resp = await client.get("/api/v1/integration/mno/sync/status?job_id=missing")
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "NOT_FOUND"
 
 
 # --- Синхронизация МНО по ВСЕМ регионам разом ----------------------------------
-
-
-class _FakeDBSession:
-    """Поддельная AsyncSessionLocal(): async-контекст-менеджер с awaitable commit."""
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        return False
-
-    async def commit(self):
-        return None
-
-
-@pytest.mark.asyncio
-async def test_run_mno_sync_all_sums_across_regions(monkeypatch):
-    """Прогон по 2 регионам одной задачей: scope=all, счётчики СУММИРУЮТСЯ, done.
-
-    Краулер теперь потоковый — эмулируем его вызовом on_progress + on_batch (запись
-    во время обхода), как это делает реальный enumerate_region_mno_ids."""
-    monkeypatch.setattr(mno_sync, "AsyncSessionLocal", lambda: _FakeDBSession())
-    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value=str(uuid4())))
-
-    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
-        ids = {"a", "b", "c"}
-        if on_progress:
-            on_progress(len(ids))
-        if on_batch:
-            await on_batch(["a", "b", "c"])
-        return ids, []
-
-    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
-    monkeypatch.setattr(
-        fgis,
-        "cluster_details",
-        AsyncMock(return_value=[{"id": "a"}, {"id": "b"}, {"id": "c"}]),
-    )
-    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=3))
-
-    job = mno_sync.MnoSyncJob(
-        job_id="all-1",
-        region_code=mno_sync.ALL_JOB_KEY,
-        region_name="Все регионы",
-        scope="all",
-        regions_total=2,
-    )
-    await mno_sync._run_mno_sync_all(
-        job, [("51", "Мурманская область"), ("63", "Самарская область")]
-    )
-
-    assert job.scope == "all"
-    assert job.regions_total == 2
-    assert job.regions_done == 2
-    assert job.regions_failed == 0
-    # Накопительно по двум регионам: 3 + 3.
-    assert job.discovered == 6
-    assert job.fetched == 6
-    assert job.upserted == 6
-    assert job.state == "done"
-    assert job.finished_at is not None
-
-
-@pytest.mark.asyncio
-async def test_run_mno_sync_all_per_region_error_does_not_abort(monkeypatch):
-    """Сбой ОДНОГО региона не роняет весь прогон: regions_failed=1, остальное done."""
-    monkeypatch.setattr(mno_sync, "AsyncSessionLocal", lambda: _FakeDBSession())
-    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value=str(uuid4())))
-
-    # 1-й регион — ок (потоковый батч записан); 2-й — краулер падает ДО записи.
-    enum_calls = {"n": 0}
-
-    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
-        enum_calls["n"] += 1
-        if enum_calls["n"] == 2:
-            raise RuntimeError("краулер упал")
-        ids = {"a", "b", "c"}
-        if on_progress:
-            on_progress(len(ids))
-        if on_batch:
-            await on_batch(["a", "b", "c"])
-        return ids, []
-
-    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
-    monkeypatch.setattr(
-        fgis,
-        "cluster_details",
-        AsyncMock(return_value=[{"id": "a"}, {"id": "b"}, {"id": "c"}]),
-    )
-    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=3))
-
-    job = mno_sync.MnoSyncJob(
-        job_id="all-2",
-        region_code=mno_sync.ALL_JOB_KEY,
-        region_name="Все регионы",
-        scope="all",
-        regions_total=2,
-    )
-    await mno_sync._run_mno_sync_all(
-        job, [("51", "Мурманская область"), ("63", "Самарская область")]
-    )
-
-    assert job.regions_done == 1
-    assert job.regions_failed == 1
-    assert job.state == "done"  # прогон завершён, а не «error»
-    assert job.error is not None
-    assert "Самарская область" in job.error  # ошибка помечена именем региона
-    # Первый регион успел записаться до сбоя второго.
-    assert job.discovered == 3
-    assert job.fetched == 3
-    assert job.upserted == 3
-
-
-@pytest.mark.asyncio
-async def test_sync_one_region_streams_batches(monkeypatch):
-    """_sync_one_region пишет ПОТОКОВО: на КАЖДЫЙ батч краулера — детали + upsert + commit,
-    не дожидаясь конца обхода. Счётчики суммируются по батчам, commit вызван на каждый
-    батч (>= 2)."""
-    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value="filter-uuid"))
-
-    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
-        # Эмулируем потоковый краулер: два батча по 100 и 30 НОВЫХ id.
-        assert on_batch is not None
-        if on_progress:
-            on_progress(130)
-        await on_batch([f"a{i}" for i in range(100)])
-        await on_batch([f"b{i}" for i in range(30)])
-        return ({f"a{i}" for i in range(100)} | {f"b{i}" for i in range(30)}, [])
-
-    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
-
-    async def fake_cluster_details(ids, region_id):
-        return [{"id": i} for i in ids]
-
-    async def fake_upsert(session, region_id, objs):
-        return len(objs)
-
-    monkeypatch.setattr(fgis, "cluster_details", fake_cluster_details)
-    monkeypatch.setattr(mno_sync, "_upsert_batch", fake_upsert)
-
-    session = AsyncMock()
-    job = mno_sync.MnoSyncJob(
-        job_id="one-1", region_code="51", region_name="Мурманская область"
-    )
-
-    await mno_sync._sync_one_region(session, job, 51)
-
-    # Детали/записано просуммированы по двум потоковым батчам: 100 + 30.
-    assert job.fetched == 130
-    assert job.upserted == 130
-    assert job.discovered == 130
-    # commit вызван на КАЖДЫЙ батч (потоковая запись, не один раз в конце).
-    assert session.commit.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -585,30 +828,66 @@ async def test_start_mno_sync_all_empty_catalog_400(client, fake_session):
 
 
 @pytest.mark.asyncio
+async def test_start_mno_sync_all_queue_unavailable_503(client, fake_session):
+    """Непустой справочник, но очередь недоступна (arq_pool=None) → 503."""
+    sel = MagicMock()
+    sel.all.return_value = [("51", "Мурманская область")]
+    fake_session.execute = AsyncMock(return_value=sel)
+
+    app.state.arq_pool = None
+    resp = await client.post("/api/v1/integration/mno/sync-all")
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "QUEUE_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
 async def test_start_mno_sync_all_endpoint(client, fake_session):
-    """Непустой справочник → 200, задача с region_code == '__all__'."""
+    """Непустой справочник → 200, задача region_code='__all__', sync_all_task в очереди."""
     sel = MagicMock()
     sel.all.return_value = [("51", "Мурманская область"), ("63", "Самарская область")]
     fake_session.execute = AsyncMock(return_value=sel)
 
-    job = mno_sync.MnoSyncJob(
-        job_id="all-3",
-        region_code=mno_sync.ALL_JOB_KEY,
-        region_name="Все регионы",
-        scope="all",
-        regions_total=2,
-    )
-    with patch(
-        "app.api.v1.integration.mno_sync.start_mno_sync_all", return_value=job
-    ) as start_spy:
+    fake = FakeRedis()
+    pool = AsyncMock()
+    app.state.arq_pool = pool
+    with patch("app.api.v1.integration.get_redis", return_value=fake):
         resp = await client.post("/api/v1/integration/mno/sync-all")
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["job_id"] == "all-3"
     assert body["region_code"] == "__all__"
     assert body["state"] == "running"
-    start_spy.assert_called_once()
+    pool.enqueue_job.assert_awaited_once()
+    assert pool.enqueue_job.await_args.args[0] == "sync_all_task"
+    # Указатель "__all__" ведёт на созданный job.
+    assert await fake.get("mno:ptr:__all__") == body["job_id"]
+
+
+@pytest.mark.asyncio
+async def test_start_mno_sync_all_dedup_returns_running(client, fake_session):
+    """Дедуп прогона «все регионы»: уже идёт → вернуть его без enqueue."""
+    sel = MagicMock()
+    sel.all.return_value = [("51", "Мурманская область")]
+    fake_session.execute = AsyncMock(return_value=sel)
+
+    fake = FakeRedis()
+    prog = mno_jobs.initial_progress(
+        "running-all", "__all__", "Все регионы", scope="all", regions_total=1
+    )
+    await mno_jobs.write_progress(fake, "running-all", prog)
+    await mno_jobs.set_pointer(fake, "__all__", "running-all")
+
+    pool = AsyncMock()
+    app.state.arq_pool = pool
+    with patch("app.api.v1.integration.get_redis", return_value=fake):
+        resp = await client.post("/api/v1/integration/mno/sync-all")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"] == "running-all"
+    assert body["region_code"] == "__all__"
+    assert body["state"] == "running"
+    pool.enqueue_job.assert_not_awaited()
 
 
 # --- Детали МНО: sidebar/object как документированный фолбэк --------------------

@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # По умолчанию — боевой публичный хост Минприроды.
     FGIS_BASE_URL: str = "https://public-api.utko.mnr.gov.ru"
 
+    # Redis — очередь фоновой синхронизации МНО (arq-воркер) и ОБЩИЙ прогресс задач
+    # между uvicorn-воркерами: in-memory реестр жил в одном воркере, из-за чего опрос
+    # статуса попадал в другой и отдавал 404. В compose host = имя сервиса `redis`.
+    REDIS_URL: str = "redis://redis:6379/0"
+
     # Каталог хранения загруженных фото обращений (относительно cwd процесса;
     # в контейнере = /app/storage). Структура: {STORAGE_DIR}/incidents/{id}/{n}.ext
     STORAGE_DIR: str = "storage"

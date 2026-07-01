@@ -25,13 +25,32 @@ services:
       timeout: 3s
       retries: 10
 
+  # Redis — очередь фоновой синхронизации МНО (arq) + общий прогресс задач между
+  # uvicorn-воркерами (--workers 2). Наружу НЕ публикуется.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build: ./backend
+    # Явный тег образа: worker переиспользует его (build: только у backend) — тогда
+    # deploy пересобирает `backend` и обновляет ОБА сервиса, менять deploy.yml не нужно.
+    image: dedecology-backend:latest
     restart: unless-stopped
     env_file: .env
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - backend_storage:/app/storage
       # Общий токен claude (read-only) для генерации цитаты о природе. Папка с токеном на хосте —
@@ -39,10 +58,30 @@ services:
       - ${CLAUDE_TOKEN_DIR:-/data}:/app/claude-auth:ro
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/dedecolog
+      - REDIS_URL=redis://redis:6379/0
     # Наружу НЕ публикуем: доступен по имени `backend:8000` внутри compose-сети (через nginx-прокси
     # фронта). Для отладки на самом сервере можно временно добавить: ports: ["127.0.0.1:8000:8000"].
     # Production: без --reload, 2 worker'а. При мало RAM можно --workers 1.
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+
+  # arq-воркер фоновой синхронизации МНО. БЕЗ своего build — переиспользует образ
+  # `dedecology-backend:latest` (собирается сервисом backend), поэтому deploy `build
+  # backend` обновляет и воркер. Миграции/сид — на backend, воркер только исполняет задачи.
+  worker:
+    image: dedecology-backend:latest
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - backend_storage:/app/storage
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/dedecolog
+      - REDIS_URL=redis://redis:6379/0
+    command: arq app.worker.WorkerSettings
 
   frontend:
     build:
@@ -74,3 +113,4 @@ services:
 volumes:
   dedecolog_pgdata:
   backend_storage:
+  redis_data:
