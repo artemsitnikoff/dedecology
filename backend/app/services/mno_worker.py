@@ -74,8 +74,15 @@ async def _crawl_region(redis, job_id, prog, session, region_id: int) -> None:
             await session.commit()
         await write_progress(redis, job_id, prog)
 
+    async def _tick() -> None:
+        # Каждый раунд обхода (в т.ч. «пустой хвост», где on_batch молчит): двигаем
+        # heartbeat updated_at (не выглядит зависшим) и отзывчиво проверяем отмену.
+        if await is_cancelled(redis, job_id):
+            raise _CancelledSync()
+        await write_progress(redis, job_id, prog)
+
     _, issues = await fgis.enumerate_region_mno_ids(
-        filter_id, region_id, on_progress=_prog, on_batch=_on_batch
+        filter_id, region_id, on_progress=_prog, on_batch=_on_batch, on_tick=_tick
     )
     for issue in issues:
         logger.warning("[mno_worker] регион %s: %s", region_id, issue)

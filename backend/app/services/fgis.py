@@ -286,6 +286,7 @@ async def enumerate_region_mno_ids(
     *,
     on_progress: Callable[[int], None] | None = None,
     on_batch: Callable[[list[str]], Awaitable[None]] | None = None,
+    on_tick: Callable[[], Awaitable[None]] | None = None,
     batch_size: int = CLUSTER_LIMIT,
 ) -> tuple[set[str], list[str]]:
     """Обходит карту региона (BFS по ячейкам) и собирает set всех id МНО.
@@ -369,6 +370,11 @@ async def enumerate_region_mno_ids(
             while len(pending) >= batch_size:
                 await on_batch(pending[:batch_size])
                 del pending[:batch_size]
+        # Heartbeat КАЖДЫЙ раунд (даже когда новых id нет — «пустой хвост» из сплитов):
+        # двигает updated_at (не выглядит зависшим, авто-stale не ложно-срабатывает) и даёт
+        # проверить отмену, пока on_batch молчит.
+        if on_tick is not None:
+            await on_tick()
 
     # Слить остаток (последний неполный батч).
     if on_batch is not None and pending:

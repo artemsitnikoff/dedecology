@@ -538,7 +538,9 @@ def _mock_fgis_ok(monkeypatch, *, upserted=3, ids=("a", "b", "c")):
     monkeypatch.setattr(mno_worker, "AsyncSessionLocal", lambda: _FakeDBSession())
     monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value="filter-uuid"))
 
-    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+    async def fake_enumerate(
+        filter_id, region_id, *, on_progress=None, on_batch=None, on_tick=None
+    ):
         if on_progress:
             on_progress(len(ids))
         if on_batch:
@@ -626,7 +628,9 @@ async def test_run_sync_all_resume_skips_done_region(monkeypatch):
 
     monkeypatch.setattr(fgis, "create_filter", fake_create_filter)
 
-    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+    async def fake_enumerate(
+        filter_id, region_id, *, on_progress=None, on_batch=None, on_tick=None
+    ):
         if on_batch:
             await on_batch(["a"])
         return {"a"}, []
@@ -660,7 +664,9 @@ async def test_run_sync_all_per_region_error_does_not_abort(monkeypatch):
     # 1-й регион — ок (батч записан); 2-й — краулер падает.
     calls = {"n": 0}
 
-    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+    async def fake_enumerate(
+        filter_id, region_id, *, on_progress=None, on_batch=None, on_tick=None
+    ):
         calls["n"] += 1
         if calls["n"] == 2:
             raise RuntimeError("краулер упал")
@@ -709,7 +715,9 @@ async def test_run_sync_all_skips_recently_synced_region(monkeypatch):
 
     monkeypatch.setattr(fgis, "create_filter", fake_create_filter)
 
-    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+    async def fake_enumerate(
+        filter_id, region_id, *, on_progress=None, on_batch=None, on_tick=None
+    ):
         if on_batch:
             await on_batch(["a"])
         return {"a"}, []
@@ -1140,7 +1148,9 @@ async def test_crawl_region_skips_existing_fgis_ids(monkeypatch):
     """_crawl_region тянет детали ТОЛЬКО для новых id — уже записанные пропускает."""
     from app.services import mno_worker
 
-    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+    async def fake_enumerate(
+        filter_id, region_id, *, on_progress=None, on_batch=None, on_tick=None
+    ):
         on_progress(4)
         await on_batch(["a", "b", "c", "d"])
         return set(), []
