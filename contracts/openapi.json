@@ -2078,6 +2078,178 @@
         ]
       }
     },
+    "/api/v1/integration/overview": {
+      "get": {
+        "tags": [
+          "Интеграция ФГИС (супер-админ)"
+        ],
+        "summary": "Get Overview",
+        "description": "Сводка: регионы (всего + посл. синхронизация), МНО (всего), разбивка по регионам.",
+        "operationId": "get_overview_api_v1_integration_overview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationOverview"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/integration/regions/sync": {
+      "post": {
+        "tags": [
+          "Интеграция ФГИС (супер-админ)"
+        ],
+        "summary": "Sync Regions",
+        "description": "Синхронно тянет справочник субъектов РФ из ФГИС и upsert-ит его в БД.",
+        "operationId": "sync_regions_api_v1_integration_regions_sync_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionsSyncResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/integration/mno/sync": {
+      "post": {
+        "tags": [
+          "Интеграция ФГИС (супер-админ)"
+        ],
+        "summary": "Start Mno Sync",
+        "description": "Запускает ФОНОВУЮ синхронизацию МНО региона. Если уже идёт — возвращает её.\n\nРегион должен быть в справочнике (иначе 404 — сначала синхронизируй регионы).",
+        "operationId": "start_mno_sync_api_v1_integration_mno_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MnoSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoSyncStartResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/integration/mno/sync/status": {
+      "get": {
+        "tags": [
+          "Интеграция ФГИС (супер-админ)"
+        ],
+        "summary": "Mno Sync Status",
+        "description": "Прогресс/итог фоновой синхронизации по job_id ИЛИ по region_code (последняя задача).",
+        "operationId": "mno_sync_status_api_v1_integration_mno_sync_status_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "region_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoSyncStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -2654,6 +2826,31 @@
         ],
         "title": "IncidentStatusUpdate"
       },
+      "IntegrationOverview": {
+        "properties": {
+          "regions": {
+            "$ref": "#/components/schemas/RegionsOverview"
+          },
+          "mno": {
+            "$ref": "#/components/schemas/MnoOverview"
+          },
+          "per_region": {
+            "items": {
+              "$ref": "#/components/schemas/PerRegionStat"
+            },
+            "type": "array",
+            "title": "Per Region"
+          }
+        },
+        "type": "object",
+        "required": [
+          "regions",
+          "mno",
+          "per_region"
+        ],
+        "title": "IntegrationOverview",
+        "description": "GET /integration/overview."
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -2923,6 +3120,35 @@
         "title": "MnoListItem",
         "description": "Строка реестра МНО. region_name резолвится из справочника регионов."
       },
+      "MnoOverview": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "MnoOverview",
+        "description": "Сводка по МНО."
+      },
+      "MnoSyncRequest": {
+        "properties": {
+          "region_code": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Region Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "region_code"
+        ],
+        "title": "MnoSyncRequest",
+        "description": "Тело POST /integration/mno/sync."
+      },
       "MnoSyncResult": {
         "properties": {
           "synced": {
@@ -2941,6 +3167,103 @@
         ],
         "title": "MnoSyncResult",
         "description": "Итог ЗАГЛУШКИ синхронизации с ФГИС: сколько помечено / всего МНО."
+      },
+      "MnoSyncStartResult": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "region_code": {
+            "type": "string",
+            "title": "Region Code"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "region_code",
+          "state"
+        ],
+        "title": "MnoSyncStartResult",
+        "description": "Ответ POST /integration/mno/sync — принятая (или уже идущая) фоновая задача."
+      },
+      "MnoSyncStatus": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "region_code": {
+            "type": "string",
+            "title": "Region Code"
+          },
+          "region_name": {
+            "type": "string",
+            "title": "Region Name"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "discovered": {
+            "type": "integer",
+            "title": "Discovered"
+          },
+          "fetched": {
+            "type": "integer",
+            "title": "Fetched"
+          },
+          "upserted": {
+            "type": "integer",
+            "title": "Upserted"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "region_code",
+          "region_name",
+          "state",
+          "discovered",
+          "fetched",
+          "upserted",
+          "started_at"
+        ],
+        "title": "MnoSyncStatus",
+        "description": "GET /integration/mno/sync/status — прогресс/итог фоновой синхронизации МНО."
       },
       "Paginated_IncidentListItem_": {
         "properties": {
@@ -3125,6 +3448,47 @@
         ],
         "title": "PendingNotifyResponse"
       },
+      "PerRegionStat": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "fed": {
+            "type": "integer",
+            "title": "Fed"
+          },
+          "mno_count": {
+            "type": "integer",
+            "title": "Mno Count"
+          },
+          "last_sync": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sync"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "fed",
+          "mno_count"
+        ],
+        "title": "PerRegionStat",
+        "description": "Строка сводной таблицы: сколько МНО в базе по региону + дата синхронизации."
+      },
       "ProfileUpdate": {
         "properties": {
           "fio": {
@@ -3308,6 +3672,62 @@
         ],
         "title": "RegionListItem",
         "description": "Строка справочника регионов. fed_code/fed_name резолвятся из FEDERAL_DISTRICTS,\nmno_count/incidents_count — подсчитываются сервисом."
+      },
+      "RegionsOverview": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "last_sync": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sync"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "RegionsOverview",
+        "description": "Сводка по справочнику регионов."
+      },
+      "RegionsSyncResult": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "last_sync": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Sync"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "created",
+          "updated",
+          "last_sync"
+        ],
+        "title": "RegionsSyncResult",
+        "description": "POST /integration/regions/sync — итог синхронизации справочника регионов."
       },
       "TokenResponse": {
         "properties": {
@@ -3554,6 +3974,10 @@
     {
       "name": "Управление пользователями (вне мобильного API)",
       "description": "Администрирование учётных записей (только роль admin)."
+    },
+    {
+      "name": "Интеграция ФГИС (супер-админ)",
+      "description": "Синхронизация справочника регионов и мест накопления (МНО) из публичного API ФГИС УТКО (слой 5). Доступно ТОЛЬКО супер-админу. Вне мобильного API."
     },
     {
       "name": "Служебное",

@@ -210,6 +210,80 @@ export interface RegionCreate {
   operators: string[];
 }
 
+/* ============================================================
+   Интеграция ФГИС (раздел супер-админа, /api/v1/integration).
+   Живые данные из ФГИС УТКО (public-api.utko.mnr.gov.ru), слой 5 — МНО.
+   Типы строго по формам ответов бэка.
+   ============================================================ */
+
+/** Строка сводки по региону в разделе интеграции (GET /integration/overview → per_region). */
+export interface IntegrationRegionRow {
+  /** Код субъекта РФ (regionId ФГИС, напр. «51»). */
+  code: string;
+  name: string;
+  /** id федерального округа (1..8; 0 — неизвестный). */
+  fed: number;
+  /** Число МНО региона в базе. */
+  mno_count: number;
+  /** ISO-дата последней синхронизации региона или null. */
+  last_sync: string | null;
+}
+
+/** Сводка раздела «Интеграция ФГИС» (GET /integration/overview). */
+export interface IntegrationOverview {
+  regions: {
+    /** Всего субъектов РФ в справочнике. */
+    total: number;
+    /** max(Region.last_sync) — ISO или null. */
+    last_sync: string | null;
+  };
+  mno: {
+    /** Всего МНО в базе. */
+    total: number;
+  };
+  per_region: IntegrationRegionRow[];
+}
+
+/** Результат синхронизации справочника регионов (POST /integration/regions/sync). */
+export interface RegionsSyncResult {
+  total: number;
+  created: number;
+  updated: number;
+  /** ISO-момент синхронизации. */
+  last_sync: string;
+}
+
+/** Состояние фоновой задачи синхронизации МНО. */
+export type MnoSyncState = 'running' | 'done' | 'error';
+
+/** Ответ на запуск фоновой синхронизации МНО (POST /integration/mno/sync). */
+export interface MnoSyncJob {
+  /** UUID фоновой задачи (in-memory реестр бэка; теряется при рестарте). */
+  job_id: string;
+  region_code: string;
+  state: MnoSyncState;
+}
+
+/** Статус фоновой синхронизации МНО (GET /integration/mno/sync/status). */
+export interface MnoSyncStatus {
+  job_id: string;
+  region_code: string;
+  region_name: string;
+  state: MnoSyncState;
+  /** Обнаружено id МНО краулером карты. */
+  discovered: number;
+  /** Загружено деталей (POST sidebar/cluster). */
+  fetched: number;
+  /** Записано (upsert) в таблицу mno. */
+  upserted: number;
+  /** Текст ошибки при state==='error', иначе null. */
+  error: string | null;
+  /** ISO-момент старта. */
+  started_at: string;
+  /** ISO-момент завершения или null (пока running). */
+  finished_at: string | null;
+}
+
 /** Конверт ошибки API: { error: { code, message, details } }. */
 export interface ApiError {
   error: {

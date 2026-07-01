@@ -69,7 +69,8 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   `human|system`, actor_user_id (FK users SET NULL), created_at. Пишется на каждое изменение статуса/
   массовое изменение/создание/удаление пользователя/смену профиля.
 - Миграции: `0001_initial` (сначала `CREATE EXTENSION pgcrypto`) · `0002` notified_at+quote ·
-  `0003` msg_url · `0004` is_superadmin (бэкфилл = старейший admin = pulse@reo.ru) · `0005` comment.
+  `0003` msg_url · `0004` is_superadmin (бэкфилл = старейший admin = pulse@reo.ru) · `0005` comment ·
+  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО из ФГИС по fgis_id).
 
 ## 5. API (`/api/v1`, конверт ошибок `{error:{code,message,details}}`)
 - **auth:** `POST /auth/login` → `{access_token,token_type}` + HttpOnly refresh-cookie (path
@@ -117,7 +118,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
 **Backend** (локально есть `.venv` python3.14 для проверок; прод — Docker python:3.12):
 ```bash
 cd backend
-.venv/bin/python -m pytest -q          # тесты (оффлайн, без внешней БД) — сейчас 116/116 зелёные
+.venv/bin/python -m pytest -q          # тесты (оффлайн, без внешней БД) — сейчас 253/253 зелёные
 .venv/bin/python -m compileall -q app  # синтаксис
 # в Docker/проде: alembic upgrade head ; python -m app.seed
 ```
@@ -161,7 +162,12 @@ npm run dev            # дев-сервер :5173 (нужен бэк на VITE_
 в группе бот молчит на не-фото — принимает только фото+подпись), **AI-разбор адреса** (claude `-p`
 sonnet) + бесплатный геокод через Подсказки, супер-админ + ручные пароли (инвайт убран), фильтр
 региона, поле «Комментарий», ссылки на фото в .xlsx, мотивирующие цитаты (рандомизация промпта),
-бэкап-скрипты, домен+HTTPS.
+бэкап-скрипты, домен+HTTPS, **раздел «Интеграция ФГИС УТКО»** (только супер-админ, `/integration`):
+живой краулер карты `public-api.utko.mnr.gov.ru` (слой 5) — синхронизация справочника субъектов РФ
+(`filters/regions`) и МНО (фильтр→плитка с дроблением кластеров→батч-детали `sidebar/cluster`:
+название/адрес/координаты; upsert по `fgis_id`, фоновая задача с прогрессом). Округ регионов — по
+встроенной карте `region_fed` (ФГИС нумерует id 1..85 подряд; хвост 80–85 ≠ автокоды: 82=Чукотка,
+83=ЯНАО, 84=Крым, 85=Севастополь). Обратный геокод НЕ нужен — адрес отдаёт `sidebar`.
 **Отложено/заброшено:** Яндекс-Форма webhook — ЗАБРОШЕН (нужен IPv6, VPS IPv4-only → сделали свою
 форму, `/intake/yandex` остался неиспользуемым); реальные письма (invite/reset) — НЕ нужны (пароли
 задаём руками); DaData Clean (платный) — не подключаем (геокод бесплатными Подсказками).

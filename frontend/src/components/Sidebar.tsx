@@ -46,6 +46,7 @@ export function Sidebar() {
     if (path.startsWith('/incidents') || path === '/') return 'incidents';
     if (path.startsWith('/mno')) return 'mno';
     if (path.startsWith('/regions')) return 'regions';
+    if (path.startsWith('/integration')) return 'integration';
     if (path.startsWith('/settings')) return 'settings';
     return '';
   };
@@ -99,6 +100,10 @@ export function Sidebar() {
 
         <div className="nav-group-label">Справочники</div>
         {refNav.map(renderNav)}
+
+        {/* Интеграция ФГИС — только супер-админ */}
+        {user?.is_superadmin &&
+          renderNav({ id: 'integration', label: 'Интеграция', icon: 'refresh-cw' })}
 
         <div className="nav-spacer" />
 

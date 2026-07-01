@@ -18,6 +18,9 @@ const MnoPage = lazy(() => import('@/pages/mno/MnoPage').then((m) => ({ default:
 const RegionsPage = lazy(() =>
   import('@/pages/regions/RegionsPage').then((m) => ({ default: m.RegionsPage }))
 );
+const IntegrationPage = lazy(() =>
+  import('@/pages/integration/IntegrationPage').then((m) => ({ default: m.IntegrationPage }))
+);
 const NotFoundPage = lazy(() =>
   import('@/pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage }))
 );
@@ -64,6 +67,18 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Гард раздела «Интеграция ФГИС» — доступен ТОЛЬКО супер-админу. Не супер-админа
+ * (и неавторизованного, у которого user ещё null) уводим на /incidents.
+ */
+function RequireSuperadmin({ children }: { children: ReactNode }) {
+  const user = useAuthStore((s) => s.user);
+  if (!user?.is_superadmin) {
+    return <Navigate to="/incidents" replace />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -88,6 +103,14 @@ export default function App() {
         <Route path="incidents" element={<IncidentsPage />} />
         <Route path="mno" element={<MnoPage />} />
         <Route path="regions" element={<RegionsPage />} />
+        <Route
+          path="integration"
+          element={
+            <RequireSuperadmin>
+              <IntegrationPage />
+            </RequireSuperadmin>
+          }
+        />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />

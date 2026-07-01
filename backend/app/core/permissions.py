@@ -11,3 +11,9 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> None:
     """Require user to have admin role"""
     if current_user.role != "admin":
         raise ForbiddenError("Требуется роль администратора")
+
+
+async def require_superadmin(current_user: User = Depends(get_current_user)) -> None:
+    """Require user to be the super-admin (раздел «Интеграция ФГИС»)."""
+    if not current_user.is_superadmin:
+        raise ForbiddenError("Требуется супер-администратор")

@@ -21,7 +21,7 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from app.main import app  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import get_current_user  # noqa: E402
-from app.core.permissions import require_admin  # noqa: E402
+from app.core.permissions import require_admin, require_superadmin  # noqa: E402
 from app.models import User  # noqa: E402
 
 
@@ -60,9 +60,13 @@ async def client(fake_session, current_user):
     async def _require_admin_override():
         return None
 
+    async def _require_superadmin_override():
+        return None
+
     app.dependency_overrides[get_db] = _get_db_override
     app.dependency_overrides[get_current_user] = _current_user_override
     app.dependency_overrides[require_admin] = _require_admin_override
+    app.dependency_overrides[require_superadmin] = _require_superadmin_override
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

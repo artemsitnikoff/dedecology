@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # Clean API требует ОБА ключа (DADATA_API_KEY + DADATA_SECRET_KEY).
     DADATA_SECRET_KEY: str | None = None
 
+    # Базовый URL публичного API ФГИС УТКО (интеграция «Места накопления»).
+    # По умолчанию — боевой публичный хост Минприроды.
+    FGIS_BASE_URL: str = "https://public-api.utko.mnr.gov.ru"
+
     # Каталог хранения загруженных фото обращений (относительно cwd процесса;
     # в контейнере = /app/storage). Структура: {STORAGE_DIR}/incidents/{id}/{n}.ext
     STORAGE_DIR: str = "storage"
