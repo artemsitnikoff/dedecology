@@ -8,13 +8,31 @@ import {
   useMnoSyncStatus,
   useRunningAllJob,
 } from '@/api/hooks/integration';
-import { useSyncRegions, useStartMnoSync, useStartMnoSyncAll } from '@/api/mutations/integration';
+import {
+  useSyncRegions,
+  useStartMnoSync,
+  useStartMnoSyncAll,
+  useCancelMnoSync,
+} from '@/api/mutations/integration';
 import { useFederalDistricts } from '@/api/hooks/regions';
 import type { ApiError, MnoSyncJob } from '@/api/aliases';
 import './IntegrationPage.css';
 
 /** Спец-значение селектора региона: синхронизировать МНО по ВСЕМ регионам справочника. */
 const ALL_REGIONS = '__all__';
+
+/** Задача «running», но heartbeat молчит дольше этого → считаем зависшей (воркер умер/оборван). */
+const STALE_MS = 10 * 60 * 1000;
+
+/** Зависла ли задача: state='running', но updated_at давно не двигался. Тогда UI сам
+ *  разлочивает запуск (без похода на сервер); бэкенд-дедуп такую тоже игнорит. */
+function isJobStale(
+  s: { state: string; updated_at: string | null } | null | undefined,
+): boolean {
+  if (!s || s.state !== 'running') return false;
+  if (!s.updated_at) return true;
+  return Date.now() - Date.parse(s.updated_at) > STALE_MS;
+}
 
 /**
  * Раздел «Интеграция ФГИС» — доступен ТОЛЬКО супер-админу (гард в App.tsx + пункт меню).
@@ -47,6 +65,7 @@ export function IntegrationPage() {
   const syncRegions = useSyncRegions();
   const startMno = useStartMnoSync();
   const startMnoAll = useStartMnoSyncAll();
+  const cancelMno = useCancelMnoSync();
 
   // Выбранный регион и активная фоновая задача синхронизации МНО.
   const [mnoRegion, setMnoRegion] = useState('');
@@ -73,8 +92,13 @@ export function IntegrationPage() {
     return (id: number) => map.get(id) ?? '—';
   }, [districtsQuery.data]);
 
+  // Зависшую задачу (running, но heartbeat давно молчит) НЕ считаем активной — кнопка
+  // запуска сама разлочивается без похода на сервер (бэкенд-дедуп её тоже игнорит).
+  const staleRun = isJobStale(status);
   const isRunning =
-    status?.state === 'running' || startMno.isPending || startMnoAll.isPending;
+    (status?.state === 'running' && !staleRun) ||
+    startMno.isPending ||
+    startMnoAll.isPending;
 
   // Прогресс одиночного региона: доля загруженных деталей от обнаруженного.
   const pct =
@@ -105,6 +129,9 @@ export function IntegrationPage() {
           ? `все регионы (${status.regions_done}/${status.regions_total}${failed})`
           : status.region_name;
       showToast(`Синхронизация МНО завершена: ${scope} — записано ${status.upserted}.`);
+    } else if (status.state === 'cancelled') {
+      // Отмена — не ошибка: честно сообщаем и уже записанное сохраняется.
+      showToast(`Синхронизация МНО отменена — записано ${status.upserted}.`);
     } else {
       showToast(`Ошибка синхронизации МНО: ${status.error || 'неизвестная ошибка'}`);
     }
@@ -116,7 +143,10 @@ export function IntegrationPage() {
   // Уже завершённую задачу (done/error) НЕ подхватываем — только running.
   useEffect(() => {
     const running = runningAllQuery.data;
-    if (jobId != null || !running || running.state !== 'running') return;
+    // Только ЖИВУЮ идущую задачу переподхватываем; зависшую (stale) — игнорим,
+    // чтобы она не блокировала кнопку запуска после F5.
+    if (jobId != null || !running || running.state !== 'running' || isJobStale(running))
+      return;
     setJobId(running.job_id);
     setMnoRegion(ALL_REGIONS);
   }, [runningAllQuery.data, jobId]);
@@ -153,6 +183,25 @@ export function IntegrationPage() {
     }
   };
 
+  // Отмена фоновой синхронизации МНО: снимает флаг/указатель на бэке, разблокирует запуск.
+  const handleCancelMno = () => {
+    if (cancelMno.isPending) return;
+    cancelMno.mutate(undefined, {
+      onSuccess: (res) => {
+        // Сброс локального jobId → опрос статуса гаснет, кнопка запуска снова активна.
+        setJobId(null);
+        // Разрешаем обработать завершение будущей новой задачи.
+        handledJobRef.current = null;
+        qc.invalidateQueries({ queryKey: ['integration', 'mno', 'running-all'] });
+        qc.invalidateQueries({ queryKey: ['integration', 'overview'] });
+        showToast(
+          res.cancelled ? 'Синхронизация отменена.' : 'Активной синхронизации не было.'
+        );
+      },
+      onError: (e) => showToast(apiErrorMessage(e) || 'Не удалось отменить синхронизацию.'),
+    });
+  };
+
   const regionsTotal = overview ? overview.regions.total : null;
   const mnoTotal = overview ? overview.mno.total : null;
 
@@ -161,7 +210,9 @@ export function IntegrationPage() {
       ? 'Завершено'
       : status?.state === 'error'
         ? 'Ошибка'
-        : 'Идёт синхронизация';
+        : status?.state === 'cancelled'
+          ? 'Отменено'
+          : 'Идёт синхронизация';
 
   return (
     <div className="de-intg-wrap">
@@ -345,6 +396,26 @@ export function IntegrationPage() {
                   )}
                   {status.state === 'error' && status.error && (
                     <div className="de-intg-progress-error">{status.error}</div>
+                  )}
+                  {/* Кнопка отмены — только пока задача идёт (когда задачи нет — панели тоже нет). */}
+                  {status.state === 'running' && (
+                    <div className="de-intg-progress-actions">
+                      <button
+                        type="button"
+                        className="de-intg-btn de-intg-btn-cancel"
+                        onClick={handleCancelMno}
+                        disabled={cancelMno.isPending}
+                      >
+                        <Icon name="x" size={14} />
+                        {cancelMno.isPending ? 'Отмена…' : 'Отменить синхронизацию'}
+                      </button>
+                    </div>
+                  )}
+                  {/* Честный статус отмены (бэк выставил state='cancelled'). */}
+                  {status.state === 'cancelled' && (
+                    <div className="de-intg-progress-cancelled">
+                      <Icon name="x" size={14} /> Синхронизация отменена
+                    </div>
                   )}
                 </div>
               )}

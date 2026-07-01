@@ -272,8 +272,8 @@ export interface RegionsSyncResult {
   last_sync: string;
 }
 
-/** Состояние фоновой задачи синхронизации МНО. */
-export type MnoSyncState = 'running' | 'done' | 'error';
+/** Состояние фоновой задачи синхронизации МНО ('cancelled' — отменена из UI). */
+export type MnoSyncState = 'running' | 'done' | 'error' | 'cancelled';
 
 /** Ответ на запуск фоновой синхронизации МНО (POST /integration/mno/sync). */
 export interface MnoSyncJob {
@@ -311,6 +311,20 @@ export interface MnoSyncStatus {
   regions_failed: number;
   /** Имя региона, обрабатываемого сейчас (для scope==='all'). */
   current_region: string;
+  /** Heartbeat: ISO-момент последнего обновления. Если running, но давно не двигался —
+   *  задача зависла, UI сам разлочивает запуск (см. IntegrationPage). */
+  updated_at: string | null;
+}
+
+/**
+ * Результат отмены фоновой синхронизации МНО (POST /integration/mno/sync/cancel).
+ * Бэк снимает указатель задачи (get_running_job → None) и выставляет флаг отмены.
+ */
+export interface MnoCancelResult {
+  /** true — была активная задача, она отменена; false — активной задачи не было. */
+  cancelled: boolean;
+  /** job_id отменённой задачи или null (если отменять было нечего). */
+  job_id: string | null;
 }
 
 /** Конверт ошибки API: { error: { code, message, details } }. */

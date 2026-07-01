@@ -22,6 +22,8 @@ from ...models import Region
 from ...redis_client import get_redis
 from ...schemas.integration import (
     IntegrationOverview,
+    MnoCancelRequest,
+    MnoCancelResult,
     MnoSyncRequest,
     MnoSyncStartResult,
     MnoSyncStatus,
@@ -141,6 +143,32 @@ async def start_mno_sync_all(
         "sync_all_task", job_id, [[code, name] for code, name in rows]
     )
     return MnoSyncStartResult(job_id=job_id, region_code=ALL_JOB_KEY, state="running")
+
+
+@router.post("/mno/sync/cancel", response_model=MnoCancelResult, tags=[TAG])
+async def cancel_mno_sync(payload: MnoCancelRequest):
+    """Отменяет идущую фоновую синхронизацию МНО и СРАЗУ разблокирует запуск в UI.
+
+    scope="all" → прогон «все регионы» (ключ "__all__"); иначе scope трактуется как
+    region_code. Ставит cancel-флаг (воркер прекратит краул на ближайшем батче), сразу
+    метит снимок state="cancelled" (статус отражает отмену без ожидания воркера) и СНИМАЕТ
+    указатель → get_running_job=None, кнопка запуска снова активна. Если активной задачи
+    по ключу нет — cancelled=false (отменять было нечего), без ошибки.
+    """
+    redis = get_redis()
+    key = ALL_JOB_KEY if payload.scope == "all" else payload.scope
+    job_id = await mno_jobs.get_pointer(redis, key)
+    if job_id:
+        await mno_jobs.set_cancelled(redis, job_id)
+        # Немедленно отражаем отмену в снимке, чтобы опрос статуса увидел её сразу.
+        prog = await mno_jobs.read_progress(redis, job_id)
+        if prog is not None:
+            prog["state"] = "cancelled"
+            prog["finished_at"] = mno_jobs.utcnow()
+            await mno_jobs.write_progress(redis, job_id, prog)
+    # Снимаем указатель в любом случае — залипшая (running) задача перестаёт блокировать UI.
+    await mno_jobs.clear_job(redis, key, job_id)
+    return MnoCancelResult(cancelled=bool(job_id), job_id=job_id)
 
 
 @router.get("/mno/sync/status", response_model=MnoSyncStatus, tags=[TAG])

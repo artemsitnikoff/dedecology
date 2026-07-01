@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
-import type { MnoSyncJob, RegionsSyncResult } from '@/api/aliases';
+import type { MnoSyncJob, RegionsSyncResult, MnoCancelResult } from '@/api/aliases';
 
 /**
  * Мутации раздела «Интеграция ФГИС» (только супер-админ).
@@ -51,6 +51,24 @@ export function useStartMnoSyncAll() {
   return useMutation({
     mutationFn: async () => {
       const res = await api.post<MnoSyncJob>('/integration/mno/sync-all');
+      return res.data;
+    },
+  });
+}
+
+/**
+ * POST /integration/mno/sync/cancel {scope:'all'} — отмена фоновой синхронизации МНО.
+ * Бэк выставляет флаг отмены (задача корректно останавливается в пределах ближайшего
+ * батча) и снимает указатель `mno:ptr:__all__` → get_running_job=None, кнопка запуска
+ * снова активна. Сброс локального jobId + инвалидация (running-all/overview) — на
+ * стороне страницы (в onSuccess вызова), чтобы UI сразу разблокировался.
+ */
+export function useCancelMnoSync() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await api.post<MnoCancelResult>('/integration/mno/sync/cancel', {
+        scope: 'all',
+      });
       return res.data;
     },
   });

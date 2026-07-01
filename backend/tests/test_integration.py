@@ -66,7 +66,8 @@ class FakeRedis:
     async def expire(self, name, ttl):
         return True
 
-    async def set(self, name, value):
+    async def set(self, name, value, ex=None):
+        # ex (TTL) принимаем для совместимости с реальным клиентом; офлайн его не эмулируем.
         self.strings[name] = value
         return True
 
@@ -475,6 +476,41 @@ async def test_mno_jobs_done_set():
     assert await mno_jobs.is_region_done(fake, "j1", "63") is False
 
 
+@pytest.mark.asyncio
+async def test_mno_jobs_cancel_roundtrip():
+    """set_cancelled / is_cancelled — флаг отмены задачи (round-trip на FakeRedis)."""
+    fake = FakeRedis()
+    assert await mno_jobs.is_cancelled(fake, "j1") is False
+    await mno_jobs.set_cancelled(fake, "j1")
+    assert await mno_jobs.is_cancelled(fake, "j1") is True
+    # Флаг именной — чужая задача не затронута.
+    assert await mno_jobs.is_cancelled(fake, "j2") is False
+
+
+@pytest.mark.asyncio
+async def test_mno_jobs_region_synced_marker():
+    """mark_region_synced / is_region_recently_synced — постоянный маркер пропуска региона."""
+    fake = FakeRedis()
+    assert await mno_jobs.is_region_recently_synced(fake, "51") is False
+    await mno_jobs.mark_region_synced(fake, "51")
+    assert await mno_jobs.is_region_recently_synced(fake, "51") is True
+    assert await mno_jobs.is_region_recently_synced(fake, "63") is False
+
+
+@pytest.mark.asyncio
+async def test_mno_jobs_clear_job_drops_pointer():
+    """clear_job снимает указатель → get_running_job=None (UI разблокирован)."""
+    fake = FakeRedis()
+    prog = mno_jobs.initial_progress("j1", "__all__", "Все регионы", scope="all")
+    await mno_jobs.write_progress(fake, "j1", prog)
+    await mno_jobs.set_pointer(fake, "__all__", "j1")
+    assert await mno_jobs.get_running_job(fake, "__all__") is not None
+
+    await mno_jobs.clear_job(fake, "__all__", "j1")
+    assert await mno_jobs.get_pointer(fake, "__all__") is None
+    assert await mno_jobs.get_running_job(fake, "__all__") is None
+
+
 # --- Воркер (mno_worker) на FakeRedis + мок fgis/сессии ------------------------
 
 
@@ -659,6 +695,72 @@ async def test_run_sync_all_per_region_error_does_not_abort(monkeypatch):
     assert await mno_jobs.is_region_done(fake, "all-2", "63") is False
 
 
+@pytest.mark.asyncio
+async def test_run_sync_all_skips_recently_synced_region(monkeypatch):
+    """ПРОПУСК НАСОВСЕМ: регион с живым region_synced-маркером не краулится (regions_done++),
+    а успешно пройденный регион метится mark_region_synced."""
+    monkeypatch.setattr(mno_worker, "AsyncSessionLocal", lambda: _FakeDBSession())
+
+    crawled: list[int] = []
+
+    async def fake_create_filter(region_id):
+        crawled.append(region_id)
+        return "f"
+
+    monkeypatch.setattr(fgis, "create_filter", fake_create_filter)
+
+    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+        if on_batch:
+            await on_batch(["a"])
+        return {"a"}, []
+
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
+    monkeypatch.setattr(fgis, "cluster_details", AsyncMock(return_value=[{"id": "a"}]))
+    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=1))
+
+    fake = FakeRedis()
+    # 51 уже синхронизирован недавно → пропустить целиком, НЕ пере-сканировать.
+    await mno_jobs.mark_region_synced(fake, "51")
+
+    await mno_worker.run_sync_all(
+        fake, "all-s", [["51", "Мурманская область"], ["63", "Самарская область"]]
+    )
+
+    # 51 пропущен (create_filter для него не звался), краулился только 63.
+    assert crawled == [63]
+    prog = await mno_jobs.read_progress(fake, "all-s")
+    # 51 засчитан по маркеру + 63 обойдён = 2.
+    assert prog["regions_done"] == 2
+    assert prog["state"] == "done"
+    # 63 успешно пройден → теперь тоже помечен синхронизированным.
+    assert await mno_jobs.is_region_recently_synced(fake, "63") is True
+
+
+@pytest.mark.asyncio
+async def test_run_sync_all_cancelled_on_batch_stops(monkeypatch):
+    """ОТМЕНА: is_cancelled=True на _on_batch → state='cancelled', прогон прекращается сразу.
+
+    side_effect=[False, True]: 1-я проверка (в начале региона) — не отменено, 2-я (внутри
+    батча) — отменено → _CancelledSync → прогон обрывается на первом регионе."""
+    _mock_fgis_ok(monkeypatch, upserted=3)
+    monkeypatch.setattr(
+        mno_worker, "is_cancelled", AsyncMock(side_effect=[False, True])
+    )
+
+    fake = FakeRedis()
+    await mno_worker.run_sync_all(
+        fake, "all-x", [["51", "Мурманская область"], ["63", "Самарская область"]]
+    )
+
+    prog = await mno_jobs.read_progress(fake, "all-x")
+    assert prog["state"] == "cancelled"
+    # Прогон оборван на первом регионе: ни один не досчитан, второй не тронут.
+    assert prog["regions_done"] == 0
+    assert prog["finished_at"] is not None
+    # Первый регион НЕ помечен синхронизированным (краул прерван на батче).
+    assert await mno_jobs.is_region_recently_synced(fake, "51") is False
+
+
 # --- Эндпоинты (мок сервиса / Redis / arq-пула) --------------------------------
 
 
@@ -816,6 +918,51 @@ async def test_mno_sync_status_not_found_404(client):
         resp = await client.get("/api/v1/integration/mno/sync/status?job_id=missing")
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_cancel_mno_sync_cancels_running(client):
+    """POST /mno/sync/cancel: есть указатель → cancelled=true, флаг отмены выставлен,
+    снимок помечен cancelled, указатель снят (get_running_job=None → UI разблокирован)."""
+    fake = FakeRedis()
+    prog = mno_jobs.initial_progress(
+        "all-c", "__all__", "Все регионы", scope="all", regions_total=3
+    )
+    await mno_jobs.write_progress(fake, "all-c", prog)
+    await mno_jobs.set_pointer(fake, "__all__", "all-c")
+
+    with patch("app.api.v1.integration.get_redis", return_value=fake):
+        resp = await client.post(
+            "/api/v1/integration/mno/sync/cancel", json={"scope": "all"}
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cancelled"] is True
+    assert body["job_id"] == "all-c"
+    # Флаг отмены выставлен — воркер прекратит краул на ближайшем батче.
+    assert await mno_jobs.is_cancelled(fake, "all-c") is True
+    # Снимок сразу помечен cancelled (+ finished_at).
+    prog2 = await mno_jobs.read_progress(fake, "all-c")
+    assert prog2["state"] == "cancelled"
+    assert prog2["finished_at"] is not None
+    # Указатель снят → активной задачи по ключу больше нет.
+    assert await mno_jobs.get_pointer(fake, "__all__") is None
+    assert await mno_jobs.get_running_job(fake, "__all__") is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_mno_sync_no_job_returns_false(client):
+    """POST /mno/sync/cancel без активной задачи по ключу → cancelled=false, job_id=null."""
+    fake = FakeRedis()
+    with patch("app.api.v1.integration.get_redis", return_value=fake):
+        resp = await client.post(
+            "/api/v1/integration/mno/sync/cancel", json={"scope": "all"}
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cancelled"] is False
+    assert body["job_id"] is None
 
 
 # --- Синхронизация МНО по ВСЕМ регионам разом ----------------------------------
@@ -1017,9 +1164,46 @@ async def test_crawl_region_skips_existing_fgis_ids(monkeypatch):
 
     session = AsyncMock()
     prog = {"discovered": 0, "fetched": 0, "upserted": 0}
-    await mno_worker._crawl_region(object(), "job-1", prog, session, 22)
+    # FakeRedis: is_cancelled в _on_batch читает redis.get → отмены нет (None), батч идёт.
+    await mno_worker._crawl_region(FakeRedis(), "job-1", prog, session, 22)
 
     assert cluster_calls == [["b", "d"]]  # только новые id
     assert prog["fetched"] == 2
     assert prog["upserted"] == 2
     assert prog["discovered"] == 4  # обнаружено считаются ВСЕ (для прогресса)
+
+
+# --- авто-детект зависшей задачи (heartbeat updated_at → авто-разлочка UI) ------
+
+
+def test_is_stale_by_updated_at():
+    from datetime import timedelta
+
+    assert mno_jobs.is_stale({"updated_at": mno_jobs.utcnow()}) is False
+    old = mno_jobs.utcnow() - timedelta(seconds=mno_jobs.STALE_SECONDS + 60)
+    assert mno_jobs.is_stale({"updated_at": old}) is True
+    # Снимок без heartbeat (старый/битый) — считаем зависшим.
+    assert mno_jobs.is_stale({"updated_at": None}) is True
+    assert mno_jobs.is_stale({}) is True
+
+
+@pytest.mark.asyncio
+async def test_get_running_job_ignores_stale():
+    from datetime import timedelta
+
+    r = FakeRedis()
+    await mno_jobs.set_pointer(r, "__all__", "job-live")
+    await mno_jobs.write_progress(
+        r,
+        "job-live",
+        mno_jobs.initial_progress(
+            "job-live", "__all__", "Все регионы", scope="all", regions_total=5
+        ),
+    )
+    # Живая running-задача (свежий heartbeat) → отдаётся (дедуп сработает).
+    assert (await mno_jobs.get_running_job(r, "__all__")) is not None
+
+    # Состарим heartbeat вручную → get_running_job вернёт None → UI сам разлочится.
+    stale = mno_jobs.utcnow() - timedelta(seconds=mno_jobs.STALE_SECONDS + 60)
+    r.hashes["mno:job:job-live"]["updated_at"] = stale.isoformat()
+    assert (await mno_jobs.get_running_job(r, "__all__")) is None

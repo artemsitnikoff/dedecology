@@ -2312,6 +2312,53 @@
         ]
       }
     },
+    "/api/v1/integration/mno/sync/cancel": {
+      "post": {
+        "tags": [
+          "Интеграция ФГИС (супер-админ)"
+        ],
+        "summary": "Cancel Mno Sync",
+        "description": "Отменяет идущую фоновую синхронизацию МНО и СРАЗУ разблокирует запуск в UI.\n\nscope=\"all\" → прогон «все регионы» (ключ \"__all__\"); иначе scope трактуется как\nregion_code. Ставит cancel-флаг (воркер прекратит краул на ближайшем батче), сразу\nметит снимок state=\"cancelled\" (статус отражает отмену без ожидания воркера) и СНИМАЕТ\nуказатель → get_running_job=None, кнопка запуска снова активна. Если активной задачи\nпо ключу нет — cancelled=false (отменять было нечего), без ошибки.",
+        "operationId": "cancel_mno_sync_api_v1_integration_mno_sync_cancel_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MnoCancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoCancelResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/integration/mno/sync/status": {
       "get": {
         "tags": [
@@ -3046,6 +3093,43 @@
         ],
         "title": "MessageResult"
       },
+      "MnoCancelRequest": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": "all"
+          }
+        },
+        "type": "object",
+        "title": "MnoCancelRequest",
+        "description": "Тело POST /integration/mno/sync/cancel — что отменяем."
+      },
+      "MnoCancelResult": {
+        "properties": {
+          "cancelled": {
+            "type": "boolean",
+            "title": "Cancelled"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cancelled"
+        ],
+        "title": "MnoCancelResult",
+        "description": "Ответ POST /integration/mno/sync/cancel."
+      },
       "MnoCreate": {
         "properties": {
           "name": {
@@ -3434,6 +3518,18 @@
               }
             ],
             "title": "Finished At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "scope": {
             "type": "string",

@@ -56,18 +56,32 @@ class MnoSyncStartResult(BaseModel):
     state: str  # running
 
 
+class MnoCancelRequest(BaseModel):
+    """Тело POST /integration/mno/sync/cancel — что отменяем."""
+    scope: str = "all"  # "all" (прогон «все регионы») | region_code (одиночный регион)
+
+
+class MnoCancelResult(BaseModel):
+    """Ответ POST /integration/mno/sync/cancel."""
+    cancelled: bool  # была ли активная задача, которую отменили
+    job_id: str | None = None  # job_id отменённой задачи (None, если отменять было нечего)
+
+
 class MnoSyncStatus(BaseModel):
     """GET /integration/mno/sync/status — прогресс/итог фоновой синхронизации МНО."""
     job_id: str
     region_code: str
     region_name: str
-    state: str  # running | done | error
+    state: str  # running | done | error | cancelled
     discovered: int
     fetched: int
     upserted: int
     error: Optional[str] = None
     started_at: datetime
     finished_at: Optional[datetime] = None
+    # Heartbeat: момент последнего обновления прогресса. Если running, но updated_at
+    # давно не двигался — задача зависла (воркер умер), UI сам разлочивает запуск.
+    updated_at: Optional[datetime] = None
     # Прогон по ВСЕМ регионам (scope="all"): порегионный прогресс. Для одиночной
     # задачи дефолты держат прежнюю форму (scope="region", один регион).
     scope: str = "region"          # "region" | "all"

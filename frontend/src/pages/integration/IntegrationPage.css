@@ -274,6 +274,10 @@
   background: var(--ark-red-100);
   color: var(--ark-red-600);
 }
+.de-intg-state-cancelled {
+  background: var(--ark-gray-200);
+  color: var(--ark-gray-700);
+}
 .de-intg-progress-region {
   font-size: 12.5px;
   color: var(--fg-2);
@@ -318,6 +322,35 @@
   border-radius: 7px;
   padding: 8px 10px;
   word-break: break-word;
+}
+
+/* ---------- Отмена синхронизации ---------- */
+.de-intg-progress-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.de-intg-btn-cancel {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+.de-intg-btn-cancel:hover:not(:disabled) {
+  border-color: var(--error-border);
+  color: var(--error-fg);
+}
+.de-intg-progress-cancelled {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-2);
 }
 
 /* ---------- Порегионный прогресс «Все регионы» ---------- */

@@ -17,13 +17,20 @@ from ..models import Mno
 from . import fgis, mno_sync
 from .mno_jobs import (
     initial_progress,
+    is_cancelled,
     is_region_done,
+    is_region_recently_synced,
     mark_region_done,
+    mark_region_synced,
     utcnow,
     write_progress,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _CancelledSync(Exception):
+    """Прогон отменён из UI (флаг mno:cancel:{job_id}). Прерывает краул на ближайшем батче."""
 
 
 async def _existing_fgis_ids(session, ids: list[str]) -> set[str]:
@@ -51,6 +58,10 @@ async def _crawl_region(redis, job_id, prog, session, region_id: int) -> None:
         prog["discovered"] = base_disc + discovered
 
     async def _on_batch(batch: list[str]) -> None:
+        # Отмена из UI: проверяем ДО обработки батча — так прогон обрывается в пределах
+        # ~100 обнаруженных id (отзывчиво), не дожидаясь конца региона.
+        if await is_cancelled(redis, job_id):
+            raise _CancelledSync()
         # Пропускаем уже записанные МНО (fgis_id в БД) — детали тянем ТОЛЬКО для новых.
         # Так возобновление после обрыва/деплоя дёшево: регион промотывается мимо сделанного.
         existing = await _existing_fgis_ids(session, batch)
@@ -84,6 +95,9 @@ async def run_sync_region(redis, job_id, region_code, region_name) -> None:
             "[mno_worker] регион %s готов: обнаружено=%s детали=%s записано=%s",
             region_code, prog["discovered"], prog["fetched"], prog["upserted"],
         )
+    except _CancelledSync:  # отмена из UI — не ошибка, честно помечаем «cancelled»
+        prog["state"] = "cancelled"
+        logger.info("[mno_worker] регион %s: синхронизация отменена из UI", region_code)
     except Exception as e:  # noqa: BLE001 — честно фиксируем ошибку в задаче
         prog["state"] = "error"
         prog["error"] = str(e)
@@ -106,8 +120,19 @@ async def run_sync_all(redis, job_id, region_pairs) -> None:
     try:
         async with AsyncSessionLocal() as session:
             for code, name in region_pairs:
+                # ОТМЕНА из UI (перед регионом): фиксируем и прекращаем прогон.
+                if await is_cancelled(redis, job_id):
+                    prog["state"] = "cancelled"
+                    logger.info("[mno_worker] all: синхронизация отменена из UI")
+                    break
                 # RESUME: регион уже пройден в этом прогоне (ретрай воркера) — пропускаем.
                 if await is_region_done(redis, job_id, code):
+                    prog["regions_done"] += 1
+                    await write_progress(redis, job_id, prog)
+                    continue
+                # ПРОПУСК НАСОВСЕМ: регион синхронизирован недавно (маркер ещё жив) — не
+                # пере-сканируем готовое (большой первый регион не блокирует остальные).
+                if await is_region_recently_synced(redis, code):
                     prog["regions_done"] += 1
                     await write_progress(redis, job_id, prog)
                     continue
@@ -117,6 +142,12 @@ async def run_sync_all(redis, job_id, region_pairs) -> None:
                     await _crawl_region(redis, job_id, prog, session, int(code))
                     prog["regions_done"] += 1
                     await mark_region_done(redis, job_id, code)
+                    await mark_region_synced(redis, code)
+                except _CancelledSync:  # отмена сработала в пределах региона (на батче)
+                    prog["state"] = "cancelled"
+                    logger.info("[mno_worker] all: синхронизация отменена из UI")
+                    await write_progress(redis, job_id, prog)
+                    return
                 except Exception as e:  # noqa: BLE001 — сбой региона не роняет прогон
                     prog["regions_failed"] += 1
                     prog["error"] = f"{name}: {e}"
@@ -124,7 +155,8 @@ async def run_sync_all(redis, job_id, region_pairs) -> None:
                         "[mno_worker] all: регион %s (%s) — сбой", code, name
                     )
                 await write_progress(redis, job_id, prog)
-        prog["state"] = "done"
+        if prog["state"] != "cancelled":
+            prog["state"] = "done"
         logger.info(
             "[mno_worker] all готов: регионов=%s успешно=%s с ошибками=%s "
             "обнаружено=%s детали=%s записано=%s",
