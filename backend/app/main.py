@@ -81,13 +81,19 @@ openapi_tags = [
 app = FastAPI(
     title="ЭкоПульс API",
     version="1.0.0",
+    # Swagger/OpenAPI под /api/v1/ — nginx проксирует наружу только /api/, поэтому docs/openapi
+    # на корне (/docs, /openapi.json) снаружи попадали бы на SPA. Переносим под /api/v1/.
+    docs_url="/api/v1/docs",
+    openapi_url="/api/v1/openapi.json",
+    redoc_url="/api/v1/redoc",
     description=(
         "API административной панели эколога/инспектора «ЭкоПульс» — триаж обращений "
         "о состоянии площадок ТКО.\n\n"
         "**Base URL:** `/api/v1`\n\n"
         "**Авторизация:** для защищённых эндпоинтов — Bearer JWT "
         "(`Authorization: Bearer <access_token>` из `POST /auth/login`). "
-        "Приём фотоотчёта — заголовок `X-Intake-Token`. Отдача фото — публично.\n\n"
+        "Отправка фотоотчёта (`POST /intake/form`) — ПУБЛИЧНО, без токена (защита honeypot-полем "
+        "`website`); `X-Intake-Token` — только на server-to-server вебхуках. Отдача фото — публично.\n\n"
         "**Конверт ошибок:** `{ \"error\": { \"code\", \"message\", \"details\" } }`.\n\n"
         "Разделы, помеченные «вне мобильного API», в клиентскую документацию не входят."
     ),
