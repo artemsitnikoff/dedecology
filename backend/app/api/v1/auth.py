@@ -34,7 +34,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, tags=["Авторизация"])
 async def login(
     login_data: LoginRequest,
     response: Response,
@@ -47,7 +47,7 @@ async def login(
     return TokenResponse(access_token=access_token)
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post("/refresh", response_model=TokenResponse, tags=["Авторизация"])
 async def refresh(
     response: Response,
     session: AsyncSession = Depends(get_db),
@@ -83,14 +83,14 @@ async def refresh(
     return TokenResponse(access_token=access_token)
 
 
-@router.post("/logout", response_model=MessageResult)
+@router.post("/logout", response_model=MessageResult, tags=["Авторизация"])
 async def logout(response: Response):
     """Выход — удаляем refresh-cookie."""
     response.delete_cookie(key="refresh_token", path=_REFRESH_COOKIE_PATH)
     return MessageResult(message="Вы вышли из системы")
 
 
-@router.get("/me", response_model=UserMe)
+@router.get("/me", response_model=UserMe, tags=["Авторизация", "Профиль пользователя"])
 async def me(current_user: User = Depends(get_current_user)):
     """Текущий пользователь."""
     return UserMe.model_validate(current_user)

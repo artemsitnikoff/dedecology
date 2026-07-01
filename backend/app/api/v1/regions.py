@@ -17,7 +17,7 @@ router = APIRouter()
 fed_router = APIRouter()
 
 
-@router.get("", response_model=list[RegionListItem])
+@router.get("", response_model=list[RegionListItem], tags=["Регионы"])
 async def list_regions(
     search: str | None = Query(None),
     fed: list[int] | None = Query(None),
@@ -32,7 +32,7 @@ async def list_regions(
     )
 
 
-@router.post("", response_model=RegionDetail, status_code=201)
+@router.post("", response_model=RegionDetail, status_code=201, tags=["Регионы"])
 async def create_region(
     payload: RegionCreate,
     session: AsyncSession = Depends(get_db),
@@ -44,7 +44,7 @@ async def create_region(
     return region
 
 
-@router.get("/{code}", response_model=RegionDetail)
+@router.get("/{code}", response_model=RegionDetail, tags=["Регионы"])
 async def get_region(
     code: str,
     session: AsyncSession = Depends(get_db),
@@ -54,7 +54,7 @@ async def get_region(
     return await region_service.get_region(session, code)
 
 
-@fed_router.get("", response_model=list[FederalDistrict])
+@fed_router.get("", response_model=list[FederalDistrict], tags=["Регионы"])
 async def get_federal_districts(
     current_user: User = Depends(get_current_user),
 ):

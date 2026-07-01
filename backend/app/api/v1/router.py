@@ -14,19 +14,20 @@ from .users import router as users_router
 
 api_router = APIRouter()
 
-api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
-api_router.include_router(incidents_router, prefix="/incidents", tags=["incidents"])
-api_router.include_router(mno_router, prefix="/mno", tags=["mno"])
-api_router.include_router(regions_router, prefix="/regions", tags=["regions"])
-api_router.include_router(
-    federal_districts_router, prefix="/federal-districts", tags=["federal-districts"]
-)
+# Теги-разделы Swagger проставлены ПОФАЙЛОВО на каждом роуте (русские названия
+# разделов мобильного API), т.к. один доменный роутер может делиться на несколько
+# разделов (напр. /mno → «Карта и МНО» / «Карточка МНО» / «Добавление нового МНО»).
+# Поэтому здесь tags на include_router не задаются — только префиксы и зависимости.
+api_router.include_router(auth_router, prefix="/auth")
+api_router.include_router(incidents_router, prefix="/incidents")
+api_router.include_router(mno_router, prefix="/mno")
+api_router.include_router(regions_router, prefix="/regions")
+api_router.include_router(federal_districts_router, prefix="/federal-districts")
 # Публичный вебхук приёма Яндекс-Формы: БЕЗ auth-dependency — самозащита токеном.
-api_router.include_router(intake_router, prefix="/intake", tags=["intake"])
+api_router.include_router(intake_router, prefix="/intake")
 api_router.include_router(
     users_router,
     prefix="/users",
-    tags=["users"],
     dependencies=[Depends(require_admin)],
 )
-api_router.include_router(profile_router, prefix="/profile", tags=["profile"])
+api_router.include_router(profile_router, prefix="/profile")

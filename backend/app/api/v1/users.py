@@ -14,7 +14,11 @@ from ...services.user import create_user, delete_user, list_users, set_user_pass
 router = APIRouter()
 
 
-@router.get("", response_model=list[UserListItem])
+@router.get(
+    "",
+    response_model=list[UserListItem],
+    tags=["Управление пользователями (вне мобильного API)"],
+)
 async def get_users(
     session: AsyncSession = Depends(get_db),
 ):
@@ -22,7 +26,12 @@ async def get_users(
     return await list_users(session)
 
 
-@router.post("", response_model=UserListItem, status_code=201)
+@router.post(
+    "",
+    response_model=UserListItem,
+    status_code=201,
+    tags=["Управление пользователями (вне мобильного API)"],
+)
 async def create_user_endpoint(
     user_data: UserCreate,
     session: AsyncSession = Depends(get_db),
@@ -34,7 +43,11 @@ async def create_user_endpoint(
     return UserListItem.model_validate(user)
 
 
-@router.post("/{user_id}/password", status_code=204)
+@router.post(
+    "/{user_id}/password",
+    status_code=204,
+    tags=["Управление пользователями (вне мобильного API)"],
+)
 async def set_password(
     user_id: UUID,
     data: PasswordReset,
@@ -47,7 +60,11 @@ async def set_password(
     return Response(status_code=204)
 
 
-@router.delete("/{user_id}", status_code=204)
+@router.delete(
+    "/{user_id}",
+    status_code=204,
+    tags=["Управление пользователями (вне мобильного API)"],
+)
 async def remove_user(
     user_id: UUID,
     session: AsyncSession = Depends(get_db),

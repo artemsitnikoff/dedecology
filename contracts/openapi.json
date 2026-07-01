@@ -1,0 +1,3563 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ЭкоПульс API",
+    "description": "API административной панели эколога/инспектора «ЭкоПульс» — триаж обращений о состоянии площадок ТКО.\n\n**Base URL:** `/api/v1`\n\n**Авторизация:** для защищённых эндпоинтов — Bearer JWT (`Authorization: Bearer <access_token>` из `POST /auth/login`). Приём фотоотчёта — заголовок `X-Intake-Token`. Отдача фото — публично.\n\n**Конверт ошибок:** `{ \"error\": { \"code\", \"message\", \"details\" } }`.\n\nРазделы, помеченные «вне мобильного API», в клиентскую документацию не входят.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Login",
+        "description": "Вход по email+паролю. Access — в теле, refresh — в HttpOnly-cookie.",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Refresh",
+        "description": "Обновление access-токена по refresh-cookie.",
+        "operationId": "refresh_api_v1_auth_refresh_post",
+        "parameters": [
+          {
+            "name": "refresh_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Refresh Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Logout",
+        "description": "Выход — удаляем refresh-cookie.",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "Авторизация",
+          "Профиль пользователя"
+        ],
+        "summary": "Me",
+        "description": "Текущий пользователь.",
+        "operationId": "me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMe"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/incidents": {
+      "get": {
+        "tags": [
+          "Админский реестр"
+        ],
+        "summary": "List Incidents",
+        "description": "Список инцидентов с фильтрами/сортировкой/пагинацией.",
+        "operationId": "list_incidents_api_v1_incidents_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "date",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(asc|desc)$",
+              "default": "desc",
+              "title": "Order"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_IncidentListItem_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/funnel": {
+      "get": {
+        "tags": [
+          "Админский реестр"
+        ],
+        "summary": "Get Funnel",
+        "description": "Счётчики чипов воронки (honor search/source/period/region, НЕ status).",
+        "operationId": "get_funnel_api_v1_incidents_funnel_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FunnelCounts"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/regions": {
+      "get": {
+        "tags": [
+          "Админский реестр"
+        ],
+        "summary": "List Regions",
+        "description": "DISTINCT непустые регионы (А→Я) — наполняет дропдаун фильтра региона.",
+        "operationId": "list_regions_api_v1_incidents_regions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Regions Api V1 Incidents Regions Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/incidents/export": {
+      "get": {
+        "tags": [
+          "Экспорт (вне мобильного API)"
+        ],
+        "summary": "Export Incidents Get",
+        "description": "Экспорт всего отфильтрованного набора в .xlsx.",
+        "operationId": "export_incidents_get_api_v1_incidents_export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "date",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(asc|desc)$",
+              "default": "desc",
+              "title": "Order"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Экспорт (вне мобильного API)"
+        ],
+        "summary": "Export Incidents Post",
+        "description": "Экспорт выбранных инцидентов в .xlsx.",
+        "operationId": "export_incidents_post_api_v1_incidents_export_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportSelection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/bulk-status": {
+      "post": {
+        "tags": [
+          "Админский реестр"
+        ],
+        "summary": "Bulk Status",
+        "description": "Массовая смена статуса (powers «Пометить Выгружен»).",
+        "operationId": "bulk_status_api_v1_incidents_bulk_status_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkStatusResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/incidents/bulk-delete": {
+      "post": {
+        "tags": [
+          "Админский реестр"
+        ],
+        "summary": "Bulk Delete",
+        "description": "Массовое удаление инцидентов (hard delete + audit на каждый).",
+        "operationId": "bulk_delete_api_v1_incidents_bulk_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkDeleteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}": {
+      "get": {
+        "tags": [
+          "Админский реестр"
+        ],
+        "summary": "Get Incident",
+        "description": "Карточка инцидента (включая bins).",
+        "operationId": "get_incident_api_v1_incidents__incident_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Incident Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/{incident_id}/status": {
+      "patch": {
+        "tags": [
+          "Админский реестр"
+        ],
+        "summary": "Update Incident Status",
+        "description": "Смена статуса одного инцидента.",
+        "operationId": "update_incident_status_api_v1_incidents__incident_id__status_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Incident Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentStatusUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mno": {
+      "get": {
+        "tags": [
+          "Карта и МНО"
+        ],
+        "summary": "List Mno",
+        "description": "Реестр МНО с фильтрами region/synced/search + сортировкой.",
+        "operationId": "list_mno_api_v1_mno_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          },
+          {
+            "name": "synced",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Synced"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "name",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(asc|desc)$",
+              "default": "asc",
+              "title": "Order"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MnoListItem"
+                  },
+                  "title": "Response List Mno Api V1 Mno Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Добавление нового МНО"
+        ],
+        "summary": "Create Mno",
+        "description": "Добавление МНО вручную (synced=false, fgis_id=null, incidents=0).",
+        "operationId": "create_mno_api_v1_mno_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MnoCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mno/export": {
+      "get": {
+        "tags": [
+          "Экспорт (вне мобильного API)"
+        ],
+        "summary": "Export Mno",
+        "description": "Экспорт отфильтрованного реестра МНО в .xlsx.",
+        "operationId": "export_mno_api_v1_mno_export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          },
+          {
+            "name": "synced",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Synced"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "name",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(asc|desc)$",
+              "default": "asc",
+              "title": "Order"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mno/sync": {
+      "post": {
+        "tags": [
+          "Карта и МНО"
+        ],
+        "summary": "Sync All Mno",
+        "description": "ЗАГЛУШКА: помечает все ещё-не-synced МНО как синхронизированные с ФГИС.",
+        "operationId": "sync_all_mno_api_v1_mno_sync_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoSyncResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/mno/{mno_id}/sync": {
+      "post": {
+        "tags": [
+          "Карта и МНО"
+        ],
+        "summary": "Sync One Mno",
+        "description": "ЗАГЛУШКА: синхронизирует одно МНО с ФГИС (без внешних запросов).",
+        "operationId": "sync_one_mno_api_v1_mno__mno_id__sync_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mno_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mno Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mno/{mno_id}": {
+      "get": {
+        "tags": [
+          "Карточка МНО"
+        ],
+        "summary": "Get Mno",
+        "description": "Карточка МНО.",
+        "operationId": "get_mno_api_v1_mno__mno_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mno_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mno Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/regions": {
+      "get": {
+        "tags": [
+          "Регионы"
+        ],
+        "summary": "List Regions",
+        "description": "Справочник регионов: фильтры search/fed + сортировка, с mno_count/incidents_count.",
+        "operationId": "list_regions_api_v1_regions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "fed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fed"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "code",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(asc|desc)$",
+              "default": "asc",
+              "title": "Order"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RegionListItem"
+                  },
+                  "title": "Response List Regions Api V1 Regions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Регионы"
+        ],
+        "summary": "Create Region",
+        "description": "Добавление региона (active=true). Дубликат кода → 409.",
+        "operationId": "create_region_api_v1_regions_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/regions/{code}": {
+      "get": {
+        "tags": [
+          "Регионы"
+        ],
+        "summary": "Get Region",
+        "description": "Карточка региона по коду субъекта.",
+        "operationId": "get_region_api_v1_regions__code__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/federal-districts": {
+      "get": {
+        "tags": [
+          "Регионы"
+        ],
+        "summary": "Get Federal Districts",
+        "description": "Справочник федеральных округов РФ (нумерация ФГИС 1..8).",
+        "operationId": "get_federal_districts_api_v1_federal_districts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FederalDistrict"
+                  },
+                  "type": "array",
+                  "title": "Response Get Federal Districts Api V1 Federal Districts Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/intake/yandex": {
+      "post": {
+        "tags": [
+          "Приём вебхуков (server-to-server)"
+        ],
+        "summary": "Yandex Intake",
+        "description": "Принимает JSON-RPC сабмит Яндекс-Формы и создаёт инцидент (source='form').\n\nВозвращает JSON-RPC-подобный result, чтобы «показать результат» в Яндексе\nотрабатывало.",
+        "operationId": "yandex_intake_api_v1_intake_yandex_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/suggest/address": {
+      "get": {
+        "tags": [
+          "Загрузка фото"
+        ],
+        "summary": "Suggest Address",
+        "description": "ПУБЛИЧНО: подсказки адреса для автозаполнения формы волонтёра.\n\nКлюч DaData остаётся на сервере. Без ключа / при q<3 символов / при сбое\nDaData отдаём пустой список (форма деградирует до ручного ввода).\n\nkind ограничивает уровень подсказок (bounded suggest):\n- \"region\"  — только регионы;\n- \"city\"    — города/населённые пункты (в пределах region, если задан);\n- \"street\"  — улицы/дома (в пределах region [+ city], если заданы);\n- \"full\"/иное — полный адрес (поведение по умолчанию).",
+        "operationId": "suggest_address_api_v1_intake_suggest_address_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "full",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          },
+          {
+            "name": "city",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "City"
+            }
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 8,
+              "title": "Count"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/form": {
+      "post": {
+        "tags": [
+          "Отправка фотоотчёта"
+        ],
+        "summary": "Public Form",
+        "description": "ПУБЛИЧНО: приём обращения из формы волонтёра (multipart/form-data).\n\nwebsite — honeypot: если заполнен, это бот → отдаём ok, но ничего не создаём.",
+        "operationId": "public_form_api_v1_intake_form_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_public_form_api_v1_intake_form_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/max": {
+      "post": {
+        "tags": [
+          "Приём вебхуков (server-to-server)"
+        ],
+        "summary": "Max Intake",
+        "description": "Приём обращения из Макс-бота (multipart/form-data) → Incident(source='max').\n\nВызывается сервером Макс-бота server-to-server. Самозащита — общий секрет\nв заголовке X-Intake-Token (тот же гейт, что у /yandex): токен не задан на\nсервере → 503; не совпал → 403. Адрес из текста разбирается DaData Clean API\n(с эвристическим фолбэком). Возвращает {\"ok\": True, \"incident_id\": ...}.",
+        "operationId": "max_intake_api_v1_intake_max_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_max_intake_api_v1_intake_max_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/pending-notify": {
+      "get": {
+        "tags": [
+          "Приём вебхуков (server-to-server)"
+        ],
+        "summary": "Pending Notify",
+        "description": "Очередь инцидентов для уведомления в группу Макс (notified_at IS NULL).\n\nServer-to-server для воркера Макс-бота: гейт X-Intake-Token (как /max).\nСтарейшие первыми (created_at ASC), не более 20 за вызов.",
+        "operationId": "pending_notify_api_v1_intake_pending_notify_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingNotifyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/mark-notified": {
+      "post": {
+        "tags": [
+          "Приём вебхуков (server-to-server)"
+        ],
+        "summary": "Mark Notified",
+        "description": "Помечает инциденты как уведомлённые (notified_at = now). Гейт X-Intake-Token.\n\nИдемпотентно: учитывает только ещё не уведомлённые id. Возвращает {\"marked\": N}.",
+        "operationId": "mark_notified_api_v1_intake_mark_notified_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkNotified"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkNotifiedResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/photo/{incident_id}/{filename}": {
+      "get": {
+        "tags": [
+          "Загрузка фото"
+        ],
+        "summary": "Get Photo",
+        "description": "ПУБЛИЧНО: отдаёт байты фото обращения. Жёсткий анти-traversal.\n\nincident_id обязан быть UUID, filename — `^[0-9]+(_thumb)?\\.jpg$`\n(FULL `{i}.jpg` или THUMB `{i}_thumb.jpg`), итоговый путь обязан остаться\nвнутри каталога incidents.",
+        "operationId": "get_photo_api_v1_intake_photo__incident_id___filename__get",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Incident Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": [
+          "Управление пользователями (вне мобильного API)"
+        ],
+        "summary": "Get Users",
+        "description": "Список всех пользователей для экрана Настроек.",
+        "operationId": "get_users_api_v1_users_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserListItem"
+                  },
+                  "type": "array",
+                  "title": "Response Get Users Api V1 Users Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Управление пользователями (вне мобильного API)"
+        ],
+        "summary": "Create User Endpoint",
+        "description": "Создаёт активного пользователя с заданным админом паролем (инвайт-флоу убран).",
+        "operationId": "create_user_endpoint_api_v1_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/password": {
+      "post": {
+        "tags": [
+          "Управление пользователями (вне мобильного API)"
+        ],
+        "summary": "Set Password",
+        "description": "Задаёт/сбрасывает пароль пользователю. Супер-админу — запрещено (403).",
+        "operationId": "set_password_api_v1_users__user_id__password_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordReset"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}": {
+      "delete": {
+        "tags": [
+          "Управление пользователями (вне мобильного API)"
+        ],
+        "summary": "Remove User",
+        "description": "Удаляет пользователя. Нельзя удалить супер-админа, admin-роль и самого себя.",
+        "operationId": "remove_user_api_v1_users__user_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/profile": {
+      "patch": {
+        "tags": [
+          "Профиль пользователя"
+        ],
+        "summary": "Patch Profile",
+        "description": "Обновляет Заявителя текущего пользователя.",
+        "operationId": "patch_profile_api_v1_profile_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMe"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/profile/password": {
+      "post": {
+        "tags": [
+          "Профиль пользователя"
+        ],
+        "summary": "Change Password",
+        "description": "Смена собственного пароля (без проверки текущего, ТЗ §9.1).",
+        "operationId": "change_password_api_v1_profile_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordReset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Служебное"
+        ],
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_max_intake_api_v1_intake_max_post": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": ""
+          },
+          "msg_id": {
+            "type": "string",
+            "title": "Msg Id",
+            "default": ""
+          },
+          "msg_url": {
+            "type": "string",
+            "title": "Msg Url",
+            "default": ""
+          },
+          "sender_name": {
+            "type": "string",
+            "title": "Sender Name",
+            "default": ""
+          },
+          "photo_time": {
+            "type": "string",
+            "title": "Photo Time",
+            "default": ""
+          },
+          "photos": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Photos",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "Body_max_intake_api_v1_intake_max_post"
+      },
+      "Body_public_form_api_v1_intake_form_post": {
+        "properties": {
+          "fio": {
+            "type": "string",
+            "title": "Fio",
+            "default": ""
+          },
+          "full_address": {
+            "type": "string",
+            "title": "Full Address",
+            "default": ""
+          },
+          "region": {
+            "type": "string",
+            "title": "Region",
+            "default": ""
+          },
+          "city": {
+            "type": "string",
+            "title": "City",
+            "default": ""
+          },
+          "street": {
+            "type": "string",
+            "title": "Street",
+            "default": ""
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords",
+            "default": ""
+          },
+          "photo_time": {
+            "type": "string",
+            "title": "Photo Time",
+            "default": ""
+          },
+          "bins": {
+            "type": "string",
+            "title": "Bins",
+            "default": ""
+          },
+          "website": {
+            "type": "string",
+            "title": "Website",
+            "default": ""
+          },
+          "photos": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Photos",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "Body_public_form_api_v1_intake_form_post"
+      },
+      "BulkDelete": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "BulkDelete"
+      },
+      "BulkDeleteResult": {
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted"
+        ],
+        "title": "BulkDeleteResult"
+      },
+      "BulkStatusResult": {
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "updated"
+        ],
+        "title": "BulkStatusResult"
+      },
+      "BulkStatusUpdate": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Ids"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "new",
+              "found",
+              "none",
+              "exported"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids",
+          "status"
+        ],
+        "title": "BulkStatusUpdate"
+      },
+      "ExportSelection": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "ExportSelection",
+        "description": "Тело POST /incidents/export — id выбранных инцидентов."
+      },
+      "FederalDistrict": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "name"
+        ],
+        "title": "FederalDistrict",
+        "description": "Элемент справочника федеральных округов."
+      },
+      "FunnelCounts": {
+        "properties": {
+          "all": {
+            "type": "integer",
+            "title": "All"
+          },
+          "new": {
+            "type": "integer",
+            "title": "New"
+          },
+          "found": {
+            "type": "integer",
+            "title": "Found"
+          },
+          "none": {
+            "type": "integer",
+            "title": "None"
+          },
+          "exported": {
+            "type": "integer",
+            "title": "Exported"
+          }
+        },
+        "type": "object",
+        "required": [
+          "all",
+          "new",
+          "found",
+          "none",
+          "exported"
+        ],
+        "title": "FunnelCounts"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IncidentDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "max",
+              "form"
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "new",
+              "found",
+              "none",
+              "exported"
+            ],
+            "title": "Status"
+          },
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          },
+          "region": {
+            "type": "string",
+            "title": "Region"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "street": {
+            "type": "string",
+            "title": "Street"
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "photo_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Time"
+          },
+          "photos": {
+            "type": "integer",
+            "title": "Photos"
+          },
+          "photo_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Photo Urls"
+          },
+          "msg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msg"
+          },
+          "msg_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msg Url"
+          },
+          "bins": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bins"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "status",
+          "fio",
+          "region",
+          "city",
+          "street",
+          "coords",
+          "photo_time",
+          "photos",
+          "photo_urls",
+          "msg",
+          "bins",
+          "received_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "IncidentDetail",
+        "description": "Полная карточка инцидента (включая bins)."
+      },
+      "IncidentListItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "max",
+              "form"
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "new",
+              "found",
+              "none",
+              "exported"
+            ],
+            "title": "Status"
+          },
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          },
+          "region": {
+            "type": "string",
+            "title": "Region"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "street": {
+            "type": "string",
+            "title": "Street"
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "photo_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Time"
+          },
+          "photos": {
+            "type": "integer",
+            "title": "Photos"
+          },
+          "photo_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Photo Urls"
+          },
+          "msg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msg"
+          },
+          "msg_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msg Url"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "status",
+          "fio",
+          "region",
+          "city",
+          "street",
+          "coords",
+          "photo_time",
+          "photos",
+          "photo_urls",
+          "msg",
+          "received_at"
+        ],
+        "title": "IncidentListItem",
+        "description": "Строка таблицы инцидентов."
+      },
+      "IncidentStatusUpdate": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "new",
+              "found",
+              "none",
+              "exported"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "IncidentStatusUpdate"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "MarkNotified": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "MarkNotified"
+      },
+      "MarkNotifiedResult": {
+        "properties": {
+          "marked": {
+            "type": "integer",
+            "title": "Marked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "marked"
+        ],
+        "title": "MarkNotifiedResult"
+      },
+      "MessageResult": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "MessageResult"
+      },
+      "MnoCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "coords": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Coords"
+          },
+          "reg": {
+            "type": "string",
+            "title": "Reg",
+            "default": ""
+          },
+          "region_code": {
+            "type": "string",
+            "title": "Region Code",
+            "default": ""
+          },
+          "city": {
+            "type": "string",
+            "title": "City",
+            "default": ""
+          },
+          "address": {
+            "type": "string",
+            "title": "Address",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "coords"
+        ],
+        "title": "MnoCreate",
+        "description": "Создание МНО вручную. Обязательны только name + coords.\n\nsynced=false, fgis_id=null, incidents=0 проставляются сервисом — НЕ из тела."
+      },
+      "MnoDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reg": {
+            "type": "string",
+            "title": "Reg"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "region_code": {
+            "type": "string",
+            "title": "Region Code"
+          },
+          "region_name": {
+            "type": "string",
+            "title": "Region Name"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords"
+          },
+          "fgis_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fgis Id"
+          },
+          "synced": {
+            "type": "boolean",
+            "title": "Synced"
+          },
+          "sync_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Date"
+          },
+          "incidents": {
+            "type": "integer",
+            "title": "Incidents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "reg",
+          "name",
+          "region_code",
+          "region_name",
+          "city",
+          "address",
+          "coords",
+          "synced",
+          "incidents"
+        ],
+        "title": "MnoDetail",
+        "description": "Карточка МНО — те же поля, что и в списке (контракт)."
+      },
+      "MnoListItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reg": {
+            "type": "string",
+            "title": "Reg"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "region_code": {
+            "type": "string",
+            "title": "Region Code"
+          },
+          "region_name": {
+            "type": "string",
+            "title": "Region Name"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords"
+          },
+          "fgis_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fgis Id"
+          },
+          "synced": {
+            "type": "boolean",
+            "title": "Synced"
+          },
+          "sync_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Date"
+          },
+          "incidents": {
+            "type": "integer",
+            "title": "Incidents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "reg",
+          "name",
+          "region_code",
+          "region_name",
+          "city",
+          "address",
+          "coords",
+          "synced",
+          "incidents"
+        ],
+        "title": "MnoListItem",
+        "description": "Строка реестра МНО. region_name резолвится из справочника регионов."
+      },
+      "MnoSyncResult": {
+        "properties": {
+          "synced": {
+            "type": "integer",
+            "title": "Synced"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "synced",
+          "total"
+        ],
+        "title": "MnoSyncResult",
+        "description": "Итог ЗАГЛУШКИ синхронизации с ФГИС: сколько помечено / всего МНО."
+      },
+      "Paginated_IncidentListItem_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentListItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "pages"
+        ],
+        "title": "Paginated[IncidentListItem]"
+      },
+      "PasswordReset": {
+        "properties": {
+          "new_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 6,
+            "title": "New Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_password"
+        ],
+        "title": "PasswordReset"
+      },
+      "PendingNotifyItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "max",
+              "form"
+            ],
+            "title": "Source"
+          },
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          },
+          "region": {
+            "type": "string",
+            "title": "Region"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "street": {
+            "type": "string",
+            "title": "Street"
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "photo_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Time"
+          },
+          "photo_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Photo Urls"
+          },
+          "msg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msg"
+          },
+          "msg_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Msg Url"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "fio",
+          "region",
+          "city",
+          "street",
+          "coords",
+          "photo_time",
+          "photo_urls",
+          "msg",
+          "quote"
+        ],
+        "title": "PendingNotifyItem",
+        "description": "Инцидент, ожидающий уведомления в группу Макс (notified_at IS NULL)."
+      },
+      "PendingNotifyResponse": {
+        "properties": {
+          "incidents": {
+            "items": {
+              "$ref": "#/components/schemas/PendingNotifyItem"
+            },
+            "type": "array",
+            "title": "Incidents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "incidents"
+        ],
+        "title": "PendingNotifyResponse"
+      },
+      "ProfileUpdate": {
+        "properties": {
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fio"
+        ],
+        "title": "ProfileUpdate"
+      },
+      "RegionCreate": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "fed": {
+            "type": "integer",
+            "title": "Fed"
+          },
+          "operators": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Operators"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "fed"
+        ],
+        "title": "RegionCreate",
+        "description": "Создание региона. active=true проставляется сервисом."
+      },
+      "RegionDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "fed": {
+            "type": "integer",
+            "title": "Fed"
+          },
+          "fed_code": {
+            "type": "string",
+            "title": "Fed Code"
+          },
+          "fed_name": {
+            "type": "string",
+            "title": "Fed Name"
+          },
+          "operators": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Operators"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "last_sync": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sync"
+          },
+          "mno_count": {
+            "type": "integer",
+            "title": "Mno Count"
+          },
+          "incidents_count": {
+            "type": "integer",
+            "title": "Incidents Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "fed",
+          "fed_code",
+          "fed_name",
+          "operators",
+          "active",
+          "mno_count",
+          "incidents_count"
+        ],
+        "title": "RegionDetail",
+        "description": "Карточка региона — те же поля, что и в списке (контракт)."
+      },
+      "RegionListItem": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "fed": {
+            "type": "integer",
+            "title": "Fed"
+          },
+          "fed_code": {
+            "type": "string",
+            "title": "Fed Code"
+          },
+          "fed_name": {
+            "type": "string",
+            "title": "Fed Name"
+          },
+          "operators": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Operators"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "last_sync": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sync"
+          },
+          "mno_count": {
+            "type": "integer",
+            "title": "Mno Count"
+          },
+          "incidents_count": {
+            "type": "integer",
+            "title": "Incidents Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "fed",
+          "fed_code",
+          "fed_name",
+          "operators",
+          "active",
+          "mno_count",
+          "incidents_count"
+        ],
+        "title": "RegionListItem",
+        "description": "Строка справочника регионов. fed_code/fed_name резолвятся из FEDERAL_DISTRICTS,\nmno_count/incidents_count — подсчитываются сервисом."
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token"
+        ],
+        "title": "TokenResponse"
+      },
+      "UserCreate": {
+        "properties": {
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "title": "Role",
+            "default": "user"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 6,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fio",
+          "email",
+          "password"
+        ],
+        "title": "UserCreate",
+        "description": "Создание пользователя админом: пароль задаётся вручную (инвайт-флоу убран)."
+      },
+      "UserListItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "invited"
+            ],
+            "title": "Status"
+          },
+          "is_superadmin": {
+            "type": "boolean",
+            "title": "Is Superadmin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "fio",
+          "email",
+          "role",
+          "status",
+          "is_superadmin"
+        ],
+        "title": "UserListItem",
+        "description": "Строка списка пользователей в Настройках."
+      },
+      "UserMe": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "invited"
+            ],
+            "title": "Status"
+          },
+          "is_superadmin": {
+            "type": "boolean",
+            "title": "Is Superadmin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "fio",
+          "role",
+          "status",
+          "is_superadmin"
+        ],
+        "title": "UserMe"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Авторизация",
+      "description": "Вход по email+паролю, обновление и отзыв токена, текущий пользователь. Access-токен — в теле ответа, refresh — в HttpOnly-cookie."
+    },
+    {
+      "name": "Профиль пользователя",
+      "description": "Данные текущего пользователя, смена ФИО и пароля."
+    },
+    {
+      "name": "Регионы",
+      "description": "Справочник субъектов РФ (адресуются кодом субъекта) и федеральных округов."
+    },
+    {
+      "name": "Карта и МНО",
+      "description": "Реестр мест накопления отходов с координатами для карты и заглушка синхронизации с ФГИС."
+    },
+    {
+      "name": "Карточка МНО",
+      "description": "Детальная карточка одного места накопления отходов."
+    },
+    {
+      "name": "Отправка фотоотчёта",
+      "description": "Публичный приём обращения из формы волонтёра (multipart, заголовок X-Intake-Token)."
+    },
+    {
+      "name": "Добавление нового МНО",
+      "description": "Ручное создание записи МНО."
+    },
+    {
+      "name": "Загрузка фото",
+      "description": "Публичная отдача фото обращения и подсказки адреса для формы. Сама загрузка фото — внутри multipart POST /intake/form."
+    },
+    {
+      "name": "Админский реестр",
+      "description": "Список обращений с фильтрами/сортировкой/пагинацией, воронка, карточка, смена статуса и массовые операции."
+    },
+    {
+      "name": "Приём вебхуков (server-to-server)",
+      "description": "Внешние вебхуки приёма (Яндекс-Форма, Макс-бот) и очередь уведомлений. Не входят в мобильный API; защищены X-Intake-Token."
+    },
+    {
+      "name": "Экспорт (вне мобильного API)",
+      "description": "Серверная выгрузка .xlsx. Не документируется для мобильного приложения."
+    },
+    {
+      "name": "Управление пользователями (вне мобильного API)",
+      "description": "Администрирование учётных записей (только роль admin)."
+    },
+    {
+      "name": "Служебное",
+      "description": "Проверка живости сервиса."
+    }
+  ]
+}

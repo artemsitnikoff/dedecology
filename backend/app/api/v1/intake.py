@@ -62,7 +62,7 @@ _SUGGEST_MIN_LEN = 3
 _SUGGEST_MAX_COUNT = 15
 
 
-@router.post("/yandex")
+@router.post("/yandex", tags=["Приём вебхуков (server-to-server)"])
 async def yandex_intake(
     request: Request,
     session: AsyncSession = Depends(get_db),
@@ -100,7 +100,7 @@ async def yandex_intake(
     }
 
 
-@router.get("/suggest/address")
+@router.get("/suggest/address", tags=["Загрузка фото"])
 async def suggest_address(
     q: str = "",
     kind: str = "full",
@@ -154,7 +154,7 @@ async def suggest_address(
     return {"suggestions": suggestions}
 
 
-@router.post("/form")
+@router.post("/form", tags=["Отправка фотоотчёта"])
 async def public_form(
     session: AsyncSession = Depends(get_db),
     fio: str = Form(""),
@@ -197,7 +197,7 @@ async def public_form(
     return {"ok": True, "incident_id": str(incident.id), "quote": quote}
 
 
-@router.post("/max")
+@router.post("/max", tags=["Приём вебхуков (server-to-server)"])
 async def max_intake(
     request: Request,
     session: AsyncSession = Depends(get_db),
@@ -236,7 +236,11 @@ async def max_intake(
     return {"ok": True, "incident_id": str(incident.id), "quote": quote}
 
 
-@router.get("/pending-notify", response_model=PendingNotifyResponse)
+@router.get(
+    "/pending-notify",
+    response_model=PendingNotifyResponse,
+    tags=["Приём вебхуков (server-to-server)"],
+)
 async def pending_notify(
     request: Request,
     session: AsyncSession = Depends(get_db),
@@ -251,7 +255,11 @@ async def pending_notify(
     return PendingNotifyResponse(incidents=incidents)
 
 
-@router.post("/mark-notified", response_model=MarkNotifiedResult)
+@router.post(
+    "/mark-notified",
+    response_model=MarkNotifiedResult,
+    tags=["Приём вебхуков (server-to-server)"],
+)
 async def mark_notified(
     request: Request,
     payload: MarkNotified,
@@ -267,7 +275,7 @@ async def mark_notified(
     return MarkNotifiedResult(marked=marked)
 
 
-@router.get("/photo/{incident_id}/{filename}")
+@router.get("/photo/{incident_id}/{filename}", tags=["Загрузка фото"])
 async def get_photo(incident_id: str, filename: str):
     """ПУБЛИЧНО: отдаёт байты фото обращения. Жёсткий анти-traversal.
 

@@ -35,7 +35,7 @@ def _xlsx_response(content: bytes, filename: str) -> Response:
     )
 
 
-@router.get("", response_model=list[MnoListItem])
+@router.get("", response_model=list[MnoListItem], tags=["Карта и МНО"])
 async def list_mno(
     search: str | None = Query(None),
     region: str | None = Query(None),
@@ -51,7 +51,7 @@ async def list_mno(
     )
 
 
-@router.get("/export")
+@router.get("/export", tags=["Экспорт (вне мобильного API)"])
 async def export_mno(
     search: str | None = Query(None),
     region: str | None = Query(None),
@@ -68,7 +68,7 @@ async def export_mno(
     return _xlsx_response(build_mno_xlsx(rows), "МНО_ЭкоПульс.xlsx")
 
 
-@router.post("", response_model=MnoDetail, status_code=201)
+@router.post("", response_model=MnoDetail, status_code=201, tags=["Добавление нового МНО"])
 async def create_mno(
     payload: MnoCreate,
     session: AsyncSession = Depends(get_db),
@@ -80,7 +80,7 @@ async def create_mno(
     return mno
 
 
-@router.post("/sync", response_model=MnoSyncResult)
+@router.post("/sync", response_model=MnoSyncResult, tags=["Карта и МНО"])
 async def sync_all_mno(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -91,7 +91,7 @@ async def sync_all_mno(
     return result
 
 
-@router.post("/{mno_id}/sync", response_model=MnoDetail)
+@router.post("/{mno_id}/sync", response_model=MnoDetail, tags=["Карта и МНО"])
 async def sync_one_mno(
     mno_id: UUID,
     session: AsyncSession = Depends(get_db),
@@ -103,7 +103,7 @@ async def sync_one_mno(
     return mno
 
 
-@router.get("/{mno_id}", response_model=MnoDetail)
+@router.get("/{mno_id}", response_model=MnoDetail, tags=["Карточка МНО"])
 async def get_mno(
     mno_id: UUID,
     session: AsyncSession = Depends(get_db),

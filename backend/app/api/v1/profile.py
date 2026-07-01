@@ -14,7 +14,7 @@ from ...services.user import reset_own_password, update_profile
 router = APIRouter()
 
 
-@router.patch("", response_model=UserMe)
+@router.patch("", response_model=UserMe, tags=["Профиль пользователя"])
 async def patch_profile(
     data: ProfileUpdate,
     session: AsyncSession = Depends(get_db),
@@ -26,7 +26,7 @@ async def patch_profile(
     return UserMe.model_validate(user)
 
 
-@router.post("/password", response_model=MessageResult)
+@router.post("/password", response_model=MessageResult, tags=["Профиль пользователя"])
 async def change_password(
     data: PasswordReset,
     session: AsyncSession = Depends(get_db),

@@ -65,7 +65,7 @@ def _public_base(request: Request) -> str:
     return f"{proto}://{host}"
 
 
-@router.get("", response_model=Paginated[IncidentListItem])
+@router.get("", response_model=Paginated[IncidentListItem], tags=["Админский реестр"])
 async def list_incidents(
     search: str | None = Query(None),
     source: list[str] | None = Query(None),
@@ -96,7 +96,7 @@ async def list_incidents(
     )
 
 
-@router.get("/funnel", response_model=FunnelCounts)
+@router.get("/funnel", response_model=FunnelCounts, tags=["Админский реестр"])
 async def get_funnel(
     search: str | None = Query(None),
     source: list[str] | None = Query(None),
@@ -117,7 +117,7 @@ async def get_funnel(
     )
 
 
-@router.get("/regions", response_model=list[str])
+@router.get("/regions", response_model=list[str], tags=["Админский реестр"])
 async def list_regions(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -126,7 +126,7 @@ async def list_regions(
     return await incident_service.list_regions(session)
 
 
-@router.get("/export")
+@router.get("/export", tags=["Экспорт (вне мобильного API)"])
 async def export_incidents_get(
     request: Request,
     search: str | None = Query(None),
@@ -155,7 +155,7 @@ async def export_incidents_get(
     return _xlsx_response(build_xlsx(rows, _public_base(request)), "Инциденты_ЭкоПульс.xlsx")
 
 
-@router.post("/export")
+@router.post("/export", tags=["Экспорт (вне мобильного API)"])
 async def export_incidents_post(
     request: Request,
     payload: ExportSelection,
@@ -169,7 +169,7 @@ async def export_incidents_post(
     )
 
 
-@router.post("/bulk-status", response_model=BulkStatusResult)
+@router.post("/bulk-status", response_model=BulkStatusResult, tags=["Админский реестр"])
 async def bulk_status(
     payload: BulkStatusUpdate,
     session: AsyncSession = Depends(get_db),
@@ -183,7 +183,7 @@ async def bulk_status(
     return BulkStatusResult(updated=updated)
 
 
-@router.post("/bulk-delete", response_model=BulkDeleteResult)
+@router.post("/bulk-delete", response_model=BulkDeleteResult, tags=["Админский реестр"])
 async def bulk_delete(
     payload: BulkDelete,
     session: AsyncSession = Depends(get_db),
@@ -197,7 +197,7 @@ async def bulk_delete(
     return BulkDeleteResult(deleted=deleted)
 
 
-@router.get("/{incident_id}", response_model=IncidentDetail)
+@router.get("/{incident_id}", response_model=IncidentDetail, tags=["Админский реестр"])
 async def get_incident(
     incident_id: UUID,
     session: AsyncSession = Depends(get_db),
@@ -208,7 +208,9 @@ async def get_incident(
     return IncidentDetail.model_validate(incident)
 
 
-@router.patch("/{incident_id}/status", response_model=IncidentDetail)
+@router.patch(
+    "/{incident_id}/status", response_model=IncidentDetail, tags=["Админский реестр"]
+)
 async def update_incident_status(
     incident_id: UUID,
     payload: IncidentStatusUpdate,
