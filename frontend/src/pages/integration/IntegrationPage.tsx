@@ -3,7 +3,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate, formatTime } from '@/lib/format';
-import { useIntegrationOverview, useMnoSyncStatus } from '@/api/hooks/integration';
+import {
+  useIntegrationOverview,
+  useMnoSyncStatus,
+  useRunningAllJob,
+} from '@/api/hooks/integration';
 import { useSyncRegions, useStartMnoSync, useStartMnoSyncAll } from '@/api/mutations/integration';
 import { useFederalDistricts } from '@/api/hooks/regions';
 import type { ApiError, MnoSyncJob } from '@/api/aliases';
@@ -55,6 +59,10 @@ export function IntegrationPage() {
   const statusQuery = useMnoSyncStatus(jobId);
   const status = statusQuery.data;
 
+  // Переподключение к идущей фоновой задаче «Все регионы» после перезагрузки (F5).
+  // Бэк-задача серверная и НЕ прерывается — теряется лишь job_id во фронт-состоянии.
+  const runningAllQuery = useRunningAllJob();
+
   const overview = overviewQuery.data;
   const perRegion = useMemo(() => overview?.per_region ?? [], [overview]);
 
@@ -101,6 +109,17 @@ export function IntegrationPage() {
       showToast(`Ошибка синхронизации МНО: ${status.error || 'неизвестная ошибка'}`);
     }
   }, [jobId, status, qc, showToast]);
+
+  // Переподключение к идущей задаче «Все регионы» после F5: если ручная задача не активна
+  // (jobId пуст) и на сервере есть ИДУЩАЯ фоновая синхронизация — подхватываем её job_id и
+  // выставляем селектор в ALL_REGIONS, чтобы опрос useMnoSyncStatus(jobId) продолжил прогресс.
+  // Уже завершённую задачу (done/error) НЕ подхватываем — только running.
+  useEffect(() => {
+    const running = runningAllQuery.data;
+    if (jobId != null || !running || running.state !== 'running') return;
+    setJobId(running.job_id);
+    setMnoRegion(ALL_REGIONS);
+  }, [runningAllQuery.data, jobId]);
 
   const handleSyncRegions = () => {
     if (syncRegions.isPending) return;
@@ -261,6 +280,11 @@ export function IntegrationPage() {
                   Сначала синхронизируйте регионы — затем выберите регион для загрузки МНО.
                 </div>
               )}
+
+              <div className="de-intg-hint">
+                <Icon name="alert-circle" size={13} /> Обновление страницы (F5) не прерывает
+                синхронизацию — она идёт на сервере.
+              </div>
 
               {/* Прогресс фоновой задачи */}
               {jobId && status && (

@@ -118,7 +118,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
 **Backend** (локально есть `.venv` python3.14 для проверок; прод — Docker python:3.12):
 ```bash
 cd backend
-.venv/bin/python -m pytest -q          # тесты (оффлайн, без внешней БД) — сейчас 253/253 зелёные
+.venv/bin/python -m pytest -q          # тесты (оффлайн, без внешней БД) — сейчас 262/262 зелёные
 .venv/bin/python -m compileall -q app  # синтаксис
 # в Docker/проде: alembic upgrade head ; python -m app.seed
 ```

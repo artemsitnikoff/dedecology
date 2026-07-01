@@ -160,6 +160,66 @@ async def test_crawler_progress_callback(monkeypatch):
     assert seen and seen[-1] == 1
 
 
+@pytest.mark.asyncio
+async def test_crawler_on_batch_streams_new_ids(monkeypatch):
+    """С on_batch краулер отдаёт НОВЫЕ id батчами (≤ batch_size) ПОТОКОВО, не дожидаясь
+    конца обхода: сумма всех батчей == seen, размеры ≤100, остаток слит последним
+    (неполным) вызовом, дублей нет."""
+    monkeypatch.setattr(fgis, "START_CELLS", [(0, 0, 10, 10)])
+    monkeypatch.setattr(fgis, "START_Z", 4)
+
+    async def fake_fetch_tile(filter_id, bbox, z):
+        # 100 + 100 + 1 = 201 уникальных id в одной ячейке (кластеры ≤100 берутся целиком).
+        return [
+            {"properties": {"layer": 5, "ids": [f"c{i}" for i in range(100)], "iconContent": "100"}},
+            {"properties": {"layer": 5, "ids": [f"d{i}" for i in range(100)], "iconContent": "100"}},
+            {"properties": {"layer": 5, "id": "s1"}},
+        ]
+
+    monkeypatch.setattr(fgis, "fetch_tile", fake_fetch_tile)
+
+    batches: list[list[str]] = []
+
+    async def on_batch(ids: list[str]) -> None:
+        batches.append(list(ids))
+
+    seen, issues = await fgis.enumerate_region_mno_ids(
+        "f", 51, on_batch=on_batch, batch_size=100
+    )
+
+    assert issues == []
+    assert len(seen) == 201
+    # Полные батчи по 100 + слитый остаток: [100, 100, 1].
+    assert [len(b) for b in batches] == [100, 100, 1]
+    assert all(len(b) <= 100 for b in batches)
+    # Остаток слит ПОСЛЕДНИМ вызовом (последний батч неполный).
+    assert len(batches[-1]) == 1
+    # Сумма всех батчей == seen, без дублей.
+    flat = [x for b in batches for x in b]
+    assert len(flat) == len(set(flat)) == len(seen)
+    assert set(flat) == seen
+
+
+@pytest.mark.asyncio
+async def test_crawler_without_on_batch_collects_full_set(monkeypatch):
+    """Обратная совместимость: без on_batch краулер собирает полный set и ничего не флашит."""
+    monkeypatch.setattr(fgis, "START_CELLS", [(0, 0, 10, 10)])
+    monkeypatch.setattr(fgis, "START_Z", 4)
+
+    async def fake_fetch_tile(filter_id, bbox, z):
+        return [
+            {"properties": {"layer": 5, "ids": [f"c{i}" for i in range(100)], "iconContent": "100"}},
+            {"properties": {"layer": 5, "id": "s1"}},
+        ]
+
+    monkeypatch.setattr(fgis, "fetch_tile", fake_fetch_tile)
+
+    seen, issues = await fgis.enumerate_region_mno_ids("f", 51)
+    assert issues == []
+    assert seen == {f"c{i}" for i in range(100)} | {"s1"}
+    assert len(seen) == 101
+
+
 # --- REGION_FED ----------------------------------------------------------------
 
 
@@ -374,14 +434,22 @@ class _FakeDBSession:
 
 @pytest.mark.asyncio
 async def test_run_mno_sync_all_sums_across_regions(monkeypatch):
-    """Прогон по 2 регионам одной задачей: scope=all, счётчики СУММИРУЮТСЯ, done."""
+    """Прогон по 2 регионам одной задачей: scope=all, счётчики СУММИРУЮТСЯ, done.
+
+    Краулер теперь потоковый — эмулируем его вызовом on_progress + on_batch (запись
+    во время обхода), как это делает реальный enumerate_region_mno_ids."""
     monkeypatch.setattr(mno_sync, "AsyncSessionLocal", lambda: _FakeDBSession())
     monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value=str(uuid4())))
-    monkeypatch.setattr(
-        fgis,
-        "enumerate_region_mno_ids",
-        AsyncMock(return_value=({"a", "b", "c"}, [])),
-    )
+
+    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+        ids = {"a", "b", "c"}
+        if on_progress:
+            on_progress(len(ids))
+        if on_batch:
+            await on_batch(["a", "b", "c"])
+        return ids, []
+
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
     monkeypatch.setattr(
         fgis,
         "cluster_details",
@@ -417,12 +485,22 @@ async def test_run_mno_sync_all_per_region_error_does_not_abort(monkeypatch):
     """Сбой ОДНОГО региона не роняет весь прогон: regions_failed=1, остальное done."""
     monkeypatch.setattr(mno_sync, "AsyncSessionLocal", lambda: _FakeDBSession())
     monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value=str(uuid4())))
-    # 1-й регион — ок; 2-й — краулер падает.
-    monkeypatch.setattr(
-        fgis,
-        "enumerate_region_mno_ids",
-        AsyncMock(side_effect=[({"a", "b", "c"}, []), RuntimeError("краулер упал")]),
-    )
+
+    # 1-й регион — ок (потоковый батч записан); 2-й — краулер падает ДО записи.
+    enum_calls = {"n": 0}
+
+    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+        enum_calls["n"] += 1
+        if enum_calls["n"] == 2:
+            raise RuntimeError("краулер упал")
+        ids = {"a", "b", "c"}
+        if on_progress:
+            on_progress(len(ids))
+        if on_batch:
+            await on_batch(["a", "b", "c"])
+        return ids, []
+
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
     monkeypatch.setattr(
         fgis,
         "cluster_details",
@@ -450,6 +528,48 @@ async def test_run_mno_sync_all_per_region_error_does_not_abort(monkeypatch):
     assert job.discovered == 3
     assert job.fetched == 3
     assert job.upserted == 3
+
+
+@pytest.mark.asyncio
+async def test_sync_one_region_streams_batches(monkeypatch):
+    """_sync_one_region пишет ПОТОКОВО: на КАЖДЫЙ батч краулера — детали + upsert + commit,
+    не дожидаясь конца обхода. Счётчики суммируются по батчам, commit вызван на каждый
+    батч (>= 2)."""
+    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value="filter-uuid"))
+
+    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+        # Эмулируем потоковый краулер: два батча по 100 и 30 НОВЫХ id.
+        assert on_batch is not None
+        if on_progress:
+            on_progress(130)
+        await on_batch([f"a{i}" for i in range(100)])
+        await on_batch([f"b{i}" for i in range(30)])
+        return ({f"a{i}" for i in range(100)} | {f"b{i}" for i in range(30)}, [])
+
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
+
+    async def fake_cluster_details(ids, region_id):
+        return [{"id": i} for i in ids]
+
+    async def fake_upsert(session, region_id, objs):
+        return len(objs)
+
+    monkeypatch.setattr(fgis, "cluster_details", fake_cluster_details)
+    monkeypatch.setattr(mno_sync, "_upsert_batch", fake_upsert)
+
+    session = AsyncMock()
+    job = mno_sync.MnoSyncJob(
+        job_id="one-1", region_code="51", region_name="Мурманская область"
+    )
+
+    await mno_sync._sync_one_region(session, job, 51)
+
+    # Детали/записано просуммированы по двум потоковым батчам: 100 + 30.
+    assert job.fetched == 130
+    assert job.upserted == 130
+    assert job.discovered == 130
+    # commit вызван на КАЖДЫЙ батч (потоковая запись, не один раз в конце).
+    assert session.commit.await_count == 2
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,6 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -32,8 +31,6 @@ from . import fgis
 from .region_fed import region_fed
 
 logger = logging.getLogger(__name__)
-
-UPSERT_BATCH = 100
 
 
 # --- Реестр фоновых задач ------------------------------------------------------
@@ -127,19 +124,17 @@ def start_mno_sync(region_code: str, region_name: str) -> MnoSyncJob:
 # --- Фоновая синхронизация МНО -------------------------------------------------
 
 
-def _chunks(seq: list, n: int) -> Iterator[list]:
-    for i in range(0, len(seq), n):
-        yield seq[i : i + n]
-
-
 async def _sync_one_region(
     session: AsyncSession, job: MnoSyncJob, region_id: int
 ) -> None:
-    """Общий core одной региональной синхронизации: фильтр → краулер id → батчи
-    деталей → upsert. Счётчики job.discovered/fetched/upserted — НАКОПИТЕЛЬНО (+=),
-    поэтому хелпер годится и для одиночного региона (base=0 → прежнее поведение), и
-    для последовательного прогона по всем регионам (суммирование). DB-сессию отдаёт
-    вызывающий."""
+    """Общий core одной региональной синхронизации ПОТОКОВО: фильтр → краулер id, и как
+    только краулер накопил batch новых id — сразу детали + upsert + commit, НЕ дожидаясь
+    конца обхода региона. Так «записано» растёт вместе с «обнаружено», данные копятся
+    непрерывно и переживают обрыв (F5/рестарт не роняют серверную задачу).
+
+    Счётчики job.discovered/fetched/upserted — НАКОПИТЕЛЬНО (+=), поэтому core годится и
+    для одиночного региона (base=0 → прежняя семантика), и для последовательного прогона
+    по всем регионам (суммирование). DB-сессию отдаёт вызывающий."""
     filter_id = await fgis.create_filter(region_id)
 
     base = job.discovered  # накопленное к началу этого региона
@@ -147,18 +142,18 @@ async def _sync_one_region(
     def _prog(d: int) -> None:
         job.discovered = base + d  # накопительно поверх ранее обнаруженного
 
-    ids_set, issues = await fgis.enumerate_region_mno_ids(
-        filter_id, region_id, on_progress=_prog
-    )
-    job.discovered = base + len(ids_set)
-    for issue in issues:
-        logger.warning("[mno_sync] регион %s: %s", region_id, issue)
-
-    for batch in _chunks(sorted(ids_set), UPSERT_BATCH):
+    async def _on_batch(batch: list[str]) -> None:
+        # Краулер отдал очередные ≤100 НОВЫХ id → сразу детали + upsert + commit.
         objs = await fgis.cluster_details(batch, region_id)
         job.fetched += len(objs)
         job.upserted += await _upsert_batch(session, region_id, objs)
         await session.commit()
+
+    _, issues = await fgis.enumerate_region_mno_ids(
+        filter_id, region_id, on_progress=_prog, on_batch=_on_batch
+    )
+    for issue in issues:
+        logger.warning("[mno_sync] регион %s: %s", region_id, issue)
 
 
 async def _run_mno_sync(job: MnoSyncJob) -> None:

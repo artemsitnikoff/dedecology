@@ -16,7 +16,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import httpx
 
@@ -281,6 +281,8 @@ async def enumerate_region_mno_ids(
     region_id: int,
     *,
     on_progress: Callable[[int], None] | None = None,
+    on_batch: Callable[[list[str]], Awaitable[None]] | None = None,
+    batch_size: int = CLUSTER_LIMIT,
 ) -> tuple[set[str], list[str]]:
     """Обходит карту региона (BFS по ячейкам) и собирает set всех id МНО.
 
@@ -293,14 +295,28 @@ async def enumerate_region_mno_ids(
           * иначе → раздробить ячейку 2×2 и поставить в очередь с зумом +2.
     Гард TILE_REQUEST_LIMIT прерывает обход и пишет причину в issues.
 
-    Возвращает (ids_set, issues) — issues пуст при штатном обходе.
+    Потоковая запись (on_batch):
+      Если передан ``on_batch`` — как только очередь НОВЫХ id накопит ``batch_size``,
+      обход НЕ дожидается конца региона, а сразу отдаёт батч через ``await on_batch(...)``
+      (вызывающий тянет детали + пишет в БД + commit). Остаток сливается финальным
+      вызовом по завершении. Без ``on_batch`` поведение прежнее: собрать полный set и
+      вернуть, ничего не флашя (обратная совместимость).
+
+    Возвращает (seen, issues) — issues пуст при штатном обходе.
     """
     from collections import deque
 
-    ids_set: set[str] = set()
+    seen: set[str] = set()          # все встреченные id (итоговый набор)
+    pending: list[str] = []         # НОВЫЕ id, ещё не отданные в on_batch
     issues: list[str] = []
     truncated = 0
     tile_requests = 0
+
+    def _add(pid: str | None) -> None:
+        """Регистрирует НОВЫЙ id: в общий set seen и в очередь pending на потоковый флаш."""
+        if pid and pid not in seen:
+            seen.add(pid)
+            pending.append(pid)
 
     queue: deque[tuple[tuple[float, float, float, float], int]] = deque(
         (cell, START_Z) for cell in START_CELLS
@@ -321,24 +337,35 @@ async def enumerate_region_mno_ids(
             if "ids" in p:  # кластер
                 total = _safe_int(p.get("iconContent"))
                 if total <= CLUSTER_LIMIT:
-                    ids_set.update(p.get("ids") or [])
+                    for cid in p.get("ids") or []:
+                        _add(cid)
                 elif z >= MAX_Z:
-                    ids_set.update(p.get("ids") or [])
+                    for cid in p.get("ids") or []:
+                        _add(cid)
                     truncated += 1
                 else:
                     next_z = min(z + 2, MAX_Z)
                     for sub in split_bbox_2x2(bbox):
                         queue.append((sub, next_z))
             else:  # одиночный объект
-                pid = p.get("id")
-                if pid:
-                    ids_set.add(pid)
+                _add(p.get("id"))
         if on_progress is not None:
-            on_progress(len(ids_set))
+            on_progress(len(seen))
+        # Потоковый флаш: пока накоплено >= batch_size новых id — сразу отдаём батч,
+        # не дожидаясь конца обхода региона (данные копятся непрерывно, переживают обрыв).
+        if on_batch is not None:
+            while len(pending) >= batch_size:
+                await on_batch(pending[:batch_size])
+                del pending[:batch_size]
+
+    # Слить остаток (последний неполный батч).
+    if on_batch is not None and pending:
+        await on_batch(pending)
+        pending.clear()
 
     if truncated:
         issues.append(
             f"на максимальном зуме {truncated} кластер(ов) с >100 объектами — взяты "
             "первые 100 (совпадающие координаты)"
         )
-    return ids_set, issues
+    return seen, issues
