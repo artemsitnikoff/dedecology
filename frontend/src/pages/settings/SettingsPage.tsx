@@ -266,7 +266,7 @@ export function SettingsPage() {
                     className="de-set-input"
                     value={nuEmail}
                     onChange={(e) => setNuEmail(e.target.value)}
-                    placeholder="ivanov@dedekolog.ru"
+                    placeholder="ivanov@reo.ru"
                   />
                 </div>
               </div>
