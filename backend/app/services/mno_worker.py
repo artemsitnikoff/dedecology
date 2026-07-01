@@ -10,7 +10,10 @@ upsert из fgis/mno_sync, но состояние прогресса ведёт
 
 import logging
 
+from sqlalchemy import select
+
 from ..database import AsyncSessionLocal
+from ..models import Mno
 from . import fgis, mno_sync
 from .mno_jobs import (
     initial_progress,
@@ -21,6 +24,17 @@ from .mno_jobs import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _existing_fgis_ids(session, ids: list[str]) -> set[str]:
+    """Какие из fgis_id уже есть в БД — их детали заново НЕ тянем (дешёвое возобновление).
+
+    Один IN-запрос на батч экономит дорогие сетевые обращения к ФГИС за деталями уже
+    записанных МНО: обрыв/деплой/повторный запуск промотываются мимо сделанного."""
+    if not ids:
+        return set()
+    rows = await session.execute(select(Mno.fgis_id).where(Mno.fgis_id.in_(ids)))
+    return {row[0] for row in rows.all() if row[0]}
 
 
 async def _crawl_region(redis, job_id, prog, session, region_id: int) -> None:
@@ -37,11 +51,15 @@ async def _crawl_region(redis, job_id, prog, session, region_id: int) -> None:
         prog["discovered"] = base_disc + discovered
 
     async def _on_batch(batch: list[str]) -> None:
-        # Краулер отдал очередные ≤100 НОВЫХ id → детали + upsert + commit + зеркало в Redis.
-        objs = await fgis.cluster_details(batch, region_id)
-        prog["fetched"] += len(objs)
-        prog["upserted"] += await mno_sync._upsert_batch(session, region_id, objs)
-        await session.commit()
+        # Пропускаем уже записанные МНО (fgis_id в БД) — детали тянем ТОЛЬКО для новых.
+        # Так возобновление после обрыва/деплоя дёшево: регион промотывается мимо сделанного.
+        existing = await _existing_fgis_ids(session, batch)
+        fresh = [mno_id for mno_id in batch if mno_id not in existing]
+        if fresh:
+            objs = await fgis.cluster_details(fresh, region_id)
+            prog["fetched"] += len(objs)
+            prog["upserted"] += await mno_sync._upsert_batch(session, region_id, objs)
+            await session.commit()
         await write_progress(redis, job_id, prog)
 
     _, issues = await fgis.enumerate_region_mno_ids(

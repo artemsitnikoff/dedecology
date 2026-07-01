@@ -490,6 +490,12 @@ class _FakeDBSession:
     async def commit(self):
         return None
 
+    async def execute(self, *a, **k):
+        # _existing_fgis_ids: пустой результат → в БД ничего нет, все id новые.
+        res = MagicMock()
+        res.all.return_value = []
+        return res
+
 
 def _mock_fgis_ok(monkeypatch, *, upserted=3, ids=("a", "b", "c")):
     """Общий мок ФГИС/upsert: один потоковый батч на регион, N объектов."""
@@ -959,3 +965,61 @@ async def test_cluster_details_falls_back_to_sidebar_object(monkeypatch):
     assert out[0]["address"] == "ул. Тест, 1"
     assert out[0]["area"] == "Район"
     assert out[0]["location"] == {"latitude": 1.5, "longitude": 2.5}
+
+
+# --- id-level skip: дешёвое возобновление (не тянем детали уже записанных МНО) --------
+
+
+@pytest.mark.asyncio
+async def test_existing_fgis_ids_returns_present():
+    from app.services import mno_worker
+
+    res = MagicMock()
+    res.all.return_value = [("a",), ("c",), (None,)]  # None-строки отфильтровываются
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=res)
+
+    got = await mno_worker._existing_fgis_ids(session, ["a", "b", "c"])
+    assert got == {"a", "c"}
+
+    # Пустой вход → пустой набор, без обращения к БД.
+    session.execute.reset_mock()
+    assert await mno_worker._existing_fgis_ids(session, []) == set()
+    session.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_crawl_region_skips_existing_fgis_ids(monkeypatch):
+    """_crawl_region тянет детали ТОЛЬКО для новых id — уже записанные пропускает."""
+    from app.services import mno_worker
+
+    async def fake_enumerate(filter_id, region_id, *, on_progress=None, on_batch=None):
+        on_progress(4)
+        await on_batch(["a", "b", "c", "d"])
+        return set(), []
+
+    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value="fid"))
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
+    # В БД уже есть "a" и "c" → детали тянем только для "b","d".
+    monkeypatch.setattr(
+        mno_worker, "_existing_fgis_ids", AsyncMock(return_value={"a", "c"})
+    )
+    monkeypatch.setattr(mno_worker, "write_progress", AsyncMock())
+
+    cluster_calls: list = []
+
+    async def fake_cluster(ids, region_id):
+        cluster_calls.append(list(ids))
+        return [{"id": i} for i in ids]
+
+    monkeypatch.setattr(fgis, "cluster_details", fake_cluster)
+    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=2))
+
+    session = AsyncMock()
+    prog = {"discovered": 0, "fetched": 0, "upserted": 0}
+    await mno_worker._crawl_region(object(), "job-1", prog, session, 22)
+
+    assert cluster_calls == [["b", "d"]]  # только новые id
+    assert prog["fetched"] == 2
+    assert prog["upserted"] == 2
+    assert prog["discovered"] == 4  # обнаружено считаются ВСЕ (для прогресса)

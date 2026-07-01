@@ -74,6 +74,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-dedecolog}:${POSTGRES_PASSWORD:-dedecolog}@db:5432/dedecolog
       - REDIS_URL=redis://redis:6379/0
     command: arq app.worker.WorkerSettings
+    # arq дописывает текущий батч перед SIGKILL при рестарте (возобновление дешёвое).
+    stop_grace_period: 60s
 
   frontend:
     build:
