@@ -14,6 +14,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from app.core.errors import AppError, ForbiddenError
@@ -353,3 +354,74 @@ async def test_mno_sync_status_not_found_404(client):
         resp = await client.get("/api/v1/integration/mno/sync/status?job_id=missing")
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+# --- Детали МНО: sidebar/object как документированный фолбэк --------------------
+
+
+def test_object_to_flat_maps_nested_sidebar_object():
+    """Вложенный ответ sidebar/object (док §3) → плоская форма sidebar/cluster."""
+    obj = {
+        "id": "7d257019",
+        "name": "Контейнерная площадка",
+        "registryNumber": "0000217-03",
+        "location": {
+            "areaName": "Курумканский муниципальный район",
+            "populationName": "Сельское поселение Элэсун",
+            "address": "ул. Ленина, 52",
+            "coordinates": {"latitude": 54.035044, "longitude": 110.097837},
+        },
+    }
+    flat = fgis._object_to_flat(obj)
+    assert flat == {
+        "id": "7d257019",
+        "name": "Контейнерная площадка",
+        "registryNumber": "0000217-03",
+        "area": "Курумканский муниципальный район",
+        "population": "Сельское поселение Элэсун",
+        "address": "ул. Ленина, 52",
+        "location": {"latitude": 54.035044, "longitude": 110.097837},
+    }
+
+
+@pytest.mark.asyncio
+async def test_cluster_details_falls_back_to_sidebar_object(monkeypatch):
+    """Если батч sidebar/cluster недоступен — cluster_details деградирует на
+    документированный sidebar/object по одному id и отдаёт ту же плоскую форму."""
+
+    class _BoomClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **k):
+            raise httpx.ConnectError("batch недоступен")
+
+    monkeypatch.setattr(fgis.httpx, "AsyncClient", _BoomClient)
+
+    async def _fake_object(mno_id):
+        return {
+            "id": mno_id,
+            "name": "Площадка",
+            "registryNumber": "R-1",
+            "location": {
+                "areaName": "Район",
+                "populationName": "Село",
+                "address": "ул. Тест, 1",
+                "coordinates": {"latitude": 1.5, "longitude": 2.5},
+            },
+        }
+
+    monkeypatch.setattr(fgis, "sidebar_object", _fake_object)
+
+    out = await fgis.cluster_details(["id-1", "id-2"], region_id=3)
+    assert len(out) == 2
+    assert out[0]["name"] == "Площадка"
+    assert out[0]["address"] == "ул. Тест, 1"
+    assert out[0]["area"] == "Район"
+    assert out[0]["location"] == {"latitude": 1.5, "longitude": 2.5}

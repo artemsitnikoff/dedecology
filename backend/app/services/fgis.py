@@ -195,8 +195,55 @@ async def fetch_tile(
     return data.get("features") or []
 
 
+async def sidebar_object(mno_id: str) -> dict | None:
+    """GET sidebar/object — публично ДОКУМЕНТИРОВАННЫЙ метод (док ФГИС §3): сведения о МНО
+    по ОДНОМУ id. Фолбэк для cluster_details, если батч-метод sidebar/cluster (его нет в
+    публичной доке) окажется недоступен. Возвращает ВЛОЖЕННУЮ форму
+    {..., location:{coordinates:{latitude,longitude}, areaName, populationName, address}}.
+    Сбой одного id → None (не роняет обход)."""
+    url = f"{_base()}{MAP_API_PREFIX}/sidebar/object"
+    params = {"Id": mno_id, "Layer": LAYER}
+    try:
+        async with httpx.AsyncClient(timeout=FGIS_TIMEOUT) as http_client:
+            resp = await http_client.get(url, params=params)
+    except Exception:  # noqa: BLE001 — фолбэк, сбой одного id не критичен
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        obj = resp.json()
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _object_to_flat(o: dict) -> dict:
+    """Приводит ВЛОЖЕННЫЙ ответ sidebar/object (док §3) к ПЛОСКОЙ форме sidebar/cluster,
+    чтобы upsert читал детали единообразно независимо от источника."""
+    loc = o.get("location") or {}
+    coords = loc.get("coordinates") or {}
+    return {
+        "id": o.get("id"),
+        "name": o.get("name") or "",
+        "registryNumber": o.get("registryNumber") or "",
+        "area": loc.get("areaName") or "",
+        "population": loc.get("populationName") or "",
+        "address": loc.get("address") or "",
+        "location": {
+            "latitude": coords.get("latitude"),
+            "longitude": coords.get("longitude"),
+        },
+    }
+
+
 async def cluster_details(ids: list[str], region_id: int) -> list[dict]:
-    """POST sidebar/cluster → полные данные объектов (name/address/area/location/...)."""
+    """Детали МНО батчем. Основной путь — POST sidebar/cluster (быстро, до 100 id/запрос).
+
+    Если батч-метод недоступен (сеть/не-200) — деградируем на публично документированный
+    sidebar/object по одному id (док §3), приводя его к той же плоской форме. Так
+    синхронизация остаётся живой и doc-совместимой, если ФГИС когда-нибудь прикроет батч.
+    Плоская форма: {id,name,registryNumber,area,population,address,location:{latitude,longitude}}.
+    """
     if not ids:
         return []
     url = f"{_base()}{MAP_API_PREFIX}/sidebar/cluster"
@@ -204,18 +251,26 @@ async def cluster_details(ids: list[str], region_id: int) -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=FGIS_TIMEOUT) as http_client:
             resp = await http_client.post(url, json=body)
-    except Exception as e:  # noqa: BLE001
-        raise AppError(
-            "FGIS_UNAVAILABLE", f"ФГИС недоступна: {type(e).__name__}", status_code=502
-        ) from e
-    if resp.status_code != 200:
-        raise AppError(
-            "FGIS_ERROR",
-            f"ФГИС вернула HTTP {resp.status_code} на деталях кластера",
-            status_code=502,
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+        logger.warning(
+            "[fgis] sidebar/cluster HTTP %s — фолбэк на sidebar/object (%d id)",
+            resp.status_code, len(ids),
         )
-    data = resp.json()
-    return data if isinstance(data, list) else []
+    except Exception as e:  # noqa: BLE001 — переходим на документированный фолбэк
+        logger.warning(
+            "[fgis] sidebar/cluster сбой %s — фолбэк на sidebar/object (%d id)",
+            type(e).__name__, len(ids),
+        )
+
+    out: list[dict] = []
+    for mno_id in ids:
+        obj = await sidebar_object(mno_id)
+        if obj is not None:
+            out.append(_object_to_flat(obj))
+    return out
 
 
 # --- Краулер: перечислить все id МНО региона -----------------------------------
