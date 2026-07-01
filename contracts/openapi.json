@@ -2179,6 +2179,33 @@
         ]
       }
     },
+    "/api/v1/integration/mno/sync-all": {
+      "post": {
+        "tags": [
+          "Интеграция ФГИС (супер-админ)"
+        ],
+        "summary": "Start Mno Sync All",
+        "description": "Запуск ФОНОВОЙ синхронизации МНО по ВСЕМ регионам справочника (последовательно).\n\nОбходит субъекты по алфавиту одной задачей с общим прогрессом. Если такой прогон\nуже идёт — возвращает его. Пустой справочник → 400 (сначала синхронизируй регионы).",
+        "operationId": "start_mno_sync_all_api_v1_integration_mno_sync_all_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoSyncStartResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/integration/mno/sync/status": {
       "get": {
         "tags": [
@@ -3249,6 +3276,31 @@
               }
             ],
             "title": "Finished At"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": "region"
+          },
+          "regions_total": {
+            "type": "integer",
+            "title": "Regions Total",
+            "default": 1
+          },
+          "regions_done": {
+            "type": "integer",
+            "title": "Regions Done",
+            "default": 0
+          },
+          "regions_failed": {
+            "type": "integer",
+            "title": "Regions Failed",
+            "default": 0
+          },
+          "current_region": {
+            "type": "string",
+            "title": "Current Region",
+            "default": ""
           }
         },
         "type": "object",

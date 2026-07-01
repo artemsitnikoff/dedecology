@@ -41,3 +41,17 @@ export function useStartMnoSync() {
     },
   });
 }
+
+/**
+ * POST /integration/mno/sync-all — запуск ОДНОЙ фоновой задачи, обходящей ВСЕ регионы
+ * справочника последовательно (общий прогресс). Тела нет; возвращает job_id, который
+ * опрашивается тем же useMnoSyncStatus(job_id). Инвалидация — по завершении (на странице).
+ */
+export function useStartMnoSyncAll() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await api.post<MnoSyncJob>('/integration/mno/sync-all');
+      return res.data;
+    },
+  });
+}

@@ -52,6 +52,17 @@ class MnoSyncJob:
     error: str | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime | None = None
+    # Прогон по ВСЕМ регионам (scope="all"): порегионный прогресс. Для одиночной
+    # задачи дефолты держат прежнюю семантику (один регион).
+    scope: str = "region"          # "region" | "all"
+    regions_total: int = 1
+    regions_done: int = 0
+    regions_failed: int = 0
+    current_region: str = ""
+
+
+# Спец-ключ реестра для задачи «все регионы» (region_code такого прогона).
+ALL_JOB_KEY = "__all__"
 
 
 _jobs: dict[str, MnoSyncJob] = {}          # job_id → задача
@@ -81,6 +92,11 @@ def job_to_status(job: MnoSyncJob) -> MnoSyncStatus:
         error=job.error,
         started_at=job.started_at,
         finished_at=job.finished_at,
+        scope=job.scope,
+        regions_total=job.regions_total,
+        regions_done=job.regions_done,
+        regions_failed=job.regions_failed,
+        current_region=job.current_region,
     )
 
 
@@ -116,29 +132,40 @@ def _chunks(seq: list, n: int) -> Iterator[list]:
         yield seq[i : i + n]
 
 
+async def _sync_one_region(
+    session: AsyncSession, job: MnoSyncJob, region_id: int
+) -> None:
+    """Общий core одной региональной синхронизации: фильтр → краулер id → батчи
+    деталей → upsert. Счётчики job.discovered/fetched/upserted — НАКОПИТЕЛЬНО (+=),
+    поэтому хелпер годится и для одиночного региона (base=0 → прежнее поведение), и
+    для последовательного прогона по всем регионам (суммирование). DB-сессию отдаёт
+    вызывающий."""
+    filter_id = await fgis.create_filter(region_id)
+
+    base = job.discovered  # накопленное к началу этого региона
+
+    def _prog(d: int) -> None:
+        job.discovered = base + d  # накопительно поверх ранее обнаруженного
+
+    ids_set, issues = await fgis.enumerate_region_mno_ids(
+        filter_id, region_id, on_progress=_prog
+    )
+    job.discovered = base + len(ids_set)
+    for issue in issues:
+        logger.warning("[mno_sync] регион %s: %s", region_id, issue)
+
+    for batch in _chunks(sorted(ids_set), UPSERT_BATCH):
+        objs = await fgis.cluster_details(batch, region_id)
+        job.fetched += len(objs)
+        job.upserted += await _upsert_batch(session, region_id, objs)
+        await session.commit()
+
+
 async def _run_mno_sync(job: MnoSyncJob) -> None:
-    """Фоновая работа: фильтр → краулер id → батчи деталей → upsert. Своя DB-сессия."""
-    region_id = int(job.region_code)
+    """Фоновая работа одиночного региона: своя DB-сессия, итог как раньше."""
     try:
-        filter_id = await fgis.create_filter(region_id)
-
-        def _on_progress(discovered: int) -> None:
-            job.discovered = discovered
-
-        ids_set, issues = await fgis.enumerate_region_mno_ids(
-            filter_id, region_id, on_progress=_on_progress
-        )
-        job.discovered = len(ids_set)
-        for issue in issues:
-            logger.warning("[mno_sync] регион %s: %s", job.region_code, issue)
-
-        sorted_ids = sorted(ids_set)
         async with AsyncSessionLocal() as session:
-            for batch in _chunks(sorted_ids, UPSERT_BATCH):
-                objs = await fgis.cluster_details(batch, region_id)
-                job.fetched += len(objs)
-                job.upserted += await _upsert_batch(session, region_id, objs)
-                await session.commit()
+            await _sync_one_region(session, job, int(job.region_code))
 
         job.state = "done"
         job.finished_at = datetime.now(timezone.utc)
@@ -151,6 +178,66 @@ async def _run_mno_sync(job: MnoSyncJob) -> None:
         job.error = str(e)
         job.finished_at = datetime.now(timezone.utc)
         logger.exception("[mno_sync] регион %s: сбой синхронизации", job.region_code)
+
+
+async def _run_mno_sync_all(job: MnoSyncJob, regions: list[tuple[str, str]]) -> None:
+    """Фоновый последовательный обход ВСЕХ регионов справочника одной задачей.
+
+    regions = [(code, name), ...]. Сбой ОДНОГО региона не роняет весь прогон —
+    считаем его в regions_failed, пишем в job.error и идём дальше. Итог прогона —
+    всегда done (кроме катастрофы вне цикла)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            for code, name in regions:
+                job.current_region = name
+                try:
+                    await _sync_one_region(session, job, int(code))
+                    job.regions_done += 1
+                except Exception as e:  # noqa: BLE001 — сбой региона не роняет прогон
+                    job.regions_failed += 1
+                    job.error = f"{name}: {e}"
+                    logger.exception(
+                        "[mno_sync] all: регион %s (%s) — сбой", code, name
+                    )
+        job.state = "done"
+        job.finished_at = datetime.now(timezone.utc)
+        logger.info(
+            "[mno_sync] all готов: регионов=%s успешно=%s с ошибками=%s "
+            "обнаружено=%s детали=%s записано=%s",
+            job.regions_total, job.regions_done, job.regions_failed,
+            job.discovered, job.fetched, job.upserted,
+        )
+    except Exception as e:  # noqa: BLE001 — катастрофа вне цикла (напр. сессия БД)
+        job.state = "error"
+        job.error = str(e)
+        job.finished_at = datetime.now(timezone.utc)
+        logger.exception("[mno_sync] all: катастрофа прогона по всем регионам")
+
+
+def start_mno_sync_all(regions: list[tuple[str, str]]) -> MnoSyncJob:
+    """Запускает ФОНОВЫЙ прогон синхронизации МНО по ВСЕМ регионам справочника.
+
+    Если такой прогон уже идёт (по ключу ALL_JOB_KEY, state == running) — возвращает
+    его, новый не плодит. regions = [(code, name), ...] в нужном порядке обхода.
+    """
+    existing = get_region_job(ALL_JOB_KEY)
+    if existing is not None and existing.state == "running":
+        return existing
+
+    job = MnoSyncJob(
+        job_id=str(uuid.uuid4()),
+        region_code=ALL_JOB_KEY,
+        region_name="Все регионы",
+        scope="all",
+        regions_total=len(regions),
+    )
+    _jobs[job.job_id] = job
+    _jobs_by_region[ALL_JOB_KEY] = job.job_id
+
+    task = asyncio.create_task(_run_mno_sync_all(job, regions))
+    _running_tasks.add(task)
+    task.add_done_callback(_running_tasks.discard)
+    return job
 
 
 async def _upsert_batch(

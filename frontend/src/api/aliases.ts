@@ -270,11 +270,11 @@ export interface MnoSyncStatus {
   region_code: string;
   region_name: string;
   state: MnoSyncState;
-  /** Обнаружено id МНО краулером карты. */
+  /** Обнаружено id МНО краулером карты (накопительно по всем регионам при scope==='all'). */
   discovered: number;
-  /** Загружено деталей (POST sidebar/cluster). */
+  /** Загружено деталей (POST sidebar/cluster); накопительно при scope==='all'. */
   fetched: number;
-  /** Записано (upsert) в таблицу mno. */
+  /** Записано (upsert) в таблицу mno; накопительно при scope==='all'. */
   upserted: number;
   /** Текст ошибки при state==='error', иначе null. */
   error: string | null;
@@ -282,6 +282,16 @@ export interface MnoSyncStatus {
   started_at: string;
   /** ISO-момент завершения или null (пока running). */
   finished_at: string | null;
+  /** Область задачи: один регион ('region', деф.) или весь справочник ('all'). */
+  scope: 'region' | 'all';
+  /** Всего регионов в обходе (1 для одиночной задачи). */
+  regions_total: number;
+  /** Регионов успешно пройдено. */
+  regions_done: number;
+  /** Регионов, завершившихся с ошибкой (сбой одного не роняет весь прогон). */
+  regions_failed: number;
+  /** Имя региона, обрабатываемого сейчас (для scope==='all'). */
+  current_region: string;
 }
 
 /** Конверт ошибки API: { error: { code, message, details } }. */

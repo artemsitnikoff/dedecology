@@ -4,10 +4,13 @@ import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate, formatTime } from '@/lib/format';
 import { useIntegrationOverview, useMnoSyncStatus } from '@/api/hooks/integration';
-import { useSyncRegions, useStartMnoSync } from '@/api/mutations/integration';
+import { useSyncRegions, useStartMnoSync, useStartMnoSyncAll } from '@/api/mutations/integration';
 import { useFederalDistricts } from '@/api/hooks/regions';
-import type { ApiError } from '@/api/aliases';
+import type { ApiError, MnoSyncJob } from '@/api/aliases';
 import './IntegrationPage.css';
+
+/** Спец-значение селектора региона: синхронизировать МНО по ВСЕМ регионам справочника. */
+const ALL_REGIONS = '__all__';
 
 /**
  * Раздел «Интеграция ФГИС» — доступен ТОЛЬКО супер-админу (гард в App.tsx + пункт меню).
@@ -39,6 +42,7 @@ export function IntegrationPage() {
 
   const syncRegions = useSyncRegions();
   const startMno = useStartMnoSync();
+  const startMnoAll = useStartMnoSyncAll();
 
   // Выбранный регион и активная фоновая задача синхронизации МНО.
   const [mnoRegion, setMnoRegion] = useState('');
@@ -61,12 +65,19 @@ export function IntegrationPage() {
     return (id: number) => map.get(id) ?? '—';
   }, [districtsQuery.data]);
 
-  const isRunning = status?.state === 'running' || startMno.isPending;
+  const isRunning =
+    status?.state === 'running' || startMno.isPending || startMnoAll.isPending;
 
-  // Прогресс: доля загруженных деталей от обнаруженного (если есть, что делить).
+  // Прогресс одиночного региона: доля загруженных деталей от обнаруженного.
   const pct =
     status && status.discovered > 0
       ? Math.min(100, Math.round((status.fetched / status.discovered) * 100))
+      : null;
+
+  // Прогресс «все регионы»: доля пройденных субъектов от общего числа.
+  const allPct =
+    status && status.regions_total > 0
+      ? Math.min(100, Math.round((status.regions_done / status.regions_total) * 100))
       : null;
 
   // Обработка завершения фоновой задачи: один раз на job_id → инвалидация + итог.
@@ -77,9 +88,15 @@ export function IntegrationPage() {
     qc.invalidateQueries({ queryKey: ['integration', 'overview'] });
     qc.invalidateQueries({ queryKey: ['mno'] });
     if (status.state === 'done') {
-      showToast(
-        `Синхронизация МНО завершена: ${status.region_name} — записано ${status.upserted}.`
-      );
+      const failed =
+        status.scope === 'all' && status.regions_failed > 0
+          ? `, с ошибками ${status.regions_failed}`
+          : '';
+      const scope =
+        status.scope === 'all'
+          ? `все регионы (${status.regions_done}/${status.regions_total}${failed})`
+          : status.region_name;
+      showToast(`Синхронизация МНО завершена: ${scope} — записано ${status.upserted}.`);
     } else {
       showToast(`Ошибка синхронизации МНО: ${status.error || 'неизвестная ошибка'}`);
     }
@@ -106,10 +123,15 @@ export function IntegrationPage() {
     }
     // Разрешаем повторную обработку завершения для новой задачи.
     handledJobRef.current = null;
-    startMno.mutate(mnoRegion, {
-      onSuccess: (job) => setJobId(job.job_id),
-      onError: (e) => showToast(apiErrorMessage(e) || 'Не удалось запустить синхронизацию МНО.'),
-    });
+    const onSuccess = (job: MnoSyncJob) => setJobId(job.job_id);
+    const onError = (e: unknown) =>
+      showToast(apiErrorMessage(e) || 'Не удалось запустить синхронизацию МНО.');
+    // «Все регионы» → одна фоновая задача по всему справочнику; иначе — один регион.
+    if (mnoRegion === ALL_REGIONS) {
+      startMnoAll.mutate(undefined, { onSuccess, onError });
+    } else {
+      startMno.mutate(mnoRegion, { onSuccess, onError });
+    }
   };
 
   const regionsTotal = overview ? overview.regions.total : null;
@@ -215,6 +237,7 @@ export function IntegrationPage() {
                     disabled={isRunning || perRegion.length === 0}
                   >
                     <option value="">Выберите регион…</option>
+                    <option value={ALL_REGIONS}>Все регионы (весь справочник)</option>
                     {perRegion.map((r) => (
                       <option key={r.code} value={r.code}>
                         {r.code} · {r.name}
@@ -251,11 +274,33 @@ export function IntegrationPage() {
                     </span>
                     <span className="de-intg-progress-region">{status.region_name}</span>
                   </div>
-                  {pct != null && (
-                    <div className="de-intg-bar">
-                      <div className="de-intg-bar-fill" style={{ width: `${pct}%` }} />
-                    </div>
+                  {status.scope === 'all' ? (
+                    <>
+                      {/* Порегионный прогресс: доля пройденных субъектов */}
+                      {allPct != null && (
+                        <div className="de-intg-bar">
+                          <div className="de-intg-bar-fill" style={{ width: `${allPct}%` }} />
+                        </div>
+                      )}
+                      <div className="de-intg-region-prog">
+                        Регион <span className="de-intg-num">{status.regions_done}</span>
+                        <span className="de-intg-num">/{status.regions_total}</span>
+                        {status.current_region && (
+                          <>
+                            {': '}
+                            <span className="de-intg-cur">{status.current_region}</span>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    pct != null && (
+                      <div className="de-intg-bar">
+                        <div className="de-intg-bar-fill" style={{ width: `${pct}%` }} />
+                      </div>
+                    )
                   )}
+                  {/* Накопительные счётчики (одиночный регион и «все») */}
                   <div className="de-intg-counters">
                     <span>
                       обнаружено <b>{status.discovered}</b>
@@ -269,6 +314,11 @@ export function IntegrationPage() {
                       записано <b>{status.upserted}</b>
                     </span>
                   </div>
+                  {status.scope === 'all' && status.regions_failed > 0 && (
+                    <div className="de-intg-failed">
+                      с ошибками: <b>{status.regions_failed}</b>
+                    </div>
+                  )}
                   {status.state === 'error' && status.error && (
                     <div className="de-intg-progress-error">{status.error}</div>
                   )}

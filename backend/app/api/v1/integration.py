@@ -8,10 +8,12 @@
 """
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.errors import AppError
 from ...database import get_db
+from ...models import Region
 from ...schemas.integration import (
     IntegrationOverview,
     MnoSyncRequest,
@@ -51,6 +53,30 @@ async def start_mno_sync(
     """
     region = await mno_sync.get_region_or_404(session, payload.region_code)
     job = mno_sync.start_mno_sync(region.code, region.name)
+    return MnoSyncStartResult(
+        job_id=job.job_id, region_code=job.region_code, state=job.state
+    )
+
+
+@router.post("/mno/sync-all", response_model=MnoSyncStartResult, tags=[TAG])
+async def start_mno_sync_all(session: AsyncSession = Depends(get_db)):
+    """Запуск ФОНОВОЙ синхронизации МНО по ВСЕМ регионам справочника (последовательно).
+
+    Обходит субъекты по алфавиту одной задачей с общим прогрессом. Если такой прогон
+    уже идёт — возвращает его. Пустой справочник → 400 (сначала синхронизируй регионы).
+    """
+    rows = (
+        await session.execute(
+            select(Region.code, Region.name).order_by(Region.name)
+        )
+    ).all()
+    if not rows:
+        raise AppError(
+            "NO_REGIONS",
+            "Справочник регионов пуст — сначала синхронизируйте регионы",
+            status_code=400,
+        )
+    job = mno_sync.start_mno_sync_all([(c, n) for c, n in rows])
     return MnoSyncStartResult(
         job_id=job.job_id, region_code=job.region_code, state=job.state
     )

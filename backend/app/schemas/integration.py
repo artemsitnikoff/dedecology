@@ -68,3 +68,10 @@ class MnoSyncStatus(BaseModel):
     error: Optional[str] = None
     started_at: datetime
     finished_at: Optional[datetime] = None
+    # Прогон по ВСЕМ регионам (scope="all"): порегионный прогресс. Для одиночной
+    # задачи дефолты держат прежнюю форму (scope="region", один регион).
+    scope: str = "region"          # "region" | "all"
+    regions_total: int = 1
+    regions_done: int = 0
+    regions_failed: int = 0
+    current_region: str = ""

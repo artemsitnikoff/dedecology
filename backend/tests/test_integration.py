@@ -356,6 +356,141 @@ async def test_mno_sync_status_not_found_404(client):
     assert resp.json()["error"]["code"] == "NOT_FOUND"
 
 
+# --- Синхронизация МНО по ВСЕМ регионам разом ----------------------------------
+
+
+class _FakeDBSession:
+    """Поддельная AsyncSessionLocal(): async-контекст-менеджер с awaitable commit."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def commit(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_run_mno_sync_all_sums_across_regions(monkeypatch):
+    """Прогон по 2 регионам одной задачей: scope=all, счётчики СУММИРУЮТСЯ, done."""
+    monkeypatch.setattr(mno_sync, "AsyncSessionLocal", lambda: _FakeDBSession())
+    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value=str(uuid4())))
+    monkeypatch.setattr(
+        fgis,
+        "enumerate_region_mno_ids",
+        AsyncMock(return_value=({"a", "b", "c"}, [])),
+    )
+    monkeypatch.setattr(
+        fgis,
+        "cluster_details",
+        AsyncMock(return_value=[{"id": "a"}, {"id": "b"}, {"id": "c"}]),
+    )
+    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=3))
+
+    job = mno_sync.MnoSyncJob(
+        job_id="all-1",
+        region_code=mno_sync.ALL_JOB_KEY,
+        region_name="Все регионы",
+        scope="all",
+        regions_total=2,
+    )
+    await mno_sync._run_mno_sync_all(
+        job, [("51", "Мурманская область"), ("63", "Самарская область")]
+    )
+
+    assert job.scope == "all"
+    assert job.regions_total == 2
+    assert job.regions_done == 2
+    assert job.regions_failed == 0
+    # Накопительно по двум регионам: 3 + 3.
+    assert job.discovered == 6
+    assert job.fetched == 6
+    assert job.upserted == 6
+    assert job.state == "done"
+    assert job.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_run_mno_sync_all_per_region_error_does_not_abort(monkeypatch):
+    """Сбой ОДНОГО региона не роняет весь прогон: regions_failed=1, остальное done."""
+    monkeypatch.setattr(mno_sync, "AsyncSessionLocal", lambda: _FakeDBSession())
+    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value=str(uuid4())))
+    # 1-й регион — ок; 2-й — краулер падает.
+    monkeypatch.setattr(
+        fgis,
+        "enumerate_region_mno_ids",
+        AsyncMock(side_effect=[({"a", "b", "c"}, []), RuntimeError("краулер упал")]),
+    )
+    monkeypatch.setattr(
+        fgis,
+        "cluster_details",
+        AsyncMock(return_value=[{"id": "a"}, {"id": "b"}, {"id": "c"}]),
+    )
+    monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=3))
+
+    job = mno_sync.MnoSyncJob(
+        job_id="all-2",
+        region_code=mno_sync.ALL_JOB_KEY,
+        region_name="Все регионы",
+        scope="all",
+        regions_total=2,
+    )
+    await mno_sync._run_mno_sync_all(
+        job, [("51", "Мурманская область"), ("63", "Самарская область")]
+    )
+
+    assert job.regions_done == 1
+    assert job.regions_failed == 1
+    assert job.state == "done"  # прогон завершён, а не «error»
+    assert job.error is not None
+    assert "Самарская область" in job.error  # ошибка помечена именем региона
+    # Первый регион успел записаться до сбоя второго.
+    assert job.discovered == 3
+    assert job.fetched == 3
+    assert job.upserted == 3
+
+
+@pytest.mark.asyncio
+async def test_start_mno_sync_all_empty_catalog_400(client, fake_session):
+    """Пустой справочник регионов → 400 NO_REGIONS (сначала синхронизируй регионы)."""
+    sel = MagicMock()
+    sel.all.return_value = []
+    fake_session.execute = AsyncMock(return_value=sel)
+
+    resp = await client.post("/api/v1/integration/mno/sync-all")
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "NO_REGIONS"
+
+
+@pytest.mark.asyncio
+async def test_start_mno_sync_all_endpoint(client, fake_session):
+    """Непустой справочник → 200, задача с region_code == '__all__'."""
+    sel = MagicMock()
+    sel.all.return_value = [("51", "Мурманская область"), ("63", "Самарская область")]
+    fake_session.execute = AsyncMock(return_value=sel)
+
+    job = mno_sync.MnoSyncJob(
+        job_id="all-3",
+        region_code=mno_sync.ALL_JOB_KEY,
+        region_name="Все регионы",
+        scope="all",
+        regions_total=2,
+    )
+    with patch(
+        "app.api.v1.integration.mno_sync.start_mno_sync_all", return_value=job
+    ) as start_spy:
+        resp = await client.post("/api/v1/integration/mno/sync-all")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"] == "all-3"
+    assert body["region_code"] == "__all__"
+    assert body["state"] == "running"
+    start_spy.assert_called_once()
+
+
 # --- Детали МНО: sidebar/object как документированный фолбэк --------------------
 
 
