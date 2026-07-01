@@ -293,6 +293,74 @@
   border: 2px solid var(--bg-1);
 }
 
+/* ---------- Пагинатор (серверная пагинация по 100) ---------- */
+.de-mno-pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-panel-2);
+}
+.de-mno-pager-info {
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+.de-mno-pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.de-mno-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  cursor: pointer;
+}
+.de-mno-pager-btn:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+.de-mno-pager-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.de-mno-pager-num {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+.de-mno-pager-num:hover:not(.active) {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+.de-mno-pager-num.active {
+  background: var(--de-brand);
+  border-color: var(--de-brand);
+  color: var(--ark-white);
+  font-weight: 600;
+}
+.de-mno-pager-gap {
+  min-width: 18px;
+  text-align: center;
+  color: var(--fg-3);
+  font-size: var(--fs-13);
+}
+
 /* ---------- Таблица (без заморозки столбца, без воронки) ---------- */
 .de-mno-table {
   min-width: 1282px;

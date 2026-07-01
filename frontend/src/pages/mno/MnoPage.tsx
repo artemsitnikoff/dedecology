@@ -1,13 +1,33 @@
 import { memo, useCallback, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate } from '@/lib/format';
-import { useMno, useMnoDetail } from '@/api/hooks/mno';
+import { useMno, useMnoDetail, useMnoPoints } from '@/api/hooks/mno';
 import type { MnoFilters, MnoSortKey, SortOrder } from '@/api/hooks/mno';
 import { useRegionsDirectory } from '@/api/hooks/regions';
 import { exportMno, useCreateMno, useSyncMno, useSyncMnoOne } from '@/api/mutations/mno';
-import type { MnoCreate, MnoListItem, RegionListItem } from '@/api/aliases';
+import type { MnoCreate, MnoListItem, MnoPoint, RegionListItem } from '@/api/aliases';
 import './Mno.css';
+
+/** Размер страницы серверной пагинации реестра МНО (контракт GET /mno). */
+const PAGE_SIZE = 100;
+
+/**
+ * Окно номеров страниц вокруг текущей. До 7 страниц — показываем все; иначе
+ * первая · … · (тек-1, тек, тек+1) · … · последняя ('gap' = многоточие).
+ */
+function pageWindow(current: number, totalPages: number): Array<number | 'gap'> {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+  const out: Array<number | 'gap'> = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(totalPages - 1, current + 1);
+  if (start > 2) out.push('gap');
+  for (let i = start; i <= end; i++) out.push(i);
+  if (end < totalPages - 1) out.push('gap');
+  out.push(totalPages);
+  return out;
+}
 
 /** Заголовки таблицы МНО (порядок прототипа). coords/sync — без сортировки. */
 type HeadKey = MnoSortKey | 'coords' | 'sync';
@@ -105,6 +125,7 @@ const MnoRow = memo(function MnoRow({ m, selected, active, onToggle, onOpen }: R
    Экран «МНО»
    ============================================================ */
 export function MnoPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<MnoSortKey>('name');
   const [sortDir, setSortDir] = useState<SortOrder>('asc');
@@ -117,10 +138,30 @@ export function MnoPage() {
 
   const { message, showToast } = useToast();
 
+  // Текущая страница живёт в URL (?mpage=N) — шарится и переживает reload; 1 → без параметра.
+  const page = Math.max(1, Number(searchParams.get('mpage')) || 1);
+  const setPage = useCallback(
+    (p: number) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (p <= 1) next.delete('mpage');
+          else next.set('mpage', String(p));
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+  // Любая смена фильтра/поиска/сортировки сбрасывает страницу на первую.
+  const resetPage = useCallback(() => setPage(1), [setPage]);
+
   // Серверная фильтрация/сортировка (как у incidents). synced: один чип → bool, оба/ни одного → all.
   const syncedFilter: boolean | undefined =
     fSync.length === 1 ? fSync[0] === 'fgis' : undefined;
-  const filters: MnoFilters = useMemo(
+  // Базовые фильтры (без пагинации) — для карты и экспорта (полный отфильтрованный набор).
+  const baseFilters: MnoFilters = useMemo(
     () => ({
       search: query || undefined,
       region: fRegion || undefined,
@@ -130,24 +171,40 @@ export function MnoPage() {
     }),
     [query, fRegion, syncedFilter, sortKey, sortDir]
   );
+  // Фильтры списка = базовые + текущая страница.
+  const listFilters: MnoFilters = useMemo(
+    () => ({ ...baseFilters, page, page_size: PAGE_SIZE }),
+    [baseFilters, page]
+  );
 
-  const listQuery = useMno(filters);
+  const listQuery = useMno(listFilters);
   const allQuery = useMno({}); // нефильтрованный итог (дедуп с Sidebar)
+  // Точки карты — отдельный лёгкий запрос, только когда активен под-режим «Карта».
+  const pointsQuery = useMnoPoints(
+    { search: query || undefined, region: fRegion || undefined, synced: syncedFilter },
+    { enabled: sub === 'map' }
+  );
   const regionsQuery = useRegionsDirectory({});
 
   const syncMno = useSyncMno();
   const syncMnoOne = useSyncMnoOne();
   const createMno = useCreateMno();
 
-  const rows = listQuery.data ?? [];
-  const grandTotal = allQuery.data?.length ?? rows.length;
+  const rows = listQuery.data?.items ?? [];
+  const total = listQuery.data?.total ?? 0;
+  const pages = listQuery.data?.pages ?? 0;
+  const grandTotal = allQuery.data?.total ?? total;
   const regions = regionsQuery.data ?? [];
 
   const filterCount = (fRegion ? 1 : 0) + (fSync.length ? 1 : 0);
   const isFiltered = filterCount > 0 || !!query;
   const counterText = isFiltered
-    ? `Показано ${rows.length} из ${grandTotal}`
+    ? `Показано ${total} из ${grandTotal}`
     : `${grandTotal} МНО · слой 5 ФГИС`;
+
+  // Диапазон строк текущей страницы для подписи пагинатора («X–Y из N»).
+  const rangeFrom = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeTo = Math.min(page * PAGE_SIZE, total);
 
   const allSelected = rows.length > 0 && rows.every((m) => selected.has(m.id));
   // Стабильная ссылка — чтобы memo строк не сбрасывался на каждом рендере.
@@ -161,18 +218,33 @@ export function MnoPage() {
       }),
     []
   );
+  // «Выбрать всё» — по строкам ТЕКУЩЕЙ страницы (rows = items страницы).
   const toggleAll = () =>
     setSelected((prev) => (rows.length > 0 && rows.every((m) => prev.has(m.id)) ? new Set<string>() : new Set(rows.map((m) => m.id))));
-  const toggleSync = (v: 'fgis' | 'manual') =>
+  const toggleSync = (v: 'fgis' | 'manual') => {
     setFSync((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
+    resetPage();
+  };
   const resetFilters = () => {
     setFRegion('');
     setFSync([]);
+    resetPage();
   };
 
   const onSort = (key: MnoSortKey) => {
     setSortDir((prev) => (sortKey === key && prev === 'asc' ? 'desc' : 'asc'));
     setSortKey(key);
+    resetPage();
+  };
+
+  // Поиск/регион меняют выборку → страница на первую.
+  const handleSearch = (v: string) => {
+    setQuery(v);
+    resetPage();
+  };
+  const handleRegion = (v: string) => {
+    setFRegion(v);
+    resetPage();
   };
 
   const handleSyncAll = () => {
@@ -193,7 +265,8 @@ export function MnoPage() {
     });
 
   const handleExport = () => {
-    void exportMno(filters);
+    // Экспорт = весь отфильтрованный реестр (без пагинации) — page/page_size не передаём.
+    void exportMno(baseFilters);
   };
 
   const handleCreate = (payload: MnoCreate) => {
@@ -206,15 +279,20 @@ export function MnoPage() {
     });
   };
 
-  // Проекция координат в проценты для схематичной карты (как в прототипе).
+  // Точки карты — из лёгкого /mno/points (id/coords/name), а НЕ из полного списка.
+  const points = pointsQuery.data?.points ?? [];
+  const pointsTotal = pointsQuery.data?.total ?? points.length;
+  const pointsCapped = pointsQuery.data?.capped ?? false;
+
+  // Проекция координат точек в проценты для схематичной карты (как в прототипе).
   const map = useMemo(() => {
-    if (!rows.length) return { pins: [] as Array<{ m: MnoListItem; x: number; y: number }>, bbox: '' };
-    const lat = (m: MnoListItem) => parseFloat(m.coords.split(',')[0]);
-    const lng = (m: MnoListItem) => parseFloat(m.coords.split(',')[1]);
-    let minLat = Math.min(...rows.map(lat));
-    let maxLat = Math.max(...rows.map(lat));
-    let minLng = Math.min(...rows.map(lng));
-    let maxLng = Math.max(...rows.map(lng));
+    if (!points.length) return { pins: [] as Array<{ p: MnoPoint; x: number; y: number }>, bbox: '' };
+    const lat = (p: MnoPoint) => parseFloat(p.coords.split(',')[0]);
+    const lng = (p: MnoPoint) => parseFloat(p.coords.split(',')[1]);
+    let minLat = Math.min(...points.map(lat));
+    let maxLat = Math.max(...points.map(lat));
+    let minLng = Math.min(...points.map(lng));
+    let maxLng = Math.max(...points.map(lng));
     let latR = maxLat - minLat || 0.4;
     let lngR = maxLng - minLng || 0.4;
     minLat -= latR * 0.16;
@@ -224,13 +302,13 @@ export function MnoPage() {
     latR = maxLat - minLat;
     lngR = maxLng - minLng;
     const bbox = `${minLng.toFixed(4)}, ${minLat.toFixed(4)} … ${maxLng.toFixed(4)}, ${maxLat.toFixed(4)}`;
-    const pins = rows.map((m) => ({
-      m,
-      x: ((lng(m) - minLng) / lngR) * 100,
-      y: (1 - (lat(m) - minLat) / latR) * 100,
+    const pins = points.map((p) => ({
+      p,
+      x: ((lng(p) - minLng) / lngR) * 100,
+      y: (1 - (lat(p) - minLat) / latR) * 100,
     }));
     return { pins, bbox };
-  }, [rows]);
+  }, [points]);
 
   return (
     <div className="de-mno-wrap">
@@ -262,7 +340,7 @@ export function MnoPage() {
           <Icon name="search" size={15} color="var(--fg-3)" />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => handleSearch(e.target.value)}
             placeholder="Поиск по наименованию, реестровому №, адресу…"
           />
         </div>
@@ -291,7 +369,7 @@ export function MnoPage() {
       <div className="de-mno-filterbar">
         <div className="de-mno-filter-group">
           <span className="de-mno-filter-label">Регион</span>
-          <select className="de-mno-select" value={fRegion} onChange={(e) => setFRegion(e.target.value)}>
+          <select className="de-mno-select" value={fRegion} onChange={(e) => handleRegion(e.target.value)}>
             <option value="">Все регионы</option>
             {regions.map((r) => (
               <option key={r.code} value={r.code}>
@@ -344,6 +422,7 @@ export function MnoPage() {
 
       {/* Контент: список */}
       {sub === 'list' && (
+        <>
         <div className="de-mno-content">
           {listQuery.isLoading ? (
             <div className="de-mno-state">Загрузка…</div>
@@ -403,6 +482,57 @@ export function MnoPage() {
             </div>
           )}
         </div>
+
+        {/* Пагинатор (серверная пагинация по 100) */}
+        {!listQuery.isLoading && !listQuery.isError && total > 0 && (
+          <div className="de-mno-pager">
+            <span className="de-mno-pager-info">
+              Показано <span className="de-mno-mono">{rangeFrom}</span>–
+              <span className="de-mno-mono">{rangeTo}</span> из{' '}
+              <span className="de-mno-mono">{total}</span>
+            </span>
+            <div className="de-mno-spacer" />
+            {pages > 1 && (
+              <div className="de-mno-pager-controls">
+                <button
+                  type="button"
+                  className="de-mno-pager-btn"
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
+                >
+                  <Icon name="chevron-left" size={15} />
+                  Назад
+                </button>
+                {pageWindow(page, pages).map((p, i) =>
+                  p === 'gap' ? (
+                    <span key={`gap-${i}`} className="de-mno-pager-gap">
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`de-mno-pager-num de-mno-mono ${p === page ? 'active' : ''}`}
+                      onClick={() => setPage(p)}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  className="de-mno-pager-btn"
+                  disabled={page >= pages}
+                  onClick={() => setPage(page + 1)}
+                >
+                  Вперёд
+                  <Icon name="chevron-right" size={15} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        </>
       )}
 
       {/* Контент: карта */}
@@ -416,44 +546,52 @@ export function MnoPage() {
                 Слой 5 · МНО
               </span>
               <span className="de-mno-map-chip mono">z 8</span>
-              <span className="de-mno-map-chip dark">{rows.length} точек</span>
+              <span className="de-mno-map-chip dark">
+                {pointsCapped ? `показано ${points.length} из ${pointsTotal}` : `${pointsTotal} точек`}
+              </span>
             </div>
             <div className="de-mno-map-legend">
               <span>
-                <span className="de-mno-map-legend-dot" style={{ background: 'var(--ark-gray-500)' }} />
-                Из ФГИС
-              </span>
-              <span>
                 <span className="de-mno-map-legend-dot" style={{ background: 'var(--de-brand)' }} />
-                Добавлено вручную
+                МНО · слой 5
               </span>
             </div>
             {map.pins.map((p) => {
-              const isActive = detailId === p.m.id;
+              const isActive = detailId === p.p.id;
               return (
                 <div
-                  key={p.m.id}
+                  key={p.p.id}
                   className={`de-mno-pin ${isActive ? 'active' : ''}`}
-                  onClick={() => setDetailId(p.m.id)}
+                  onClick={() => setDetailId(p.p.id)}
                   style={{
                     left: `${p.x}%`,
                     top: `${p.y}%`,
                     transform: `translate(-50%,-100%) scale(${isActive ? 1.22 : 1})`,
-                    color: p.m.synced ? 'var(--ark-gray-500)' : 'var(--de-brand)',
+                    color: 'var(--de-brand)',
                   }}
                 >
-                  <div className="de-mno-pin-label">{p.m.name}</div>
+                  <div className="de-mno-pin-label">{p.p.name}</div>
                   <Pin size={28} />
                 </div>
               );
             })}
-            {rows.length === 0 && (
+            {pointsQuery.isLoading ? (
+              <div className="de-mno-map-empty">
+                <div className="de-mno-map-empty-title">Загрузка точек…</div>
+              </div>
+            ) : pointsQuery.isError ? (
+              <div className="de-mno-map-empty">
+                <Pin size={40} />
+                <div className="de-mno-map-empty-title">Не удалось загрузить точки</div>
+                <div>Попробуйте обновить страницу.</div>
+              </div>
+            ) : points.length === 0 ? (
               <div className="de-mno-map-empty">
                 <Pin size={40} />
                 <div className="de-mno-map-empty-title">Нет точек на карте</div>
                 <div>Сбросьте фильтры, чтобы увидеть все МНО.</div>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       )}

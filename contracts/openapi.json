@@ -903,7 +903,7 @@
           "Карта и МНО"
         ],
         "summary": "List Mno",
-        "description": "Реестр МНО с фильтрами region/synced/search + сортировкой.",
+        "description": "Пагинированный реестр МНО с фильтрами region/synced/search + сортировкой.",
         "operationId": "list_mno_api_v1_mno_get",
         "security": [
           {
@@ -979,6 +979,29 @@
               "default": "asc",
               "title": "Order"
             }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Page Size"
+            }
           }
         ],
         "responses": {
@@ -987,11 +1010,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MnoListItem"
-                  },
-                  "title": "Response List Mno Api V1 Mno Get"
+                  "$ref": "#/components/schemas/Paginated_MnoListItem_"
                 }
               }
             }
@@ -1037,6 +1056,93 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MnoDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mno/points": {
+      "get": {
+        "tags": [
+          "Карта и МНО"
+        ],
+        "summary": "List Mno Points",
+        "description": "Лёгкие координаты МНО для карты (без пагинации, обрезка до лимита).\n\nОбъявлен ДО /{mno_id} — статический роут раньше параметрического, иначе FastAPI\nтрактует «points» как UUID → 422.",
+        "operationId": "list_mno_points_api_v1_mno_points_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          },
+          {
+            "name": "synced",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Synced"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoPointsResponse"
                 }
               }
             }
@@ -2138,7 +2244,7 @@
           "Интеграция ФГИС (супер-админ)"
         ],
         "summary": "Start Mno Sync",
-        "description": "Запускает ФОНОВУЮ синхронизацию МНО региона. Если уже идёт — возвращает её.\n\nРегион должен быть в справочнике (иначе 404 — сначала синхронизируй регионы).",
+        "description": "Ставит в очередь ФОНОВУЮ синхронизацию МНО региона. Если уже идёт — возвращает её.\n\nРегион должен быть в справочнике (иначе 404 — сначала синхронизируй регионы).\nОчередь недоступна (Redis лежит) → 503 QUEUE_UNAVAILABLE.",
         "operationId": "start_mno_sync_api_v1_integration_mno_sync_post",
         "requestBody": {
           "content": {
@@ -2185,7 +2291,7 @@
           "Интеграция ФГИС (супер-админ)"
         ],
         "summary": "Start Mno Sync All",
-        "description": "Запуск ФОНОВОЙ синхронизации МНО по ВСЕМ регионам справочника (последовательно).\n\nОбходит субъекты по алфавиту одной задачей с общим прогрессом. Если такой прогон\nуже идёт — возвращает его. Пустой справочник → 400 (сначала синхронизируй регионы).",
+        "description": "Ставит в очередь ФОНОВУЮ синхронизацию МНО по ВСЕМ регионам справочника (одной задачей).\n\nОбходит субъекты по алфавиту. Если такой прогон уже идёт — возвращает его. Пустой\nсправочник → 400 (сначала синхронизируй регионы). Очередь недоступна → 503.",
         "operationId": "start_mno_sync_all_api_v1_integration_mno_sync_all_post",
         "responses": {
           "200": {
@@ -2212,7 +2318,7 @@
           "Интеграция ФГИС (супер-админ)"
         ],
         "summary": "Mno Sync Status",
-        "description": "Прогресс/итог фоновой синхронизации по job_id ИЛИ по region_code (последняя задача).",
+        "description": "Прогресс/итог фоновой синхронизации по job_id ИЛИ по region_code (последняя задача).\n\nСостояние читается из Redis, поэтому видно из любого uvicorn-воркера.",
         "operationId": "mno_sync_status_api_v1_integration_mno_sync_status_get",
         "security": [
           {
@@ -3161,6 +3267,58 @@
         "title": "MnoOverview",
         "description": "Сводка по МНО."
       },
+      "MnoPoint": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "coords",
+          "name"
+        ],
+        "title": "MnoPoint",
+        "description": "Лёгкая точка МНО для карты: id + координаты «lat, lon» + название."
+      },
+      "MnoPointsResponse": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MnoPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "capped": {
+            "type": "boolean",
+            "title": "Capped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "points",
+          "total",
+          "capped"
+        ],
+        "title": "MnoPointsResponse",
+        "description": "Точки МНО для карты (отдельный лёгкий эндпоинт, без пагинации).\n\ntotal — всего МНО по текущему фильтру; points — первые не более лимита точек\nс непустыми координатами; capped=True — total превысил лимит и points обрезаны."
+      },
       "MnoSyncRequest": {
         "properties": {
           "region_code": {
@@ -3352,6 +3510,42 @@
           "pages"
         ],
         "title": "Paginated[IncidentListItem]"
+      },
+      "Paginated_MnoListItem_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MnoListItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "pages"
+        ],
+        "title": "Paginated[MnoListItem]"
       },
       "PasswordReset": {
         "properties": {

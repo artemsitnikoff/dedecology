@@ -47,3 +47,21 @@ class MnoSyncResult(BaseModel):
     """Итог ЗАГЛУШКИ синхронизации с ФГИС: сколько помечено / всего МНО."""
     synced: int
     total: int
+
+
+class MnoPoint(ORMBase):
+    """Лёгкая точка МНО для карты: id + координаты «lat, lon» + название."""
+    id: UUID
+    coords: str
+    name: str
+
+
+class MnoPointsResponse(BaseModel):
+    """Точки МНО для карты (отдельный лёгкий эндпоинт, без пагинации).
+
+    total — всего МНО по текущему фильтру; points — первые не более лимита точек
+    с непустыми координатами; capped=True — total превысил лимит и points обрезаны.
+    """
+    points: list[MnoPoint]
+    total: int
+    capped: bool

@@ -8,7 +8,15 @@ import pytest
 from sqlalchemy.sql.operators import eq
 
 from app.models import Mno
-from app.schemas.mno import MnoCreate, MnoDetail, MnoListItem, MnoSyncResult
+from app.schemas.base import Paginated
+from app.schemas.mno import (
+    MnoCreate,
+    MnoDetail,
+    MnoListItem,
+    MnoPoint,
+    MnoPointsResponse,
+    MnoSyncResult,
+)
 from app.services import mno as mno_service
 from app.services.mno import _filters
 
@@ -39,27 +47,39 @@ def _detail(**kw) -> MnoDetail:
 # --- Эндпоинты -----------------------------------------------------------------
 
 
+def _page(items=None, total=1, page=1, page_size=100) -> Paginated[MnoListItem]:
+    items = [_item()] if items is None else items
+    pages = (total + page_size - 1) // page_size if total > 0 else 0
+    return Paginated[MnoListItem](
+        items=items, total=total, page=page, page_size=page_size, pages=pages
+    )
+
+
 @pytest.mark.asyncio
-async def test_list_mno_returns_list(client):
+async def test_list_mno_returns_paginated(client):
     with patch(
         "app.api.v1.mno.mno_service.list_mno",
-        new=AsyncMock(return_value=[_item()]),
+        new=AsyncMock(return_value=_page(total=1)),
     ):
         resp = await client.get("/api/v1/mno")
     assert resp.status_code == 200
     body = resp.json()
-    assert len(body) == 1
-    assert body[0]["region_name"] == "Самарская область"
-    assert body[0]["synced"] is True
+    assert body["total"] == 1
+    assert body["page"] == 1
+    assert body["page_size"] == 100
+    assert len(body["items"]) == 1
+    assert body["items"][0]["region_name"] == "Самарская область"
+    assert body["items"][0]["synced"] is True
 
 
 @pytest.mark.asyncio
 async def test_list_mno_forwards_filters(client):
-    """region/synced/search/sort пробрасываются в сервис."""
-    spy = AsyncMock(return_value=[])
+    """region/synced/search/sort/page/page_size пробрасываются в сервис."""
+    spy = AsyncMock(return_value=_page(items=[], total=0))
     with patch("app.api.v1.mno.mno_service.list_mno", new=spy):
         resp = await client.get(
-            "/api/v1/mno?region=63&synced=false&search=Бульварная&sort=reg&order=desc"
+            "/api/v1/mno?region=63&synced=false&search=Бульварная"
+            "&sort=reg&order=desc&page=2&page_size=50"
         )
     assert resp.status_code == 200
     kw = spy.call_args.kwargs
@@ -68,6 +88,8 @@ async def test_list_mno_forwards_filters(client):
     assert kw["search"] == "Бульварная"
     assert kw["sort"] == "reg"
     assert kw["order"] == "desc"
+    assert kw["page"] == 2
+    assert kw["page_size"] == 50
 
 
 @pytest.mark.asyncio
@@ -167,6 +189,70 @@ async def test_static_sync_not_shadowed_by_id(client):
         resp = await client.post("/api/v1/mno/sync")
     assert resp.status_code == 200
     spy.assert_awaited_once()
+
+
+# --- /points (карта) -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_points_returns_points(client):
+    """GET /mno/points отдаёт points/total/capped и пробрасывает фильтры."""
+    points_resp = MnoPointsResponse(
+        points=[MnoPoint(id=uuid4(), coords="53.231410, 50.166820", name="Площадка A")],
+        total=5000,
+        capped=True,
+    )
+    spy = AsyncMock(return_value=points_resp)
+    with patch("app.api.v1.mno.mno_service.list_points", new=spy):
+        resp = await client.get("/api/v1/mno/points?region=63&synced=true&search=ул")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 5000
+    assert body["capped"] is True
+    assert len(body["points"]) == 1
+    assert body["points"][0]["name"] == "Площадка A"
+    assert body["points"][0]["coords"] == "53.231410, 50.166820"
+    kw = spy.call_args.kwargs
+    assert kw["region"] == "63"
+    assert kw["synced"] is True
+    assert kw["search"] == "ул"
+
+
+@pytest.mark.asyncio
+async def test_static_points_not_shadowed_by_id(client):
+    """GET /mno/points объявлен ДО /{id}: его не перехватывает get_mno."""
+    with patch(
+        "app.api.v1.mno.mno_service.list_points",
+        new=AsyncMock(
+            return_value=MnoPointsResponse(points=[], total=0, capped=False)
+        ),
+    ), patch(
+        "app.api.v1.mno.mno_service.get_mno",
+        new=AsyncMock(side_effect=AssertionError("get_mno перехватил /points")),
+    ):
+        resp = await client.get("/api/v1/mno/points")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_list_points_service_marks_capped():
+    """list_points: total из COUNT(*), points из строк с координатами, capped при переполнении."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = mno_service.MAX_POINTS + 10
+    row = MagicMock(id=uuid4(), coords="53.2, 50.6")
+    row.name = "Площадка A"  # name= в конструкторе MagicMock — служебный, задаём явно
+    points_res = MagicMock()
+    points_res.all.return_value = [row]
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    resp = await mno_service.list_points(session, search=None, region=None, synced=None)
+
+    assert resp.total == mno_service.MAX_POINTS + 10
+    assert resp.capped is True
+    assert len(resp.points) == 1
+    assert resp.points[0].name == "Площадка A"
+    assert resp.points[0].coords == "53.2, 50.6"
 
 
 # --- _filters ------------------------------------------------------------------

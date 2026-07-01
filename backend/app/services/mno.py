@@ -6,6 +6,7 @@
 заглушка заменяется реальным клиентом ФГИС.
 """
 
+import math
 import uuid
 from datetime import datetime, timezone
 
@@ -14,8 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import NotFoundError
 from ..models import Mno, Region
-from ..schemas.mno import MnoDetail, MnoListItem, MnoSyncResult
+from ..schemas.base import Paginated
+from ..schemas.mno import (
+    MnoDetail,
+    MnoListItem,
+    MnoPoint,
+    MnoPointsResponse,
+    MnoSyncResult,
+)
 from .audit import audit
+
+# Максимум точек, отдаваемых карте за раз (карта не грузит весь реестр).
+MAX_POINTS = 2000
 
 # sort-ключ из API → колонка модели. region сортируется по коду субъекта.
 _SORT_COLUMNS = {
@@ -75,6 +86,21 @@ def _to_list_item(m: Mno, region_names: dict[str, str]) -> MnoListItem:
     )
 
 
+async def _count(
+    session: AsyncSession,
+    *,
+    search: str | None,
+    region: str | None,
+    synced: bool | None,
+) -> int:
+    """COUNT(*) по тем же фильтрам, что и список (для пагинации/карты)."""
+    filters = _filters(search, region, synced)
+    stmt = select(func.count(Mno.id))
+    if filters:
+        stmt = stmt.where(*filters)
+    return (await session.execute(stmt)).scalar_one()
+
+
 async def _query(
     session: AsyncSession,
     *,
@@ -83,7 +109,13 @@ async def _query(
     synced: bool | None,
     sort: str,
     order: str,
+    offset: int | None = None,
+    limit: int | None = None,
 ) -> list[Mno]:
+    """Ядро фильтра/сортировки: сырые строки Mno.
+
+    offset/limit опциональны — None означает «весь набор» (используется экспортом).
+    """
     filters = _filters(search, region, synced)
     stmt = select(Mno)
     if filters:
@@ -91,6 +123,10 @@ async def _query(
     sort_col = _SORT_COLUMNS.get(sort, Mno.name)
     direction = asc if order == "asc" else desc
     stmt = stmt.order_by(direction(sort_col), direction(Mno.id))
+    if offset is not None:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -103,13 +139,27 @@ async def list_mno(
     synced: bool | None = None,
     sort: str = "name",
     order: str = "asc",
-) -> list[MnoListItem]:
-    """Список МНО с фильтрами region/synced/search + сортировкой."""
+    page: int = 1,
+    page_size: int = 100,
+) -> Paginated[MnoListItem]:
+    """Пагинированный реестр МНО с фильтрами region/synced/search + сортировкой."""
+    total = await _count(session, search=search, region=region, synced=synced)
     rows = await _query(
-        session, search=search, region=region, synced=synced, sort=sort, order=order
+        session,
+        search=search,
+        region=region,
+        synced=synced,
+        sort=sort,
+        order=order,
+        offset=(page - 1) * page_size,
+        limit=page_size,
     )
     region_names = await _region_names(session)
-    return [_to_list_item(m, region_names) for m in rows]
+    items = [_to_list_item(m, region_names) for m in rows]
+    pages = math.ceil(total / page_size) if total > 0 else 0
+    return Paginated[MnoListItem](
+        items=items, total=total, page=page, page_size=page_size, pages=pages
+    )
 
 
 async def list_for_export(
@@ -121,10 +171,40 @@ async def list_for_export(
     sort: str = "name",
     order: str = "asc",
 ) -> list[MnoListItem]:
-    """Отфильтрованный реестр для .xlsx (тот же набор, что и список)."""
-    return await list_mno(
+    """Полный отфильтрованный реестр для .xlsx (БЕЗ пагинации — весь набор)."""
+    rows = await _query(
         session, search=search, region=region, synced=synced, sort=sort, order=order
     )
+    region_names = await _region_names(session)
+    return [_to_list_item(m, region_names) for m in rows]
+
+
+async def list_points(
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    region: str | None = None,
+    synced: bool | None = None,
+) -> MnoPointsResponse:
+    """Лёгкие координаты МНО для карты: те же фильтры, без имён регионов.
+
+    total — всего МНО по фильтру; points — первые MAX_POINTS строк с непустыми
+    координатами; capped=True — total превысил лимит и points обрезаны.
+    """
+    total = await _count(session, search=search, region=region, synced=synced)
+    filters = _filters(search, region, synced)
+    filters.append(Mno.coords != "")
+    stmt = (
+        select(Mno.id, Mno.coords, Mno.name)
+        .where(*filters)
+        .order_by(asc(Mno.id))
+        .limit(MAX_POINTS)
+    )
+    result = await session.execute(stmt)
+    points = [
+        MnoPoint(id=row.id, coords=row.coords, name=row.name) for row in result.all()
+    ]
+    return MnoPointsResponse(points=points, total=total, capped=total > MAX_POINTS)
 
 
 async def _get(session: AsyncSession, mno_id: uuid.UUID) -> Mno:

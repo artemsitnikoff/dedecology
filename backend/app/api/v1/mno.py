@@ -16,7 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_db
 from ...deps import get_current_user
 from ...models import User
-from ...schemas.mno import MnoCreate, MnoDetail, MnoListItem, MnoSyncResult
+from ...schemas.base import Paginated
+from ...schemas.mno import (
+    MnoCreate,
+    MnoDetail,
+    MnoListItem,
+    MnoPointsResponse,
+    MnoSyncResult,
+)
 from ...services import mno as mno_service
 from ...services.mno_export import build_mno_xlsx
 
@@ -35,19 +42,46 @@ def _xlsx_response(content: bytes, filename: str) -> Response:
     )
 
 
-@router.get("", response_model=list[MnoListItem], tags=["Карта и МНО"])
+@router.get("", response_model=Paginated[MnoListItem], tags=["Карта и МНО"])
 async def list_mno(
     search: str | None = Query(None),
     region: str | None = Query(None),
     synced: bool | None = Query(None),
     sort: str = Query("name"),
     order: str = Query("asc", pattern="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=200),
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Реестр МНО с фильтрами region/synced/search + сортировкой."""
+    """Пагинированный реестр МНО с фильтрами region/synced/search + сортировкой."""
     return await mno_service.list_mno(
-        session, search=search, region=region, synced=synced, sort=sort, order=order
+        session,
+        search=search,
+        region=region,
+        synced=synced,
+        sort=sort,
+        order=order,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/points", response_model=MnoPointsResponse, tags=["Карта и МНО"])
+async def list_mno_points(
+    search: str | None = Query(None),
+    region: str | None = Query(None),
+    synced: bool | None = Query(None),
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Лёгкие координаты МНО для карты (без пагинации, обрезка до лимита).
+
+    Объявлен ДО /{mno_id} — статический роут раньше параметрического, иначе FastAPI
+    трактует «points» как UUID → 422.
+    """
+    return await mno_service.list_points(
+        session, search=search, region=region, synced=synced
     )
 
 

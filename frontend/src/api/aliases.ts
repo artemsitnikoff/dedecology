@@ -159,6 +159,25 @@ export interface MnoListItem {
 /** Деталь МНО (GET /mno/{id}) — те же поля, что и в списке. */
 export type MnoDetail = MnoListItem;
 
+/** Лёгкая точка МНО для карты (GET /mno/points) — только id + координаты + название. */
+export interface MnoPoint {
+  id: string;
+  /** «широта, долгота» текстом. */
+  coords: string;
+  name: string;
+}
+
+/**
+ * Ответ GET /mno/points — координаты МНО для карты (без пагинации).
+ * total — всего МНО по фильтру; points — первые не более лимита точек;
+ * capped=true — точки обрезаны по лимиту (показано меньше, чем total).
+ */
+export interface MnoPointsResponse {
+  points: MnoPoint[];
+  total: number;
+  capped: boolean;
+}
+
 /** Тело создания МНО (POST /mno). Обязательны name+coords; synced=false, fgis_id=null. */
 export interface MnoCreate {
   name: string;

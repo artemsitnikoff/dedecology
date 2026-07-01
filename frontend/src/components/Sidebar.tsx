@@ -27,7 +27,7 @@ export function Sidebar() {
   // Реальные нефильтрованные итоги (те же queryKey, что и на экранах → дедуп).
   // Пока грузится — count undefined, бейдж не рисуется (без фейков).
   const incidentsCount = useFunnelCounts({}).data?.all;
-  const mnoCount = useMno({}).data?.length;
+  const mnoCount = useMno({}).data?.total;
   const regionsCount = useRegionsDirectory({}).data?.length;
 
   const handleLogout = async () => {
