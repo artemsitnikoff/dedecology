@@ -27,9 +27,9 @@ from ...schemas.incident import (
 )
 from ...services import dadata as dadata_service
 from ...services import incident as incident_service
+from ...services import incident_type as incident_type_service
 from ...services import intake as intake_service
 from ...services import quotes as quotes_service
-from ...services.incident_types import list_incident_types
 
 logger = logging.getLogger(__name__)
 
@@ -156,13 +156,16 @@ async def suggest_address(
 
 
 @router.get("/incident-types", tags=["Отправка фотоотчёта"])
-async def incident_types():
+async def incident_types(session: AsyncSession = Depends(get_db)):
     """ПУБЛИЧНО: справочник типов инцидента [{code, label}] для дропдауна формы/фильтра.
 
-    Статичный справочник (services/incident_types.py); подпись фронт резолвит по коду.
-    Публичный (intake-роутер без auth) — нужен неавторизованной форме волонтёра.
+    Источник — редактируемый справочник в БД (таблица incident_types); подпись фронт
+    резолвит по коду. Контракт ответа сохранён ([{code, label}] в порядке sort_order),
+    чтобы форма/фильтр/карточка не меняли свой fetch. Публичный (intake-роутер без
+    auth) — нужен неавторизованной форме волонтёра.
     """
-    return list_incident_types()
+    types = await incident_type_service.list_types(session)
+    return [{"code": t.code, "label": t.label} for t in types]
 
 
 @router.post("/form", tags=["Отправка фотоотчёта"])

@@ -31,6 +31,40 @@ export interface IncidentType {
   label: string;
 }
 
+/**
+ * Полная запись справочника типов инцидента (GET /incident-types) — с id и порядком
+ * сортировки. Используется страницей-справочником «Типы инцидентов» в админке (CRUD).
+ * Источник правды — таблица incident_types в БД (заменила хардкод-константу).
+ */
+export interface IncidentTypeItem {
+  id: string;
+  /** Стабильный код типа — на него ссылаются инциденты, при правке НЕ меняется. */
+  code: string;
+  /** Русская подпись для UI. */
+  label: string;
+  /** Порядок сортировки в дропдаунах/таблице (меньше — выше). */
+  sort_order: number;
+}
+
+/**
+ * Тело создания типа инцидента (POST /incident-types). Обязателен только label:
+ * если code пуст — бэк генерирует стабильный код; если sort_order пуст — ставит в конец.
+ */
+export interface IncidentTypeCreate {
+  label: string;
+  code?: string;
+  sort_order?: number;
+}
+
+/**
+ * Тело изменения типа инцидента (PATCH /incident-types/{id}). code менять нельзя
+ * (на него ссылаются инциденты) — правим только подпись и порядок.
+ */
+export interface IncidentTypeUpdate {
+  label?: string;
+  sort_order?: number;
+}
+
 /** Инцидент (детальное представление, GET /incidents/{id} — все поля, включая bins). */
 export interface Incident {
   id: string;

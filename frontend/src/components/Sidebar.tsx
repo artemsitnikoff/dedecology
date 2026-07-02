@@ -46,6 +46,7 @@ export function Sidebar() {
     if (path.startsWith('/incidents') || path === '/') return 'incidents';
     if (path.startsWith('/mno')) return 'mno';
     if (path.startsWith('/regions')) return 'regions';
+    if (path.startsWith('/incident-types')) return 'incident-types';
     if (path.startsWith('/integration')) return 'integration';
     if (path.startsWith('/settings')) return 'settings';
     return '';
@@ -61,6 +62,7 @@ export function Sidebar() {
   // Справочники.
   const refNav: NavItem[] = [
     { id: 'regions', label: 'Регионы', icon: 'map', count: regionsCount },
+    { id: 'incident-types', label: 'Типы инцидентов', icon: 'file-text' },
   ];
 
   const roleLabel = user?.role === 'admin' ? 'Администратор' : 'Пользователь';

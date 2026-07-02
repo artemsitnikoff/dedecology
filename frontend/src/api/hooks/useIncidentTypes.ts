@@ -13,10 +13,14 @@ export async function getIncidentTypes(): Promise<IncidentType[]> {
   return res.data;
 }
 
-/** Хук справочника типов инцидента для дропдаунов (форма + фильтр + карточка). */
+/**
+ * Хук справочника типов инцидента для дропдаунов (форма + фильтр + карточка).
+ * queryKey = ['intake','incident-types'] — отдельный от админского ['incident-types'],
+ * чтобы CRUD-мутации инвалидировали ОБА кэша (полный список страницы + публичный дропдаун).
+ */
 export function useIncidentTypes() {
   return useQuery({
-    queryKey: ['incident-types'],
+    queryKey: ['intake', 'incident-types'],
     queryFn: getIncidentTypes,
     staleTime: 60 * 60 * 1000, // 1 час — справочник почти статичен
   });

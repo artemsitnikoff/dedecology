@@ -1809,6 +1809,181 @@
         ]
       }
     },
+    "/api/v1/incident-types": {
+      "get": {
+        "tags": [
+          "Справочники"
+        ],
+        "summary": "List Incident Types",
+        "description": "Полный справочник типов инцидента [{id, code, label, sort_order}] для страницы.",
+        "operationId": "list_incident_types_api_v1_incident_types_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IncidentTypeItem"
+                  },
+                  "type": "array",
+                  "title": "Response List Incident Types Api V1 Incident Types Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Справочники"
+        ],
+        "summary": "Create Incident Type",
+        "description": "Создаёт тип инцидента (require_admin). code генерится, если не задан.",
+        "operationId": "create_incident_type_api_v1_incident_types_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentTypeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentTypeItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/incident-types/{type_id}": {
+      "patch": {
+        "tags": [
+          "Справочники"
+        ],
+        "summary": "Update Incident Type",
+        "description": "Изменяет label/sort_order (require_admin). code неизменяем.",
+        "operationId": "update_incident_type_api_v1_incident_types__type_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Type Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentTypeUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentTypeItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Справочники"
+        ],
+        "summary": "Delete Incident Type",
+        "description": "Удаляет тип (require_admin). Инциденты с этим кодом остаются (покажут «—»).",
+        "operationId": "delete_incident_type_api_v1_incident_types__type_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Type Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/intake/yandex": {
       "post": {
         "tags": [
@@ -1929,7 +2104,7 @@
           "Отправка фотоотчёта"
         ],
         "summary": "Incident Types",
-        "description": "ПУБЛИЧНО: справочник типов инцидента [{code, label}] для дропдауна формы/фильтра.\n\nСтатичный справочник (services/incident_types.py); подпись фронт резолвит по коду.\nПубличный (intake-роутер без auth) — нужен неавторизованной форме волонтёра.",
+        "description": "ПУБЛИЧНО: справочник типов инцидента [{code, label}] для дропдауна формы/фильтра.\n\nИсточник — редактируемый справочник в БД (таблица incident_types); подпись фронт\nрезолвит по коду. Контракт ответа сохранён ([{code, label}] в порядке sort_order),\nчтобы форма/фильтр/карточка не меняли свой fetch. Публичный (intake-роутер без\nauth) — нужен неавторизованной форме волонтёра.",
         "operationId": "incident_types_api_v1_intake_incident_types_get",
         "responses": {
           "200": {
@@ -3309,6 +3484,106 @@
           "status"
         ],
         "title": "IncidentStatusUpdate"
+      },
+      "IncidentTypeCreate": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "IncidentTypeCreate",
+        "description": "Создание типа. code необязателен (пуст → сервис сгенерит автокод);\nsort_order необязателен (пуст → в конец списка)."
+      },
+      "IncidentTypeItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "sort_order": {
+            "type": "integer",
+            "title": "Sort Order"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "label",
+          "sort_order"
+        ],
+        "title": "IncidentTypeItem",
+        "description": "Строка справочника типов инцидента (для страницы админки)."
+      },
+      "IncidentTypeUpdate": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "type": "object",
+        "title": "IncidentTypeUpdate",
+        "description": "Изменение типа: правим только label/sort_order. code неизменяем."
       },
       "IntegrationOverview": {
         "properties": {

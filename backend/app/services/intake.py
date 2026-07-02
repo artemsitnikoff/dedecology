@@ -25,7 +25,7 @@ from .dadata import clean_address, geocode_address
 from .geo import parse_latlon
 from . import parse_log
 from .incident_parse import ai_parse_incident
-from .incident_types import is_valid_incident_type
+from .incident_type import code_exists
 
 logger = logging.getLogger(__name__)
 
@@ -587,8 +587,8 @@ async def create_incident_from_public_form(
     """Создаёт Incident (source='form') из публичной формы волонтёра + фото.
 
     region/city/street берутся из явных полей, если непусты, иначе выводятся
-    эвристикой из full_address. incident_type — код из справочника
-    incident_types.py: пишется, только если код валиден (мусор → NULL). comment —
+    эвристикой из full_address. incident_type — код из редактируемого справочника
+    (таблица incident_types): пишется, только если код есть в БД (мусор → NULL). comment —
     прочая информация (стрипнутая; пусто → NULL). Фото валидируются (тип/размер/
     количество) и сохраняются в {STORAGE_DIR}/incidents/{id}/. flush() здесь,
     commit() — в роутере. Невалидные фото → ValidationError + очистка каталога.
@@ -599,9 +599,13 @@ async def create_incident_from_public_form(
     city = _clean_str(city)
     street = _clean_str(street)
     coords = _clean_str(coords)
-    # Тип инцидента: код из справочника. Неизвестный/пустой код → NULL (мусор не пишем).
+    # Тип инцидента: код из редактируемого справочника (таблица incident_types).
+    # Неизвестный/пустой код → NULL (мусор не пишем). Пустой код короткозамыкаем,
+    # чтобы не дёргать БД лишний раз.
     type_code = _clean_str(incident_type)
-    incident_type_value = type_code if is_valid_incident_type(type_code) else None
+    incident_type_value = (
+        type_code if type_code and await code_exists(session, type_code) else None
+    )
     # Прочая информация из формы (необязательное поле): стрипнутая строка или NULL.
     comment_value = _clean_str(comment) or None
 

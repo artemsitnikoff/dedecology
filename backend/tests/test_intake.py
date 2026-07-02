@@ -705,44 +705,52 @@ async def test_public_service_overlong_fields_truncated(fake_session):
 
 @pytest.mark.asyncio
 async def test_public_service_saves_valid_incident_type_and_comment(fake_session):
-    """Валидный код типа + comment (стрипнутый) сохраняются на инциденте."""
+    """Валидный код типа (есть в БД) + comment (стрипнутый) сохраняются на инциденте."""
     fake_session.add = MagicMock()
-    incident = await create_incident_from_public_form(
-        fake_session,
-        fio="Волонтёр",
-        full_address="",
-        region="Самарская область",
-        city="г. Самара",
-        street="ул. Ленина, 1",
-        coords="",
-        photo_time="",
-        bins="",
-        incident_type="fire",
-        comment="  Баки переполнены  ",
-        photo_files=[],
-    )
+    # Валидность типа теперь проверяется по БД (code_exists) — мокаем «код найден».
+    with patch(
+        "app.services.intake.code_exists", new=AsyncMock(return_value=True)
+    ):
+        incident = await create_incident_from_public_form(
+            fake_session,
+            fio="Волонтёр",
+            full_address="",
+            region="Самарская область",
+            city="г. Самара",
+            street="ул. Ленина, 1",
+            coords="",
+            photo_time="",
+            bins="",
+            incident_type="fire",
+            comment="  Баки переполнены  ",
+            photo_files=[],
+        )
     assert incident.incident_type == "fire"
     assert incident.comment == "Баки переполнены"
 
 
 @pytest.mark.asyncio
 async def test_public_service_garbage_incident_type_is_none(fake_session):
-    """Неизвестный код типа не пишется (мусор → None); пустой comment → None."""
+    """Неизвестный код типа (нет в БД) не пишется (мусор → None); пустой comment → None."""
     fake_session.add = MagicMock()
-    incident = await create_incident_from_public_form(
-        fake_session,
-        fio="Волонтёр",
-        full_address="",
-        region="Самарская область",
-        city="г. Самара",
-        street="",
-        coords="",
-        photo_time="",
-        bins="",
-        incident_type="not_a_type",
-        comment="   ",
-        photo_files=[],
-    )
+    # code_exists возвращает False → код отбрасывается (incident_type=None).
+    with patch(
+        "app.services.intake.code_exists", new=AsyncMock(return_value=False)
+    ):
+        incident = await create_incident_from_public_form(
+            fake_session,
+            fio="Волонтёр",
+            full_address="",
+            region="Самарская область",
+            city="г. Самара",
+            street="",
+            coords="",
+            photo_time="",
+            bins="",
+            incident_type="not_a_type",
+            comment="   ",
+            photo_files=[],
+        )
     assert incident.incident_type is None
     assert incident.comment is None
 

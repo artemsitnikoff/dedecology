@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from ...core.permissions import require_admin, require_superadmin
 from .auth import router as auth_router
+from .incident_types import router as incident_types_router
 from .incidents import router as incidents_router
 from .intake import router as intake_router
 from .integration import router as integration_router
@@ -24,6 +25,9 @@ api_router.include_router(incidents_router, prefix="/incidents")
 api_router.include_router(mno_router, prefix="/mno")
 api_router.include_router(regions_router, prefix="/regions")
 api_router.include_router(federal_districts_router, prefix="/federal-districts")
+# Справочник «Типы инцидентов»: GET — авторизованным (гвард get_current_user на
+# роуте), мутации — под require_admin (Depends на каждом мутирующем эндпоинте).
+api_router.include_router(incident_types_router, prefix="/incident-types")
 # Публичный вебхук приёма Яндекс-Формы: БЕЗ auth-dependency — самозащита токеном.
 api_router.include_router(intake_router, prefix="/intake")
 api_router.include_router(
