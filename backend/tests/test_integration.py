@@ -1323,6 +1323,38 @@ async def test_crawler_drills_dense_without_early_stop(monkeypatch):
     assert issues == []  # штатный обход: очередь дренировалась, без обрыва/усечения
 
 
+@pytest.mark.asyncio
+async def test_crawler_stops_when_region_total_reached(monkeypatch):
+    """Ранняя остановка ПО ИТОГУ: как только собрано region_total (сумма iconContent на
+    старт-зуме = счётчик ФГИС), обход прекращается и НЕ домалывает растущую очередь уже
+    найденного (это и есть фикс «долго» на уже собранном регионе)."""
+    monkeypatch.setattr(fgis, "START_CELLS", [(0.0, 0.0, 10.0, 10.0)])
+    monkeypatch.setattr(fgis, "START_Z", 4)
+    monkeypatch.setattr(fgis, "MAX_Z", 20)   # глубоко: без стоп-по-итогу молотило бы тысячи тайлов
+    monkeypatch.setattr(fgis, "CLUSTER_LIMIT", 2)
+    monkeypatch.setattr(fgis, "TILE_CONCURRENCY", 1)
+
+    calls = {"n": 0}
+
+    async def fake_fetch_tile(filter_id, bbox, z):
+        calls["n"] += 1
+        if z == fgis.START_Z:
+            # Итог региона = 3 (iconContent). Кластер >CLUSTER_LIMIT → дробится (не добавляет).
+            return [{"properties": {"layer": 5, "ids": ["x"], "iconContent": "3"}}]
+        # Каждая под-ячейка: 1 НОВЫЙ id + большой кластер (>limit) → дробится, очередь РАСТЁТ.
+        return [
+            {"properties": {"layer": 5, "id": f"m{calls['n']}"}},
+            {"properties": {"layer": 5, "ids": ["x"], "iconContent": "9"}},
+        ]
+
+    monkeypatch.setattr(fgis, "fetch_tile", fake_fetch_tile)
+
+    ids, issues = await fgis.enumerate_region_mno_ids("f", 40)
+    assert len(ids) == 3        # собрали ровно итог региона (3)
+    assert calls["n"] < 15      # остановились рано, а не грызли дробление до MAX_Z=20
+    assert issues == []
+
+
 # --- финализация осиротевших задач при старте воркера (анти-залипание) ---------
 
 

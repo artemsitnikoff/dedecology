@@ -324,6 +324,7 @@ async def enumerate_region_mno_ids(
     truncated = 0
     tile_requests = 0
     rounds = 0                      # раундов обхода (для периодического лога прогресса)
+    region_total = 0                # сумма iconContent на СТАРТ-зуме = всего МНО в регионе (цель)
 
     def _add(pid: str | None) -> None:
         """Регистрирует НОВЫЙ id: в общий set seen и в очередь pending на потоковый флаш."""
@@ -356,6 +357,10 @@ async def enumerate_region_mno_ids(
         for (bbox, z), features in zip(cells, results):
             for f in features:
                 p = f.get("properties") or {}
+                # На СТАРТ-зуме суммируем полное число объектов (iconContent кластера или
+                # +1 за одиночку) — это ИТОГ по региону от ФГИС (цель для ранней остановки).
+                if z == START_Z:
+                    region_total += _safe_int(p.get("iconContent")) if "ids" in p else 1
                 if "ids" in p:  # кластер
                     total = _safe_int(p.get("iconContent"))
                     if total <= CLUSTER_LIMIT:
@@ -384,12 +389,22 @@ async def enumerate_region_mno_ids(
         # проверить отмену, пока on_batch молчит.
         if on_tick is not None:
             await on_tick()
+        # РАННЯЯ ОСТАНОВКА ПО ИТОГУ: собрали все МНО региона (по счётчику ФГИС) — дальше
+        # очередь лишь дробит уже найденное вхолостую (растёт, новых id нет). Это НЕ старое
+        # «плато» (оно стопило по «скучно» ещё на грубом зуме, не добрав города): здесь стоп
+        # срабатывает ТОЛЬКО когда реально собрано региональное ИТОГО, т.е. добурившись всюду.
+        if region_total and len(seen) >= region_total:
+            logger.info(
+                "[fgis] обход: собрано %s из %s (итог ФГИС) — регион собран, стоп (раунд %s, тайлов %s)",
+                len(seen), region_total, rounds, tile_requests,
+            )
+            break
         # Периодический лог хода обхода: видно, движется ли краул (растут tiles/seen) или
         # встал на конкретном раунде (последняя строка = точка затыка + размер очереди).
         if rounds % 25 == 0:
             logger.info(
-                "[fgis] обход: раунд %s, тайлов %s, очередь %s, обнаружено %s, усечено %s",
-                rounds, tile_requests, len(queue), len(seen), truncated,
+                "[fgis] обход: раунд %s, тайлов %s, очередь %s, обнаружено %s из ~%s, усечено %s",
+                rounds, tile_requests, len(queue), len(seen), region_total, truncated,
             )
 
     # Слить остаток (последний неполный батч).
