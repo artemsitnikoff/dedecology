@@ -65,6 +65,21 @@ class Settings(BaseSettings):
     # цитаты остаются на CLAUDE_QUOTE_MODEL.
     CLAUDE_PARSE_MODEL: str = "sonnet"
 
+    # --- Почта волонтёров (плагинный mailer) ---
+    # SMTP пока НЕ настроен → app/services/mailer.py логирует «email not sent» и
+    # возвращает False, а эндпоинты регистрации/сброса кладут токен/ссылку в ОТВЕТ
+    # (для интеграции/тестов) с email_sent=false. Заполнишь SMTP_* → письма уйдут
+    # реально (smtplib), токен из ответа исчезнет. Никаких фейков «письмо отправлено».
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 0
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+
+    # Базовый публичный URL приложения — из него собираются ссылки verify/reset
+    # в письмах волонтёрам (APP_PUBLIC_URL + "/verify?token=..." и т.п.).
+    APP_PUBLIC_URL: str = "https://ecopulse.reo.ru"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

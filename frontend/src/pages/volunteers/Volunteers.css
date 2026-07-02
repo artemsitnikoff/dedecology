@@ -1,0 +1,385 @@
+/* ============================================================
+   Справочник «Волонтёры» — классы скоупим под .de-vol-wrap.
+   Дизайн зеркалит «Типы инцидентов»/«Регионы» (класс-семейства .de-it/.de-reg):
+   те же токены (--ark и --de), те же паттерны шапки/таблицы/пилюль/модалки.
+   Без выдуманных токенов и хардкода цветов/отступов.
+   ============================================================ */
+
+.de-vol-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--bg-1);
+}
+.de-vol-spacer {
+  flex: 1;
+}
+
+/* ---------- Шапка ---------- */
+.de-vol-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 28px 9px;
+  border-bottom: 1px solid var(--border-1);
+  flex: none;
+}
+.de-vol-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--fg-1);
+}
+.de-vol-subtitle {
+  font-size: var(--fs-12);
+  color: var(--fg-3);
+  margin-top: 1px;
+}
+
+/* ---------- Контент / таблица ---------- */
+.de-vol-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-1);
+}
+.de-vol-content::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.de-vol-content::-webkit-scrollbar-thumb {
+  background: var(--ark-gray-300);
+  border-radius: 6px;
+  border: 2px solid var(--bg-1);
+}
+.de-vol-table {
+  min-width: 1080px;
+}
+.de-vol-thead {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  background: var(--bg-panel-2);
+  border-bottom: 1px solid var(--border-1);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+}
+.de-vol-th {
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  color: var(--fg-2);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.de-vol-row {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--bg-1);
+}
+.de-vol-row:hover {
+  background: var(--bg-panel-2);
+}
+
+.de-vol-cell {
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+/* Ширины/выравнивание колонок — общие для thead и строк. */
+.de-vol-c-fio {
+  flex: 1;
+  min-width: 180px;
+}
+.de-vol-c-email {
+  width: 240px;
+}
+.de-vol-c-phone {
+  width: 150px;
+}
+.de-vol-c-verified {
+  width: 160px;
+}
+.de-vol-c-status {
+  width: 150px;
+}
+.de-vol-c-date {
+  width: 120px;
+}
+.de-vol-c-actions {
+  width: 260px;
+  gap: 8px;
+  justify-content: flex-end;
+}
+/* Текст строк (не задевает мелкий uppercase шапки). */
+.de-vol-row .de-vol-c-fio {
+  font-size: 13.5px;
+  color: var(--fg-1);
+  font-weight: 500;
+}
+.de-vol-row .de-vol-c-email {
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  line-height: 52px;
+}
+.de-vol-row .de-vol-c-phone {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+}
+.de-vol-row .de-vol-c-date {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+
+/* ---------- Пилюли статуса ---------- */
+.de-vol-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.de-vol-pill.on {
+  background: var(--ark-green-100);
+  color: var(--ark-green-600);
+}
+.de-vol-pill.off {
+  background: var(--ark-gray-200);
+  color: var(--fg-2);
+}
+.de-vol-pill.block {
+  background: var(--error-bg);
+  color: var(--ark-red-600);
+}
+.de-vol-pill-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* ---------- Кнопки действий в строке ---------- */
+.de-vol-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 7px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+.de-vol-row-btn:hover:not(:disabled) {
+  filter: brightness(0.97);
+  color: var(--fg-1);
+}
+.de-vol-row-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.de-vol-row-btn.danger {
+  color: var(--ark-red-600);
+  border-color: var(--error-border);
+}
+.de-vol-row-btn.danger:hover:not(:disabled) {
+  background: var(--error-bg);
+}
+
+/* ---------- Пустое / служебные состояния ---------- */
+.de-vol-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 32px;
+  text-align: center;
+  color: var(--fg-2);
+}
+.de-vol-empty-mark {
+  font-size: 44px;
+  line-height: 1;
+}
+.de-vol-empty h3 {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.de-vol-empty p {
+  margin: 0;
+  max-width: 380px;
+  font-size: var(--fs-13);
+}
+.de-vol-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 32px;
+  color: var(--fg-2);
+  font-size: var(--fs-14);
+}
+.de-vol-state.error {
+  color: var(--error-fg);
+}
+
+/* ---------- Модалка подтверждения удаления ---------- */
+.de-vol-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(15, 22, 32, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: deFadeVol 0.14s ease;
+}
+.de-vol-modal {
+  width: 480px;
+  max-width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--bg-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  animation: deUpVol 0.18s ease;
+}
+.de-vol-modal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border-2);
+}
+.de-vol-modal-head h2 {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+}
+.de-vol-modal-head-sub {
+  font-size: var(--fs-12);
+  color: var(--fg-3);
+  margin-top: 2px;
+}
+.de-vol-modal-close {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: var(--ark-gray-100);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--fg-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.de-vol-modal-close:hover {
+  background: var(--bg-3-hover);
+}
+.de-vol-modal-body {
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.de-vol-modal-foot {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 16px 22px;
+  border-top: 1px solid var(--border-2);
+}
+.de-vol-modal-cancel {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  cursor: pointer;
+}
+.de-vol-modal-submit {
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 8px;
+  border: 0;
+  background: var(--de-brand);
+  color: var(--ark-white);
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  cursor: pointer;
+}
+.de-vol-modal-submit:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.de-vol-modal-submit.danger {
+  background: var(--ark-red-500);
+}
+
+/* Текст подтверждения удаления */
+.de-vol-confirm-text {
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+.de-vol-confirm-text b {
+  color: var(--fg-1);
+}
+
+@keyframes deFadeVol {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes deUpVol {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -2820,6 +2820,422 @@
         }
       }
     },
+    "/api/v1/volunteer/register": {
+      "post": {
+        "tags": [
+          "Волонтёры (мобильное приложение)"
+        ],
+        "summary": "Register Volunteer",
+        "description": "Регистрация волонтёра. Дубль email → 409. Шлём письмо со ссылкой подтверждения.",
+        "operationId": "register_volunteer_api_v1_volunteer_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolunteerRegister"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerRegisterResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/volunteer/verify-email": {
+      "post": {
+        "tags": [
+          "Волонтёры (мобильное приложение)"
+        ],
+        "summary": "Verify Volunteer Email",
+        "description": "Подтверждение почты по токену из письма. Невалид/протух → 400 INVALID_TOKEN.",
+        "operationId": "verify_volunteer_email_api_v1_volunteer_verify_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolunteerVerifyEmail"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerVerifyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/volunteer/login": {
+      "post": {
+        "tags": [
+          "Волонтёры (мобильное приложение)"
+        ],
+        "summary": "Login Volunteer",
+        "description": "Вход волонтёра. 401 неверные данные · 403 EMAIL_NOT_VERIFIED · 403 BLOCKED.",
+        "operationId": "login_volunteer_api_v1_volunteer_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolunteerLogin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerLoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/volunteer/password/reset-request": {
+      "post": {
+        "tags": [
+          "Волонтёры (мобильное приложение)"
+        ],
+        "summary": "Request Reset",
+        "description": "Запрос сброса пароля. Всегда ok=true (анти-энумерация); токен — только при !email_sent.",
+        "operationId": "request_reset_api_v1_volunteer_password_reset_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolunteerResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerResetRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/volunteer/password/reset": {
+      "post": {
+        "tags": [
+          "Волонтёры (мобильное приложение)"
+        ],
+        "summary": "Do Reset",
+        "description": "Сброс пароля по токену из письма. Невалид/протух → 400 INVALID_TOKEN.",
+        "operationId": "do_reset_api_v1_volunteer_password_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolunteerResetPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/volunteer/onboarding": {
+      "patch": {
+        "tags": [
+          "Волонтёры (мобильное приложение)"
+        ],
+        "summary": "Onboarding",
+        "description": "Онбординг: проставить телефон текущего волонтёра.",
+        "operationId": "onboarding_api_v1_volunteer_onboarding_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolunteerOnboarding"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/volunteer/me": {
+      "get": {
+        "tags": [
+          "Волонтёры (мобильное приложение)"
+        ],
+        "summary": "Me",
+        "description": "Профиль текущего волонтёра.",
+        "operationId": "me_api_v1_volunteer_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerProfile"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/volunteers": {
+      "get": {
+        "tags": [
+          "Справочники"
+        ],
+        "summary": "List Volunteers",
+        "description": "Список волонтёров (новые сверху) для справочника «Волонтёры».",
+        "operationId": "list_volunteers_api_v1_volunteers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VolunteerListItem"
+                  },
+                  "type": "array",
+                  "title": "Response List Volunteers Api V1 Volunteers Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/volunteers/{volunteer_id}/active": {
+      "patch": {
+        "tags": [
+          "Справочники"
+        ],
+        "summary": "Set Volunteer Active",
+        "description": "Блокировка/разблокировка волонтёра (is_active). Нет волонтёра → 404.",
+        "operationId": "set_volunteer_active_api_v1_volunteers__volunteer_id__active_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "volunteer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Volunteer Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolunteerSetActive"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerListItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/volunteers/{volunteer_id}": {
+      "delete": {
+        "tags": [
+          "Справочники"
+        ],
+        "summary": "Delete Volunteer",
+        "description": "Удаляет волонтёра. Нет волонтёра → 404.",
+        "operationId": "delete_volunteer_api_v1_volunteers__volunteer_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "volunteer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Volunteer Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -4155,6 +4571,17 @@
         "title": "MnoSyncStatus",
         "description": "GET /integration/mno/sync/status — прогресс/итог фоновой синхронизации МНО."
       },
+      "OkResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "OkResponse"
+      },
       "Paginated_IncidentListItem_": {
         "properties": {
           "items": {
@@ -4843,6 +5270,348 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VolunteerListItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "email_verified": {
+            "type": "boolean",
+            "title": "Email Verified"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "fio",
+          "email",
+          "phone",
+          "email_verified",
+          "is_active",
+          "created_at"
+        ],
+        "title": "VolunteerListItem",
+        "description": "Строка справочника «Волонтёры» в админке."
+      },
+      "VolunteerLogin": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "VolunteerLogin"
+      },
+      "VolunteerLoginResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "volunteer": {
+            "$ref": "#/components/schemas/VolunteerProfile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "volunteer"
+        ],
+        "title": "VolunteerLoginResponse"
+      },
+      "VolunteerOnboarding": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Phone"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone"
+        ],
+        "title": "VolunteerOnboarding"
+      },
+      "VolunteerProfile": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "fio": {
+            "type": "string",
+            "title": "Fio"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "email_verified": {
+            "type": "boolean",
+            "title": "Email Verified"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "fio",
+          "email",
+          "phone",
+          "email_verified"
+        ],
+        "title": "VolunteerProfile",
+        "description": "Профиль волонтёра для мобильного приложения (/me, онбординг, вложен в логин)."
+      },
+      "VolunteerRegister": {
+        "properties": {
+          "fio": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Fio"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 6,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fio",
+          "email",
+          "password"
+        ],
+        "title": "VolunteerRegister"
+      },
+      "VolunteerRegisterResponse": {
+        "properties": {
+          "volunteer_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Volunteer Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "email_sent": {
+            "type": "boolean",
+            "title": "Email Sent"
+          },
+          "email_verify_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Verify Token"
+          },
+          "verify_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verify Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "volunteer_id",
+          "email",
+          "email_sent"
+        ],
+        "title": "VolunteerRegisterResponse"
+      },
+      "VolunteerResetPassword": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Token"
+          },
+          "new_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 6,
+            "title": "New Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "VolunteerResetPassword"
+      },
+      "VolunteerResetRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "VolunteerResetRequest"
+      },
+      "VolunteerResetRequestResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "email_sent": {
+            "type": "boolean",
+            "title": "Email Sent"
+          },
+          "reset_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Token"
+          },
+          "reset_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email_sent"
+        ],
+        "title": "VolunteerResetRequestResponse"
+      },
+      "VolunteerSetActive": {
+        "properties": {
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_active"
+        ],
+        "title": "VolunteerSetActive"
+      },
+      "VolunteerVerifyEmail": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "VolunteerVerifyEmail"
+      },
+      "VolunteerVerifyResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "email_verified": {
+            "type": "boolean",
+            "title": "Email Verified",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "VolunteerVerifyResponse"
       }
     },
     "securitySchemes": {

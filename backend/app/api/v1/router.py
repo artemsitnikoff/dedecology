@@ -13,6 +13,8 @@ from .profile import router as profile_router
 from .regions import fed_router as federal_districts_router
 from .regions import router as regions_router
 from .users import router as users_router
+from .volunteer import router as volunteer_router
+from .volunteers import router as volunteers_router
 
 api_router = APIRouter()
 
@@ -41,4 +43,13 @@ api_router.include_router(
     integration_router,
     prefix="/integration",
     dependencies=[Depends(require_superadmin)],
+)
+# Волонтёры (мобильное приложение): контур самообслуживания — БЕЗ admin-гейта
+# (регистрация/логин/сброс публичны; /me и /onboarding защищены get_current_volunteer).
+api_router.include_router(volunteer_router, prefix="/volunteer")
+# Админ-справочник «Волонтёры»: просмотр + блокировка/удаление, только admin.
+api_router.include_router(
+    volunteers_router,
+    prefix="/volunteers",
+    dependencies=[Depends(require_admin)],
 )

@@ -5,6 +5,7 @@ from .audit import AuditLog
 from .region import Region
 from .mno import Mno
 from .incident_type import IncidentType
+from .volunteer import Volunteer
 
 __all__ = [
     "Base",
@@ -16,4 +17,5 @@ __all__ = [
     "Region",
     "Mno",
     "IncidentType",
+    "Volunteer",
 ]

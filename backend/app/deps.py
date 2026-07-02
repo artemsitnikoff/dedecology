@@ -6,8 +6,8 @@ from uuid import UUID
 
 from .database import get_db
 from .core.security import decode_token
-from .core.errors import InvalidCredentialsError, UserInactiveError
-from .models import User
+from .core.errors import AppError, InvalidCredentialsError, UserInactiveError
+from .models import User, Volunteer
 
 oauth2_scheme = HTTPBearer()
 
@@ -47,3 +47,45 @@ async def get_current_user(
         raise UserInactiveError()
 
     return user
+
+
+async def get_current_volunteer(
+    token=Depends(oauth2_scheme),
+    session: AsyncSession = Depends(get_db),
+) -> Volunteer:
+    """Текущий волонтёр по логин-токену (typ="volunteer").
+
+    Изоляция: требуем claim typ=="volunteer" → admin access-токен (там "type", не "typ")
+    сюда не пройдёт; sub волонтёра ищем в volunteers (не в users). Любой сбой токена и
+    отсутствие/блокировка волонтёра → 401 NOT_AUTHENTICATED (не раскрываем причину).
+    """
+    unauthenticated = AppError(
+        code="NOT_AUTHENTICATED",
+        message="Требуется авторизация волонтёра",
+        status_code=401,
+    )
+    try:
+        payload = decode_token(token.credentials)
+    except ValueError:
+        raise unauthenticated
+
+    if payload.get("typ") != "volunteer":
+        raise unauthenticated
+
+    vol_id = payload.get("sub")
+    if vol_id is None:
+        raise unauthenticated
+    try:
+        vol_uuid = UUID(vol_id)
+    except (ValueError, TypeError):
+        raise unauthenticated
+
+    result = await session.execute(
+        select(Volunteer).where(Volunteer.id == vol_uuid)
+    )
+    volunteer = result.scalar_one_or_none()
+
+    if volunteer is None or not volunteer.is_active:
+        raise unauthenticated
+
+    return volunteer

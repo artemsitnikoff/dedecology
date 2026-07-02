@@ -26,6 +26,9 @@ const IncidentTypesPage = lazy(() =>
 const IntegrationPage = lazy(() =>
   import('@/pages/integration/IntegrationPage').then((m) => ({ default: m.IntegrationPage }))
 );
+const VolunteersPage = lazy(() =>
+  import('@/pages/volunteers/VolunteersPage').then((m) => ({ default: m.VolunteersPage }))
+);
 const NotFoundPage = lazy(() =>
   import('@/pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage }))
 );
@@ -109,6 +112,7 @@ export default function App() {
         <Route path="mno" element={<MnoPage />} />
         <Route path="regions" element={<RegionsPage />} />
         <Route path="incident-types" element={<IncidentTypesPage />} />
+        <Route path="volunteers" element={<VolunteersPage />} />
         <Route
           path="integration"
           element={

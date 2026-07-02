@@ -91,6 +91,39 @@ class ConflictError(AppError):
         )
 
 
+class InvalidTokenError(AppError):
+    """Битая/просроченная ссылка подтверждения почты или сброса пароля (волонтёр)."""
+
+    def __init__(self, message: str = "Ссылка недействительна или устарела"):
+        super().__init__(
+            code="INVALID_TOKEN",
+            message=message,
+            status_code=400,
+        )
+
+
+class EmailNotVerifiedError(AppError):
+    """Волонтёр не подтвердил почту — вход запрещён (403)."""
+
+    def __init__(self):
+        super().__init__(
+            code="EMAIL_NOT_VERIFIED",
+            message="Подтвердите адрес электронной почты, чтобы войти",
+            status_code=403,
+        )
+
+
+class BlockedError(AppError):
+    """Учётка волонтёра заблокирована администратором (403)."""
+
+    def __init__(self):
+        super().__init__(
+            code="BLOCKED",
+            message="Учётная запись заблокирована",
+            status_code=403,
+        )
+
+
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
