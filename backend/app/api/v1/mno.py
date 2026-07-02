@@ -72,16 +72,20 @@ async def list_mno_points(
     search: str | None = Query(None),
     region: str | None = Query(None),
     synced: bool | None = Query(None),
+    bbox: str | None = Query(
+        None, description="Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)"
+    ),
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Лёгкие координаты МНО для карты (без пагинации, обрезка до лимита).
+    """Лёгкие координаты МНО для карты (обрезка до лимита на КАДР).
 
-    Объявлен ДО /{mno_id} — статический роут раньше параметрического, иначе FastAPI
-    трактует «points» как UUID → 422.
+    bbox — видимая область: при зуме/панораме фронт перезапрашивает точки текущего
+    кадра. Объявлен ДО /{mno_id} — статический роут раньше параметрического, иначе
+    FastAPI трактует «points» как UUID → 422.
     """
     return await mno_service.list_points(
-        session, search=search, region=region, synced=synced
+        session, search=search, region=region, synced=synced, bbox=bbox
     )
 
 

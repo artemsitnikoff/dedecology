@@ -430,6 +430,64 @@ async def test_list_points_service_marks_capped():
     assert resp.points[0].address == "г. Кинель, ул. Маяковского, 41"
 
 
+@pytest.mark.asyncio
+async def test_list_points_applies_bbox_filter():
+    """Валидный bbox → числовой lat/lon-фильтр в WHERE (COUNT и выборка точек)."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 1
+    points_res = MagicMock()
+    points_res.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    resp = await incident_service.list_points(
+        session,
+        search=None,
+        source=None,
+        status=None,
+        date_from=None,
+        date_to=None,
+        region=None,
+        bbox="53.0,50.0,54.0,51.0",
+    )
+
+    assert resp.total == 1
+    count_sql = str(session.execute.call_args_list[0].args[0])
+    points_sql = str(session.execute.call_args_list[1].args[0])
+    for sql in (count_sql, points_sql):
+        assert "incidents.lat IS NOT NULL" in sql
+        assert "incidents.lat BETWEEN" in sql
+        assert "incidents.lon BETWEEN" in sql
+    # bbox-режим не использует прежний фильтр coords != '' (COUNT его не селектит).
+    assert "incidents.coords" not in count_sql
+
+
+@pytest.mark.asyncio
+async def test_list_points_bbox_ignored_when_invalid():
+    """Битый bbox → игнор: прежнее поведение (coords != '', без lat/lon-фильтра)."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 0
+    points_res = MagicMock()
+    points_res.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    await incident_service.list_points(
+        session,
+        search=None,
+        source=None,
+        status=None,
+        date_from=None,
+        date_to=None,
+        region=None,
+        bbox="не-bbox",
+    )
+
+    points_sql = str(session.execute.call_args_list[1].args[0])
+    assert "incidents.coords !=" in points_sql
+    assert "BETWEEN" not in points_sql
+
+
 def test_short_address_joins_nonempty_city_street():
     """_short_address склеивает непустые город/улицу; пустые/пробелы отбрасываются."""
     assert _short_address("Самарская область", "г. Кинель", "ул. Мира, 1") == (

@@ -17,8 +17,10 @@ from ..schemas.incident import (
     IncidentPointsResponse,
 )
 from .audit import audit
+from .geo import parse_bbox
 
-# Максимум точек инцидентов, отдаваемых карте за раз (карта не грузит весь реестр).
+# Максимум точек инцидентов, отдаваемых карте за КАДР (bbox) или глобально
+# (карта не грузит весь реестр).
 MAX_POINTS = 3000
 
 # Порядок статусов в БД для сортировки `status` (new < found < none < exported)
@@ -300,16 +302,28 @@ async def list_points(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     region: str | None = None,
+    bbox: str | None = None,
 ) -> IncidentPointsResponse:
     """Лёгкие координаты инцидентов для карты: те же фильтры, что у списка (без sort/page).
 
-    Учитываются только строки с непустыми координатами. total — их число по фильтру;
-    points — первые MAX_POINTS таких строк; capped=True — total превысил лимит и points обрезаны.
+    bbox («minLat,minLon,maxLat,maxLon») — видимая область карты: при зуме/панораме
+    фронт перезапрашивает точки текущего кадра, так постепенно виден весь набор.
+      - bbox задан и валиден → фильтр по числовым lat/lon (индекс ix_incidents_lat_lon)
+        + существующие фильтры; total = COUNT по этому кадру.
+      - bbox не задан/битый → прежнее поведение: все инциденты по фильтрам с непустыми coords.
+    В обоих случаях points — первые MAX_POINTS строк; capped=True — total превысил лимит.
     """
     filters = _base_filters(search, source, date_from, date_to, region)
     if status:
         filters.append(Incident.status.in_(status))
-    filters.append(Incident.coords != "")
+    box = parse_bbox(bbox)
+    if box is not None:
+        min_lat, min_lon, max_lat, max_lon = box
+        filters.append(Incident.lat.is_not(None))
+        filters.append(Incident.lat.between(min_lat, max_lat))
+        filters.append(Incident.lon.between(min_lon, max_lon))
+    else:
+        filters.append(Incident.coords != "")
     where_clause = and_(*filters)
 
     total = (

@@ -34,8 +34,21 @@ export interface YGeoObjects {
   getBounds: () => YBounds | null;
 }
 
+/**
+ * Менеджер событий карты (Yandex Maps 2.1). Используем только add/remove по имени
+ * события ('boundschange'); объект события нам не нужен — текущую область берём из
+ * map.getBounds().
+ */
+export interface YEventManager {
+  add: (type: string, handler: (event?: unknown) => void) => void;
+  remove: (type: string, handler: (event?: unknown) => void) => void;
+}
+
 export interface YMap {
   geoObjects: YGeoObjects;
+  events: YEventManager;
+  /** Текущая видимая область карты в порядке Яндекса [[юг,запад],[север,восток]]. */
+  getBounds: () => YBounds | null;
   setBounds: (bounds: YBounds, opts?: { checkZoomRange?: boolean }) => void;
   destroy: () => void;
 }

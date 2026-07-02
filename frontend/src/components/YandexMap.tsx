@@ -13,6 +13,13 @@ export type MapPoint = {
 type Props = {
   points: MapPoint[];
   className?: string;
+  /**
+   * Вызывается при смене видимой области карты (с дебаунсом ~400мс) и один раз при
+   * инициализации — чтобы страница узнала стартовый кадр. bbox в порядке
+   * [minLat, minLon, maxLat, maxLon]. Наличие пропа включает «viewport-режим»:
+   * страница догружает точки текущего кадра.
+   */
+  onBoundsChange?: (bbox: [number, number, number, number]) => void;
 };
 
 /**
@@ -36,12 +43,25 @@ function parseCoords(raw: string): [number, number] | null {
  * не загрузился — честно рендерит плашку «Карта недоступна…», без фейковых пинов.
  * Карта инициализируется один раз; при смене `points` ObjectManager пересобирается.
  */
-export function YandexMap({ points, className }: Props) {
+export function YandexMap({ points, className, onBoundsChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<YMap | null>(null);
   const omRef = useRef<YObjectManager | null>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+
+  // Последний onBoundsChange держим в ref: слушатель события навешивается один раз при
+  // инициализации карты, а проп меняется на каждом рендере страницы (стрелка).
+  const onBoundsChangeRef = useRef(onBoundsChange);
+  useEffect(() => {
+    onBoundsChangeRef.current = onBoundsChange;
+  });
+
+  // Таймер дебаунса boundschange (чистится в cleanup и перед каждым новым событием).
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Авто-подгон вида под точки делаем ТОЛЬКО ОДИН РАЗ — иначе setBounds → boundschange →
+  // refetch → снова подгон зациклится (в viewport-режиме).
+  const fittedOnce = useRef(false);
 
   const configured = isYandexKeyConfigured();
 
@@ -49,6 +69,24 @@ export function YandexMap({ points, className }: Props) {
   useEffect(() => {
     if (!configured) return;
     let cancelled = false;
+    let mapInstance: YMap | null = null;
+
+    // Отдаёт текущую область карты странице (порядок [minLat, minLon, maxLat, maxLon]).
+    const emitBounds = (map: YMap) => {
+      const cb = onBoundsChangeRef.current;
+      if (!cb) return;
+      const bounds = map.getBounds();
+      if (!bounds) return;
+      const [[minLat, minLon], [maxLat, maxLon]] = bounds;
+      cb([minLat, minLon, maxLat, maxLon]);
+    };
+    // boundschange прилетает часто (во время зума/панорамы) — дебаунсим ~400мс.
+    const handleBoundsChange = () => {
+      const map = mapRef.current;
+      if (!map) return;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => emitBounds(map), 400);
+    };
 
     loadYmaps()
       .then((ymaps) => {
@@ -66,7 +104,12 @@ export function YandexMap({ points, className }: Props) {
         map.geoObjects.add(om);
         mapRef.current = map;
         omRef.current = om;
+        mapInstance = map;
+        // Подписка на смену видимой области (догрузка точек по кадру).
+        map.events.add('boundschange', handleBoundsChange);
         setReady(true);
+        // Стартовый bbox — сразу (без дебаунса), чтобы страница узнала первый кадр.
+        emitBounds(map);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -75,6 +118,11 @@ export function YandexMap({ points, className }: Props) {
     return () => {
       cancelled = true;
       setReady(false);
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      if (mapInstance) mapInstance.events.remove('boundschange', handleBoundsChange);
       if (mapRef.current) {
         mapRef.current.destroy();
         mapRef.current = null;
@@ -104,10 +152,14 @@ export function YandexMap({ points, className }: Props) {
     }
     om.add({ type: 'FeatureCollection', features });
 
-    // Подгоняем вид под точки (если они есть и границы посчитались).
-    if (features.length > 0) {
+    // Подгоняем вид под точки ТОЛЬКО ОДИН РАЗ — при первом непустом наборе. Дальше не
+    // трогаем вид: иначе setBounds → boundschange → refetch → подгон зациклится.
+    if (features.length > 0 && !fittedOnce.current) {
       const bounds = map.geoObjects.getBounds();
-      if (bounds) map.setBounds(bounds, { checkZoomRange: true });
+      if (bounds) {
+        map.setBounds(bounds, { checkZoomRange: true });
+        fittedOnce.current = true;
+      }
     }
   }, [points, ready]);
 

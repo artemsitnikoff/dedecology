@@ -191,8 +191,11 @@ export function IncidentsPage() {
   // ----- Локальный UI-стейт -----
   // Режим отображения: список (таблица) или настоящая Яндекс.Карта. Фильтры общие (из URL).
   const [view, setView] = useState<'list' | 'map'>('list');
+  // Видимая область карты «minLat,minLon,maxLat,maxLon» — задаётся картой (boundschange
+  // + стартовый кадр). Догружаем точки текущего кадра; undefined до инициализации карты.
+  const [mapBbox, setMapBbox] = useState<string | undefined>(undefined);
   // Точки карты — отдельный лёгкий запрос /incidents/points, только в режиме «Карта».
-  const pointsQuery = useIncidentPoints(filters, { enabled: view === 'map' });
+  const pointsQuery = useIncidentPoints({ ...filters, bbox: mapBbox }, { enabled: view === 'map' });
   const points = pointsQuery.data?.points ?? [];
   const pointsTotal = pointsQuery.data?.total ?? points.length;
   const pointsCapped = pointsQuery.data?.capped ?? false;
@@ -505,10 +508,11 @@ export function IncidentsPage() {
                   coords: p.coords,
                   label: p.address || p.status,
                 }))}
+                onBoundsChange={([a, b, c, d]) => setMapBbox(`${a},${b},${c},${d}`)}
               />
               {pointsCapped && (
                 <div className="de-inc-map-cap">
-                  показано {points.length} из {pointsTotal}
+                  показано {points.length} из {pointsTotal} в этой области
                 </div>
               )}
             </div>

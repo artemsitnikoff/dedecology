@@ -496,7 +496,7 @@
           "Админский реестр"
         ],
         "summary": "List Incident Points",
-        "description": "Лёгкие координаты инцидентов для карты (без пагинации, обрезка до лимита).\n\nТе же фильтры, что у списка (search/source/status/region/period), без sort/page.\nОбъявлен ДО /{incident_id} — статический роут раньше параметрического, иначе\nFastAPI трактует «points» как UUID → 422.",
+        "description": "Лёгкие координаты инцидентов для карты (обрезка до лимита на КАДР).\n\nТе же фильтры, что у списка (search/source/status/region/period), без sort/page,\nплюс bbox — видимая область: при зуме/панораме фронт перезапрашивает точки кадра.\nОбъявлен ДО /{incident_id} — статический роут раньше параметрического, иначе\nFastAPI трактует «points» как UUID → 422.",
         "operationId": "list_incident_points_api_v1_incidents_points_get",
         "security": [
           {
@@ -607,6 +607,24 @@
               ],
               "title": "Region"
             }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)",
+              "title": "Bbox"
+            },
+            "description": "Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)"
           }
         ],
         "responses": {
@@ -1222,7 +1240,7 @@
           "Карта и МНО"
         ],
         "summary": "List Mno Points",
-        "description": "Лёгкие координаты МНО для карты (без пагинации, обрезка до лимита).\n\nОбъявлен ДО /{mno_id} — статический роут раньше параметрического, иначе FastAPI\nтрактует «points» как UUID → 422.",
+        "description": "Лёгкие координаты МНО для карты (обрезка до лимита на КАДР).\n\nbbox — видимая область: при зуме/панораме фронт перезапрашивает точки текущего\nкадра. Объявлен ДО /{mno_id} — статический роут раньше параметрического, иначе\nFastAPI трактует «points» как UUID → 422.",
         "operationId": "list_mno_points_api_v1_mno_points_get",
         "security": [
           {
@@ -1277,6 +1295,24 @@
               ],
               "title": "Synced"
             }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)",
+              "title": "Bbox"
+            },
+            "description": "Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)"
           }
         ],
         "responses": {

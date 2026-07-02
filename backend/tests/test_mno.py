@@ -255,6 +255,52 @@ async def test_list_points_service_marks_capped():
     assert resp.points[0].coords == "53.2, 50.6"
 
 
+@pytest.mark.asyncio
+async def test_list_points_applies_bbox_filter():
+    """Валидный bbox → числовой lat/lon-фильтр в WHERE (COUNT и выборка точек)."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 1
+    row = MagicMock(id=uuid4(), coords="53.2, 50.6")
+    row.name = "Площадка A"
+    points_res = MagicMock()
+    points_res.all.return_value = [row]
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    resp = await mno_service.list_points(
+        session, search=None, region=None, synced=None, bbox="53.0,50.0,54.0,51.0"
+    )
+
+    assert resp.total == 1
+    count_sql = str(session.execute.call_args_list[0].args[0])
+    points_sql = str(session.execute.call_args_list[1].args[0])
+    for sql in (count_sql, points_sql):
+        assert "mno.lat IS NOT NULL" in sql
+        assert "mno.lat BETWEEN" in sql
+        assert "mno.lon BETWEEN" in sql
+    # bbox-режим не использует прежний фильтр coords != '' (COUNT его не селектит).
+    assert "mno.coords" not in count_sql
+
+
+@pytest.mark.asyncio
+async def test_list_points_bbox_ignored_when_invalid():
+    """Битый bbox → игнор: прежнее поведение (coords != '', без lat/lon-фильтра)."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 0
+    points_res = MagicMock()
+    points_res.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    await mno_service.list_points(
+        session, search=None, region=None, synced=None, bbox="garbage"
+    )
+
+    points_sql = str(session.execute.call_args_list[1].args[0])
+    assert "mno.coords !=" in points_sql
+    assert "BETWEEN" not in points_sql
+
+
 # --- _filters ------------------------------------------------------------------
 
 

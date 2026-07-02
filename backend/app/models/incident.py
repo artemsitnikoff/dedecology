@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, CheckConstraint, Integer, Text, text
+from sqlalchemy import String, Boolean, CheckConstraint, Float, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,6 +32,10 @@ class Incident(Base, TimestampMixin):
     street: Mapped[str] = mapped_column(String(500), nullable=False, server_default=text("''"))
     # "lat, lon" текстом
     coords: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))
+    # Числовые координаты (миграция 0009): дублируют coords для быстрого bbox-фильтра
+    # карты по индексу ix_incidents_lat_lon. NULL — coords пусты/невалидны.
+    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # ПРОЧАЯ не-адресная информация из свободного текста обращения: «Радар №…»,
     # ФИО заявителя (если есть в тексте), описание проблемы («Баки раздельного
     # сбора отсутствуют»), заметки. Раньше AI это выкидывал; NULL — нет/не извлечено.

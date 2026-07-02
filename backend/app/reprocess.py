@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .database import AsyncSessionLocal
 from .models import Incident
 from .services.audit import audit
+from .services.geo import parse_latlon
 from .services.incident_parse import ai_parse_incident
 from .services.intake import resolve_address
 
@@ -119,6 +120,8 @@ async def reprocess(session: AsyncSession, *, apply: bool, process_all: bool) ->
                 inc.city = new_city
                 inc.street = new_street
                 inc.coords = final_coords
+                # Держим числовые lat/lon в синхроне с coords для bbox-фильтра карты.
+                inc.lat, inc.lon = parse_latlon(final_coords)
                 inc.comment = final_comment
                 after = {
                     "region": new_region, "city": new_city,

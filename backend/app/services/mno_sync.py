@@ -25,6 +25,7 @@ from ..schemas.integration import (
     RegionsSyncResult,
 )
 from . import fgis
+from .geo import parse_latlon
 from .region_fed import region_fed
 
 
@@ -45,6 +46,10 @@ async def _upsert_batch(
         lat = loc.get("latitude")
         lon = loc.get("longitude")
         coords = f"{lat}, {lon}" if lat is not None and lon is not None else ""
+        # Числовые lat/lon для bbox-фильтра карты. У ФГИС координаты уже числовые —
+        # прогоняем через parse_latlon (НЕ бросает), чтобы мусор/None дал NULL, а не
+        # уронил транзакцию региона (см. защитную подрезку прочих полей ниже).
+        lat_num, lon_num = parse_latlon(coords)
         city = str(o.get("area") or o.get("population") or "")
         values = {
             # Защитная подрезка под лимиты колонок: ФГИС присылает длинные значения
@@ -56,6 +61,8 @@ async def _upsert_batch(
             "city": city[:255],
             "address": o.get("address") or "",
             "coords": coords[:64],
+            "lat": lat_num,
+            "lon": lon_num,
             "synced": True,
             "sync_date": now,
         }

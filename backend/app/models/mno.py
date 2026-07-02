@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, Integer, Text, text
+from sqlalchemy import String, Boolean, Float, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,10 @@ class Mno(Base, TimestampMixin):
     address: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     # "широта, долгота" текстом (как у инцидента)
     coords: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))
+    # Числовые координаты (миграция 0009): дублируют coords для быстрого bbox-фильтра
+    # карты по индексу ix_mno_lat_lon. NULL — coords пусты/невалидны (точка не на карте).
+    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # ID в ФГИС. NULL — МНО заведено вручную и в ФГИС ещё не выгружено.
     fgis_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # Синхронизировано с ФГИС (ЗАГЛУШКА — реальной интеграции нет, см. сервис)

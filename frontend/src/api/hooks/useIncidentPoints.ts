@@ -10,9 +10,13 @@ import type { IncidentFilters } from './useIncidents';
  * и список (search/source/status/region/period), но sort/page карте не нужны — их
  * отбрасываем (бэк их всё равно игнорирует). Карта не грузит полный реестр — это
  * отдельный запрос, включаемый только в режиме «Карта» (options.enabled).
+ *
+ * bbox («minLat,minLon,maxLat,maxLon») — видимая область карты: сервер отдаёт точки
+ * только текущего кадра (кап на кадр), так постепенно виден весь регион. bbox входит
+ * в queryKey → смена кадра автоматически перезапрашивает точки.
  */
 export function useIncidentPoints(
-  filters: IncidentFilters,
+  filters: IncidentFilters & { bbox?: string },
   options?: { enabled?: boolean }
 ) {
   return useQuery({
@@ -23,6 +27,7 @@ export function useIncidentPoints(
       params.delete('order');
       params.delete('page');
       params.delete('page_size');
+      if (filters.bbox) params.set('bbox', filters.bbox);
       const qs = params.toString();
       const res = await api.get<IncidentPointsResponse>(
         `/incidents/points${qs ? `?${qs}` : ''}`

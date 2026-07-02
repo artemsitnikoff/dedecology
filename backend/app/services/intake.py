@@ -22,6 +22,7 @@ from ..models import Incident
 from .addr_norm import normalize_city, normalize_region
 from .audit import audit
 from .dadata import clean_address, geocode_address
+from .geo import parse_latlon
 from . import parse_log
 from .incident_parse import ai_parse_incident
 
@@ -185,6 +186,8 @@ async def create_incident_from_form(
     photo_time = _parse_photo_time(params.get("photo_time"))
     photo_urls = _parse_photo_urls(params.get("photos"))
     photos = max(0, min(3, len(photo_urls)))
+    # Числовые lat/lon для bbox-фильтра карты (NULL, если coords пусты/невалидны).
+    lat, lon = parse_latlon(coords)
 
     incident = Incident(
         source="form",
@@ -194,6 +197,8 @@ async def create_incident_from_form(
         city=city,
         street=street,
         coords=coords or "",
+        lat=lat,
+        lon=lon,
         photo_time=photo_time,
         photos=photos,
         photo_urls=photo_urls,
@@ -401,6 +406,9 @@ async def create_incident_from_max(
     if parsed_photo_time is None:
         parsed_photo_time = _parse_photo_time(photo_time)
 
+    # Числовые lat/lon для bbox-фильтра карты (NULL, если coords пусты/невалидны).
+    lat, lon = parse_latlon(coords)
+
     incident = Incident(
         source="max",
         status="new",
@@ -409,6 +417,8 @@ async def create_incident_from_max(
         city=city,
         street=street,
         coords=coords or "",
+        lat=lat,
+        lon=lon,
         comment=comment,
         photo_time=parsed_photo_time,
         photos=0,
@@ -608,6 +618,9 @@ async def create_incident_from_public_form(
     # 400 без записи в БД.
     decoded = await _decode_uploads(photo_files)
 
+    # Числовые lat/lon для bbox-фильтра карты (NULL, если coords пусты/невалидны).
+    lat, lon = parse_latlon(coords)
+
     incident = Incident(
         source="form",
         status="new",
@@ -616,6 +629,8 @@ async def create_incident_from_public_form(
         city=city,
         street=street,
         coords=coords or "",
+        lat=lat,
+        lon=lon,
         photo_time=parsed_photo_time,
         photos=0,
         photo_urls=[],

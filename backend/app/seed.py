@@ -15,6 +15,7 @@ from .config import settings
 from .core.security import get_password_hash
 from .database import AsyncSessionLocal
 from .models import Incident, Mno, Region, User
+from .services.geo import parse_latlon
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -156,6 +157,7 @@ async def seed_incidents(session: AsyncSession) -> None:
         logger.info("Инциденты уже засеяны (%d шт.) — пропускаю", existing_count)
         return
     for spec in DEMO_INCIDENTS:
+        lat, lon = parse_latlon(spec["coords"])
         session.add(
             Incident(
                 source=spec["source"],
@@ -165,6 +167,8 @@ async def seed_incidents(session: AsyncSession) -> None:
                 city=spec["city"],
                 street=spec["street"],
                 coords=spec["coords"],
+                lat=lat,
+                lon=lon,
                 photo_time=_parse_photo_time(spec["photoTime"]),
                 photos=spec["photos"],
                 photo_urls=_placeholder_urls(spec["photos"]),
@@ -207,6 +211,7 @@ async def seed_mno(session: AsyncSession) -> None:
         logger.info("МНО уже засеяны (%d шт.) — пропускаю", existing_count)
         return
     for spec in DEMO_MNO:
+        lat, lon = parse_latlon(spec["coords"])
         session.add(
             Mno(
                 reg=spec["reg"],
@@ -215,6 +220,8 @@ async def seed_mno(session: AsyncSession) -> None:
                 city=spec["city"],
                 address=spec["address"],
                 coords=spec["coords"],
+                lat=lat,
+                lon=lon,
                 fgis_id=spec["fgisId"],
                 synced=spec["synced"],
                 sync_date=_parse_received(spec["syncDate"]) if spec["syncDate"] else None,

@@ -24,8 +24,9 @@ from ..schemas.mno import (
     MnoSyncResult,
 )
 from .audit import audit
+from .geo import parse_bbox, parse_latlon
 
-# Максимум точек, отдаваемых карте за раз (карта не грузит весь реестр).
+# Максимум точек, отдаваемых карте за КАДР (bbox) или глобально (карта не грузит весь реестр).
 MAX_POINTS = 2000
 
 # sort-ключ из API → колонка модели. region сортируется по коду субъекта.
@@ -185,15 +186,30 @@ async def list_points(
     search: str | None = None,
     region: str | None = None,
     synced: bool | None = None,
+    bbox: str | None = None,
 ) -> MnoPointsResponse:
     """Лёгкие координаты МНО для карты: те же фильтры, без имён регионов.
 
-    total — всего МНО по фильтру; points — первые MAX_POINTS строк с непустыми
-    координатами; capped=True — total превысил лимит и points обрезаны.
+    bbox («minLat,minLon,maxLat,maxLon») — видимая область карты: при зуме/панораме
+    фронт перезапрашивает точки текущего кадра, так постепенно виден весь регион.
+      - bbox задан и валиден → фильтр по числовым lat/lon (индекс ix_mno_lat_lon) +
+        существующие фильтры; total = COUNT по этому кадру.
+      - bbox не задан/битый → прежнее поведение: все МНО по фильтрам с непустыми coords.
+    В обоих случаях points — первые MAX_POINTS строк; capped=True — total превысил лимит.
     """
-    total = await _count(session, search=search, region=region, synced=synced)
     filters = _filters(search, region, synced)
-    filters.append(Mno.coords != "")
+    box = parse_bbox(bbox)
+    if box is not None:
+        min_lat, min_lon, max_lat, max_lon = box
+        filters.append(Mno.lat.is_not(None))
+        filters.append(Mno.lat.between(min_lat, max_lat))
+        filters.append(Mno.lon.between(min_lon, max_lon))
+        total = (
+            await session.execute(select(func.count(Mno.id)).where(*filters))
+        ).scalar_one()
+    else:
+        total = await _count(session, search=search, region=region, synced=synced)
+        filters.append(Mno.coords != "")
     stmt = (
         select(Mno.id, Mno.coords, Mno.name)
         .where(*filters)
@@ -228,9 +244,14 @@ async def create_mno(session: AsyncSession, data, actor_user_id: uuid.UUID) -> M
 
     Появится в ФГИС только после синхронизации (заглушки). Аудит — на создание.
     """
+    coords = data.coords.strip()
+    # Числовые lat/lon для bbox-фильтра карты (NULL, если coords пусты/невалидны).
+    lat, lon = parse_latlon(coords)
     mno = Mno(
         name=data.name.strip(),
-        coords=data.coords.strip(),
+        coords=coords,
+        lat=lat,
+        lon=lon,
         reg=(data.reg or "").strip(),
         region_code=(data.region_code or "").strip(),
         city=(data.city or "").strip(),

@@ -65,9 +65,13 @@ export function useMno(filters: MnoFilters) {
  * GET /mno/points — лёгкие координаты МНО для карты (без пагинации; сервер обрезает
  * до лимита и сообщает capped/total). Принимает только search/region/synced — БЕЗ
  * page/sort. Карта не грузит полный реестр, поэтому это отдельный запрос.
+ *
+ * bbox («minLat,minLon,maxLat,maxLon») — видимая область карты: сервер отдаёт точки
+ * только текущего кадра (кап на кадр), так постепенно виден весь регион. bbox входит
+ * в queryKey → смена кадра автоматически перезапрашивает точки.
  */
 export function useMnoPoints(
-  filters: Pick<MnoFilters, 'search' | 'region' | 'synced'>,
+  filters: Pick<MnoFilters, 'search' | 'region' | 'synced'> & { bbox?: string },
   options?: { enabled?: boolean }
 ) {
   return useQuery({
@@ -77,6 +81,7 @@ export function useMnoPoints(
       if (filters.search?.trim()) params.set('search', filters.search.trim());
       if (filters.region) params.set('region', filters.region);
       if (typeof filters.synced === 'boolean') params.set('synced', String(filters.synced));
+      if (filters.bbox) params.set('bbox', filters.bbox);
       const qs = params.toString();
       const res = await api.get<MnoPointsResponse>(`/mno/points${qs ? `?${qs}` : ''}`);
       return res.data;

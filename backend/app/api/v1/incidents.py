@@ -135,12 +135,16 @@ async def list_incident_points(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     region: str | None = Query(None),
+    bbox: str | None = Query(
+        None, description="Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)"
+    ),
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Лёгкие координаты инцидентов для карты (без пагинации, обрезка до лимита).
+    """Лёгкие координаты инцидентов для карты (обрезка до лимита на КАДР).
 
-    Те же фильтры, что у списка (search/source/status/region/period), без sort/page.
+    Те же фильтры, что у списка (search/source/status/region/period), без sort/page,
+    плюс bbox — видимая область: при зуме/панораме фронт перезапрашивает точки кадра.
     Объявлен ДО /{incident_id} — статический роут раньше параметрического, иначе
     FastAPI трактует «points» как UUID → 422.
     """
@@ -152,6 +156,7 @@ async def list_incident_points(
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
         region=region,
+        bbox=bbox,
     )
 
 

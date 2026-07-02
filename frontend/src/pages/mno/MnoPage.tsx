@@ -134,6 +134,9 @@ export function MnoPage() {
   const [fSync, setFSync] = useState<Array<'fgis' | 'manual'>>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sub, setSub] = useState<'list' | 'map'>('list');
+  // Видимая область карты «minLat,minLon,maxLat,maxLon» — задаётся картой (boundschange
+  // + стартовый кадр). Догружаем точки текущего кадра; undefined до инициализации карты.
+  const [mapBbox, setMapBbox] = useState<string | undefined>(undefined);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -182,7 +185,7 @@ export function MnoPage() {
   const allQuery = useMno({}); // нефильтрованный итог (дедуп с Sidebar)
   // Точки карты — отдельный лёгкий запрос, только когда активен под-режим «Карта».
   const pointsQuery = useMnoPoints(
-    { search: query || undefined, region: fRegion || undefined, synced: syncedFilter },
+    { search: query || undefined, region: fRegion || undefined, synced: syncedFilter, bbox: mapBbox },
     { enabled: sub === 'map' }
   );
   const regionsQuery = useRegionsDirectory({});
@@ -532,10 +535,11 @@ export function MnoPage() {
               <YandexMap
                 className="de-mno-ymap"
                 points={points.map((p) => ({ id: p.id, coords: p.coords, label: p.name }))}
+                onBoundsChange={([a, b, c, d]) => setMapBbox(`${a},${b},${c},${d}`)}
               />
               {pointsCapped && (
                 <div className="de-mno-map-cap">
-                  показано {points.length} из {pointsTotal}
+                  показано {points.length} из {pointsTotal} в этой области
                 </div>
               )}
             </div>
