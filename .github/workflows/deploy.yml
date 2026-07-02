@@ -53,6 +53,12 @@
               fi
 
               docker compose -f docker-compose.prod.yml up -d
+              # worker крутит старый код, а nginx фронта кэширует старый IP backend (502) —
+                # форсируем пересоздание обоих при смене backend.
+                if [ -n "$REBUILD_BACK" ]; then 
+                  echo "Force-recreate worker + frontend on new backend"
+                  docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps worker frontend
+                fi
   
               # Миграции применяем ТОЛЬКО если менялись файлы версий alembic.
               if echo "$CHANGED" | grep -qE "^backend/alembic/versions/"; then
