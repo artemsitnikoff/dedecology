@@ -162,7 +162,9 @@ docker compose -f docker-compose.prod.yml run --rm backend python -m app.seed
 - `docker compose -f docker-compose.prod.yml ps` — все контейнеры `Up`/`healthy`?
 - Порт 8888 открыт И в ufw, И в облачном firewall? (частая причина — облачный SG).
 - `... logs backend` — нет ошибок подключения к БД? (проверь, что `DATABASE_URL` пароль == `POSTGRES_PASSWORD`).
-- 502 на `/api/...` — backend ещё поднимается или упал; смотри его логи.
+- 502 на `/api/...` — либо backend ещё поднимается/упал (`... logs backend`), ЛИБО фронт-nginx
+  закэшировал старый IP backend после его пересоздания → `docker compose -f docker-compose.prod.yml
+  restart frontend` (nginx перечитает адрес). Деплой (§6.5) теперь пересоздаёт frontend сам.
 - Логин не держится / сразу разлогинивает — убедись, что `SESSION_COOKIE_SECURE=False` при заходе по HTTP.
 
 ## 9. Бэкап БД
@@ -178,3 +180,40 @@ bash scripts/restore-db.sh backups/dedecolog_ГГГГММДД_ЧЧММСС.dump
   (`scp`/облако) — на том же диске это НЕ резервная копия.
 - Авто-расписание (ежедневно 3:30) — добавь в `crontab -e`:
   `30 3 * * * bash /var/www/dedecology/scripts/backup-db.sh >> /var/www/dedecology/backups/backup.log 2>&1`
+
+## 10. Синхронизация ФГИС УТКО (раздел «Интеграция») — эксплуатация и разбор «висит»
+Фоновый краул МНО исполняет сервис `worker` (arq), прогресс — в Redis, запуск/отмена — из UI
+(супер-админ, `/integration`).
+
+**Смотреть вживую:**
+```bash
+docker compose -f docker-compose.prod.yml logs -f worker
+```
+Пишется КАЖДЫЙ батч (`[mno_worker] регион N батч #K [ok|timeout|error]: … | X.Xс`) и ход обхода
+каждые 25 раундов (`[fgis] обход: раунд R … обнаружено X из ~Y`). Тишина после старта задачи =
+логи приложения заглушены → воркер на СТАРОМ коде (см. ниже про force-recreate).
+
+**Как устроено (чтобы не гадать при «висит/долго»):**
+- Обход стоп, как только `обнаружено >= итог региона` (ФГИС даёт итог суммой `iconContent` на
+  грубом зуме) — уже собранный регион НЕ домалывается вхолостую (иначе очередь растёт часами).
+- На каждый батч деталей — таймаут `DETAIL_TIMEOUT=120с`: ФГИС молчит → батч `[timeout]`,
+  пропускается (доберётся при повторе), синк идёт дальше. **Вечно висеть не может.**
+- Сбой батча (сеть/длина поля) → `session.rollback()` + пропуск, регион не падает каскадом.
+- Возобновление дешёвое: уже записанные МНО (по `fgis_id`) пропускаются (счётчик `skipped`).
+
+**Убить очередь / зависшую задачу** (данные в Postgres и маркеры `region_synced` НЕ трогаем):
+```bash
+docker compose -f docker-compose.prod.yml exec redis sh -c 'redis-cli del arq:queue; for k in $(redis-cli --scan --pattern "mno:ptr:*") $(redis-cli --scan --pattern "mno:cancel:*") $(redis-cli --scan --pattern "arq:job:*"); do redis-cli del "$k"; done; echo cleared'
+docker compose -f docker-compose.prod.yml restart worker    # добьёт КРУТЯЩУЮСЯ задачу
+```
+⚠️ НЕ `flushall` — снесёт `mno:region_synced:*` (маркеры собранных регионов) и внутренности arq.
+
+**Грабли: worker может крутить СТАРЫЙ код.** `worker` переиспользует образ `dedecology-backend:latest`
+(без своего `build:`), а `docker compose up -d` не всегда пересоздаёт его под свежесобранный образ.
+Деплой (§6.5) теперь форсит это сам (`up -d --force-recreate --no-deps worker frontend` при смене
+backend). Вручную:
+```bash
+docker compose -f docker-compose.prod.yml build backend
+docker compose -f docker-compose.prod.yml up -d --force-recreate backend worker frontend
+docker compose -f docker-compose.prod.yml exec worker grep -c region_total app/services/fgis.py  # ≥1 = новый код
+```
