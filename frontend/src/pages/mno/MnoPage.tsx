@@ -287,6 +287,11 @@ export function MnoPage() {
   const points = pointsQuery.data?.points ?? [];
   const pointsTotal = pointsQuery.data?.total ?? points.length;
   const pointsCapped = pointsQuery.data?.capped ?? false;
+  // Мемо — чтобы YandexMap не пересобирал маркеры на каждый ре-рендер страницы.
+  const mapPoints = useMemo(
+    () => points.map((p) => ({ id: p.id, coords: p.coords, label: p.name })),
+    [points],
+  );
 
   return (
     <div className="de-mno-wrap">
@@ -516,34 +521,24 @@ export function MnoPage() {
       {/* Контент: карта (настоящая Яндекс.Карта с кластеризацией) */}
       {sub === 'map' && (
         <div className="de-mno-map-area">
-          {pointsQuery.isLoading ? (
-            <div className="de-mno-map">
-              <div className="de-mno-map-empty">
-                <div className="de-mno-map-empty-title">Загрузка точек…</div>
-              </div>
+          {/* Карта смонтирована ВСЕГДА — загрузку показываем подписью-оверлеем, НЕ заменой
+              (иначе refetch по bbox размонтировал бы карту и сбрасывал вид → цикл). */}
+          <div className="de-mno-map-wrap">
+            <YandexMap
+              className="de-mno-ymap"
+              points={mapPoints}
+              onBoundsChange={([a, b, c, d]) => setMapBbox(`${a},${b},${c},${d}`)}
+            />
+            <div className="de-mno-map-cap">
+              {pointsQuery.isError
+                ? 'не удалось загрузить точки'
+                : pointsQuery.isFetching
+                  ? 'обновление точек…'
+                  : pointsCapped
+                    ? `показано ${points.length} из ${pointsTotal} в этой области`
+                    : `${points.length} точек`}
             </div>
-          ) : pointsQuery.isError ? (
-            <div className="de-mno-map">
-              <div className="de-mno-map-empty">
-                <Pin size={40} />
-                <div className="de-mno-map-empty-title">Не удалось загрузить точки</div>
-                <div>Попробуйте обновить страницу.</div>
-              </div>
-            </div>
-          ) : (
-            <div className="de-mno-map-wrap">
-              <YandexMap
-                className="de-mno-ymap"
-                points={points.map((p) => ({ id: p.id, coords: p.coords, label: p.name }))}
-                onBoundsChange={([a, b, c, d]) => setMapBbox(`${a},${b},${c},${d}`)}
-              />
-              {pointsCapped && (
-                <div className="de-mno-map-cap">
-                  показано {points.length} из {pointsTotal} в этой области
-                </div>
-              )}
-            </div>
-          )}
+          </div>
         </div>
       )}
 

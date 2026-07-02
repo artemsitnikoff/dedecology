@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import type { MnoDetail, MnoListItem, MnoPointsResponse, Paginated } from '@/api/aliases';
 
@@ -86,6 +86,8 @@ export function useMnoPoints(
       const res = await api.get<MnoPointsResponse>(`/mno/points${qs ? `?${qs}` : ''}`);
       return res.data;
     },
+    // Держим прошлые точки при смене bbox — карта не мигает пустотой на рефетче.
+    placeholderData: keepPreviousData,
     enabled: options?.enabled ?? true,
   });
 }

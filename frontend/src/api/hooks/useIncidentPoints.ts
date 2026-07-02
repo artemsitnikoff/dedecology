@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import type { IncidentPointsResponse } from '@/api/aliases';
 import { buildIncidentParams } from './useIncidents';
@@ -34,6 +34,8 @@ export function useIncidentPoints(
       );
       return res.data;
     },
+    // Держим прошлые точки при смене bbox — карта не мигает пустотой на рефетче.
+    placeholderData: keepPreviousData,
     enabled: options?.enabled ?? true,
   });
 }

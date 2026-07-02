@@ -199,6 +199,11 @@ export function IncidentsPage() {
   const points = pointsQuery.data?.points ?? [];
   const pointsTotal = pointsQuery.data?.total ?? points.length;
   const pointsCapped = pointsQuery.data?.capped ?? false;
+  // Мемо — чтобы YandexMap не пересобирал маркеры на каждый ре-рендер страницы.
+  const mapPoints = useMemo(
+    () => points.map((p) => ({ id: p.id, coords: p.coords, label: p.address || p.status })),
+    [points],
+  );
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -495,28 +500,24 @@ export function IncidentsPage() {
       {/* Контент: карта (настоящая Яндекс.Карта с кластеризацией) */}
       {view === 'map' && (
         <div className="de-inc-map-area">
-          {pointsQuery.isLoading ? (
-            <div className="de-inc-map-state">Загрузка точек…</div>
-          ) : pointsQuery.isError ? (
-            <div className="de-inc-map-state error">Не удалось загрузить точки на карте.</div>
-          ) : (
-            <div className="de-inc-map-wrap">
-              <YandexMap
-                className="de-inc-ymap"
-                points={points.map((p) => ({
-                  id: p.id,
-                  coords: p.coords,
-                  label: p.address || p.status,
-                }))}
-                onBoundsChange={([a, b, c, d]) => setMapBbox(`${a},${b},${c},${d}`)}
-              />
-              {pointsCapped && (
-                <div className="de-inc-map-cap">
-                  показано {points.length} из {pointsTotal} в этой области
-                </div>
-              )}
+          {/* Карта смонтирована ВСЕГДА — загрузку показываем подписью, НЕ заменой (иначе
+              refetch по bbox размонтировал бы карту и сбрасывал вид → цикл). */}
+          <div className="de-inc-map-wrap">
+            <YandexMap
+              className="de-inc-ymap"
+              points={mapPoints}
+              onBoundsChange={([a, b, c, d]) => setMapBbox(`${a},${b},${c},${d}`)}
+            />
+            <div className="de-inc-map-cap">
+              {pointsQuery.isError
+                ? 'не удалось загрузить точки'
+                : pointsQuery.isFetching
+                  ? 'обновление точек…'
+                  : pointsCapped
+                    ? `показано ${points.length} из ${pointsTotal} в этой области`
+                    : `${points.length} точек`}
             </div>
-          )}
+          </div>
         </div>
       )}
 
