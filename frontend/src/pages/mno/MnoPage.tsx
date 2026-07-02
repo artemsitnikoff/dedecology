@@ -7,7 +7,8 @@ import { useMno, useMnoDetail, useMnoPoints } from '@/api/hooks/mno';
 import type { MnoFilters, MnoSortKey, SortOrder } from '@/api/hooks/mno';
 import { useRegionsDirectory } from '@/api/hooks/regions';
 import { exportMno, useCreateMno, useSyncMno, useSyncMnoOne } from '@/api/mutations/mno';
-import type { MnoCreate, MnoListItem, MnoPoint, RegionListItem } from '@/api/aliases';
+import type { MnoCreate, MnoListItem, RegionListItem } from '@/api/aliases';
+import { YandexMap } from '@/components/YandexMap';
 import './Mno.css';
 
 /** Размер страницы серверной пагинации реестра МНО (контракт GET /mno). */
@@ -284,32 +285,6 @@ export function MnoPage() {
   const pointsTotal = pointsQuery.data?.total ?? points.length;
   const pointsCapped = pointsQuery.data?.capped ?? false;
 
-  // Проекция координат точек в проценты для схематичной карты (как в прототипе).
-  const map = useMemo(() => {
-    if (!points.length) return { pins: [] as Array<{ p: MnoPoint; x: number; y: number }>, bbox: '' };
-    const lat = (p: MnoPoint) => parseFloat(p.coords.split(',')[0]);
-    const lng = (p: MnoPoint) => parseFloat(p.coords.split(',')[1]);
-    let minLat = Math.min(...points.map(lat));
-    let maxLat = Math.max(...points.map(lat));
-    let minLng = Math.min(...points.map(lng));
-    let maxLng = Math.max(...points.map(lng));
-    let latR = maxLat - minLat || 0.4;
-    let lngR = maxLng - minLng || 0.4;
-    minLat -= latR * 0.16;
-    maxLat += latR * 0.16;
-    minLng -= lngR * 0.16;
-    maxLng += lngR * 0.16;
-    latR = maxLat - minLat;
-    lngR = maxLng - minLng;
-    const bbox = `${minLng.toFixed(4)}, ${minLat.toFixed(4)} … ${maxLng.toFixed(4)}, ${maxLat.toFixed(4)}`;
-    const pins = points.map((p) => ({
-      p,
-      x: ((lng(p) - minLng) / lngR) * 100,
-      y: (1 - (lat(p) - minLat) / latR) * 100,
-    }));
-    return { pins, bbox };
-  }, [points]);
-
   return (
     <div className="de-mno-wrap">
       {/* Шапка */}
@@ -535,64 +510,36 @@ export function MnoPage() {
         </>
       )}
 
-      {/* Контент: карта */}
+      {/* Контент: карта (настоящая Яндекс.Карта с кластеризацией) */}
       {sub === 'map' && (
         <div className="de-mno-map-area">
-          <div className="de-mno-map">
-            <div className="de-mno-map-bbox">bbox · {map.bbox || '—'}</div>
-            <div className="de-mno-map-chips">
-              <span className="de-mno-map-chip">
-                <span className="de-mno-map-chip-dot" />
-                Слой 5 · МНО
-              </span>
-              <span className="de-mno-map-chip mono">z 8</span>
-              <span className="de-mno-map-chip dark">
-                {pointsCapped ? `показано ${points.length} из ${pointsTotal}` : `${pointsTotal} точек`}
-              </span>
-            </div>
-            <div className="de-mno-map-legend">
-              <span>
-                <span className="de-mno-map-legend-dot" style={{ background: 'var(--de-brand)' }} />
-                МНО · слой 5
-              </span>
-            </div>
-            {map.pins.map((p) => {
-              const isActive = detailId === p.p.id;
-              return (
-                <div
-                  key={p.p.id}
-                  className={`de-mno-pin ${isActive ? 'active' : ''}`}
-                  onClick={() => setDetailId(p.p.id)}
-                  style={{
-                    left: `${p.x}%`,
-                    top: `${p.y}%`,
-                    transform: `translate(-50%,-100%) scale(${isActive ? 1.22 : 1})`,
-                    color: 'var(--de-brand)',
-                  }}
-                >
-                  <div className="de-mno-pin-label">{p.p.name}</div>
-                  <Pin size={28} />
-                </div>
-              );
-            })}
-            {pointsQuery.isLoading ? (
+          {pointsQuery.isLoading ? (
+            <div className="de-mno-map">
               <div className="de-mno-map-empty">
                 <div className="de-mno-map-empty-title">Загрузка точек…</div>
               </div>
-            ) : pointsQuery.isError ? (
+            </div>
+          ) : pointsQuery.isError ? (
+            <div className="de-mno-map">
               <div className="de-mno-map-empty">
                 <Pin size={40} />
                 <div className="de-mno-map-empty-title">Не удалось загрузить точки</div>
                 <div>Попробуйте обновить страницу.</div>
               </div>
-            ) : points.length === 0 ? (
-              <div className="de-mno-map-empty">
-                <Pin size={40} />
-                <div className="de-mno-map-empty-title">Нет точек на карте</div>
-                <div>Сбросьте фильтры, чтобы увидеть все МНО.</div>
-              </div>
-            ) : null}
-          </div>
+            </div>
+          ) : (
+            <div className="de-mno-map-wrap">
+              <YandexMap
+                className="de-mno-ymap"
+                points={points.map((p) => ({ id: p.id, coords: p.coords, label: p.name }))}
+              />
+              {pointsCapped && (
+                <div className="de-mno-map-cap">
+                  показано {points.length} из {pointsTotal}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -3,10 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { useIncidents } from '@/api/hooks/useIncidents';
 import type { IncidentFilters, SortKey, SortOrder } from '@/api/hooks/useIncidents';
+import { useIncidentPoints } from '@/api/hooks/useIncidentPoints';
 import { useFunnelCounts } from '@/api/hooks/useFunnelCounts';
 import { useRegions } from '@/api/hooks/useRegions';
 import { exportAll, exportSelected, useBulkStatus, useBulkDelete } from '@/api/mutations/incidents';
 import type { Source, Status } from '@/api/aliases';
+import { YandexMap } from '@/components/YandexMap';
 import { Funnel } from './Funnel';
 import { FilterBar } from './FilterBar';
 import { IncidentsTable } from './IncidentsTable';
@@ -187,6 +189,14 @@ export function IncidentsPage() {
   const total = incidentsQuery.data?.total ?? 0;
 
   // ----- Локальный UI-стейт -----
+  // Режим отображения: список (таблица) или настоящая Яндекс.Карта. Фильтры общие (из URL).
+  const [view, setView] = useState<'list' | 'map'>('list');
+  // Точки карты — отдельный лёгкий запрос /incidents/points, только в режиме «Карта».
+  const pointsQuery = useIncidentPoints(filters, { enabled: view === 'map' });
+  const points = pointsQuery.data?.points ?? [];
+  const pointsTotal = pointsQuery.data?.total ?? points.length;
+  const pointsCapped = pointsQuery.data?.capped ?? false;
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -337,7 +347,27 @@ export function IncidentsPage() {
           />
         </div>
         <div className="de-inc-spacer" />
-        <span className="de-inc-hint">Сортировка — по клику на заголовок столбца</span>
+        {view === 'list' && (
+          <span className="de-inc-hint">Сортировка — по клику на заголовок столбца</span>
+        )}
+        <div className="de-inc-seg">
+          <button
+            type="button"
+            className={`de-inc-seg-btn ${view === 'list' ? 'active' : ''}`}
+            onClick={() => setView('list')}
+          >
+            <Icon name="list" size={15} />
+            Список
+          </button>
+          <button
+            type="button"
+            className={`de-inc-seg-btn ${view === 'map' ? 'active' : ''}`}
+            onClick={() => setView('map')}
+          >
+            <Icon name="map" size={15} />
+            Карта
+          </button>
+        </div>
       </div>
 
       <Funnel status={status} counts={funnelQuery.data} onSelect={setStatusParam} />
@@ -424,38 +454,67 @@ export function IncidentsPage() {
         </div>
       )}
 
-      {/* Контент */}
-      <div className="de-inc-content" ref={scrollRef}>
-        {incidentsQuery.isLoading ? (
-          <div className="de-inc-state">Загрузка…</div>
-        ) : incidentsQuery.isError ? (
-          <div className="de-inc-state error">Не удалось загрузить инциденты.</div>
-        ) : rows.length > 0 ? (
-          <IncidentsTable
-            rows={rows}
-            selected={selected}
-            sort={sort}
-            order={order}
-            allSelected={allSelected}
-            onSort={handleSort}
-            onToggleAll={toggleAll}
-            onToggleSelect={toggleSelect}
-            onOpen={openDetail}
-            onPhoto={openPhoto}
-          />
-        ) : (
-          <div className="de-inc-empty">
-            <div className="de-inc-empty-mark">💚</div>
-            <h3>Ничего не найдено</h3>
-            <p>Под заданные фильтры обращений нет. Попробуйте сбросить фильтры.</p>
-            {hasFilters && (
-              <button type="button" className="de-inc-empty-btn" onClick={resetFilters}>
-                Сбросить фильтры
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Контент: список (таблица) */}
+      {view === 'list' && (
+        <div className="de-inc-content" ref={scrollRef}>
+          {incidentsQuery.isLoading ? (
+            <div className="de-inc-state">Загрузка…</div>
+          ) : incidentsQuery.isError ? (
+            <div className="de-inc-state error">Не удалось загрузить инциденты.</div>
+          ) : rows.length > 0 ? (
+            <IncidentsTable
+              rows={rows}
+              selected={selected}
+              sort={sort}
+              order={order}
+              allSelected={allSelected}
+              onSort={handleSort}
+              onToggleAll={toggleAll}
+              onToggleSelect={toggleSelect}
+              onOpen={openDetail}
+              onPhoto={openPhoto}
+            />
+          ) : (
+            <div className="de-inc-empty">
+              <div className="de-inc-empty-mark">💚</div>
+              <h3>Ничего не найдено</h3>
+              <p>Под заданные фильтры обращений нет. Попробуйте сбросить фильтры.</p>
+              {hasFilters && (
+                <button type="button" className="de-inc-empty-btn" onClick={resetFilters}>
+                  Сбросить фильтры
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Контент: карта (настоящая Яндекс.Карта с кластеризацией) */}
+      {view === 'map' && (
+        <div className="de-inc-map-area">
+          {pointsQuery.isLoading ? (
+            <div className="de-inc-map-state">Загрузка точек…</div>
+          ) : pointsQuery.isError ? (
+            <div className="de-inc-map-state error">Не удалось загрузить точки на карте.</div>
+          ) : (
+            <div className="de-inc-map-wrap">
+              <YandexMap
+                className="de-inc-ymap"
+                points={points.map((p) => ({
+                  id: p.id,
+                  coords: p.coords,
+                  label: p.address || p.status,
+                }))}
+              />
+              {pointsCapped && (
+                <div className="de-inc-map-cap">
+                  показано {points.length} из {pointsTotal}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {detailId && (
         <DetailDrawer

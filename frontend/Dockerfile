@@ -13,6 +13,10 @@ RUN npm ci
 ARG VITE_API_BASE_URL=http://localhost:8000/api/v1
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
+# Ключ Yandex Maps JS API (build-time). Пусто → карта рендерит честную плашку.
+ARG VITE_YANDEX_MAPS_KEY=
+ENV VITE_YANDEX_MAPS_KEY=${VITE_YANDEX_MAPS_KEY}
+
 # Исходники
 COPY . .
 

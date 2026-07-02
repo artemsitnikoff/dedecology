@@ -9,9 +9,15 @@ from sqlalchemy.sql.operators import eq
 
 from app.core.errors import NotFoundError
 from app.schemas.base import Paginated
-from app.schemas.incident import FunnelCounts, IncidentDetail, IncidentListItem
+from app.schemas.incident import (
+    FunnelCounts,
+    IncidentDetail,
+    IncidentListItem,
+    IncidentPoint,
+    IncidentPointsResponse,
+)
 from app.services import incident as incident_service
-from app.services.incident import _base_filters
+from app.services.incident import _base_filters, _short_address
 
 
 def _list_item(**kw):
@@ -329,6 +335,108 @@ async def test_list_regions_query_shape():
     assert "DISTINCT" in compiled
     assert "ORDER BY" in compiled
     assert "IS NOT NULL" in compiled
+
+
+# --- /points (карта) -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_points_returns_points(client):
+    """GET /incidents/points отдаёт points/total/capped и пробрасывает фильтры списка."""
+    points_resp = IncidentPointsResponse(
+        points=[
+            IncidentPoint(
+                id=uuid4(),
+                coords="53.2229, 50.6291",
+                status="new",
+                address="г. Кинель, ул. Маяковского, 41",
+            )
+        ],
+        total=4200,
+        capped=True,
+    )
+    spy = AsyncMock(return_value=points_resp)
+    with patch("app.api.v1.incidents.incident_service.list_points", new=spy):
+        resp = await client.get(
+            "/api/v1/incidents/points?search=Кинель&source=max&status=new"
+            "&region=Самарская область"
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 4200
+    assert body["capped"] is True
+    assert len(body["points"]) == 1
+    assert body["points"][0]["coords"] == "53.2229, 50.6291"
+    assert body["points"][0]["status"] == "new"
+    assert body["points"][0]["address"] == "г. Кинель, ул. Маяковского, 41"
+    kw = spy.call_args.kwargs
+    assert kw["search"] == "Кинель"
+    assert kw["source"] == ["max"]
+    assert kw["status"] == ["new"]
+    assert kw["region"] == "Самарская область"
+
+
+@pytest.mark.asyncio
+async def test_points_route_not_shadowed_by_id(client):
+    """Литерал /points объявлен ДО /{id}: его не перехватывает get_incident."""
+    with patch(
+        "app.api.v1.incidents.incident_service.list_points",
+        new=AsyncMock(
+            return_value=IncidentPointsResponse(points=[], total=0, capped=False)
+        ),
+    ), patch(
+        "app.api.v1.incidents.incident_service.get_incident",
+        new=AsyncMock(side_effect=AssertionError("get_incident перехватил /points")),
+    ):
+        resp = await client.get("/api/v1/incidents/points")
+    assert resp.status_code == 200
+    assert resp.json() == {"points": [], "total": 0, "capped": False}
+
+
+@pytest.mark.asyncio
+async def test_list_points_service_marks_capped():
+    """list_points: total из COUNT(*), points из строк с координатами, capped при переполнении."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = incident_service.MAX_POINTS + 5
+    row = MagicMock(
+        id=uuid4(),
+        coords="53.2229, 50.6291",
+        status="found",
+        region="Самарская область",
+        city="г. Кинель",
+        street="ул. Маяковского, 41",
+    )
+    points_res = MagicMock()
+    points_res.all.return_value = [row]
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    resp = await incident_service.list_points(
+        session,
+        search=None,
+        source=None,
+        status=None,
+        date_from=None,
+        date_to=None,
+        region=None,
+    )
+
+    assert resp.total == incident_service.MAX_POINTS + 5
+    assert resp.capped is True
+    assert len(resp.points) == 1
+    assert resp.points[0].coords == "53.2229, 50.6291"
+    assert resp.points[0].status == "found"
+    # Адрес — краткая склейка город+улица (регион в подпись не идёт).
+    assert resp.points[0].address == "г. Кинель, ул. Маяковского, 41"
+
+
+def test_short_address_joins_nonempty_city_street():
+    """_short_address склеивает непустые город/улицу; пустые/пробелы отбрасываются."""
+    assert _short_address("Самарская область", "г. Кинель", "ул. Мира, 1") == (
+        "г. Кинель, ул. Мира, 1"
+    )
+    assert _short_address("Самарская область", "", "ул. Мира, 1") == "ул. Мира, 1"
+    assert _short_address("Самарская область", "   ", "  ") == ""
 
 
 @pytest.mark.asyncio

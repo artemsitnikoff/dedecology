@@ -1,0 +1,34 @@
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/api/client';
+import type { IncidentPointsResponse } from '@/api/aliases';
+import { buildIncidentParams } from './useIncidents';
+import type { IncidentFilters } from './useIncidents';
+
+/**
+ * GET /incidents/points — лёгкие координаты инцидентов для карты (без пагинации;
+ * сервер обрезает до лимита и сообщает capped/total). Использует те же фильтры, что
+ * и список (search/source/status/region/period), но sort/page карте не нужны — их
+ * отбрасываем (бэк их всё равно игнорирует). Карта не грузит полный реестр — это
+ * отдельный запрос, включаемый только в режиме «Карта» (options.enabled).
+ */
+export function useIncidentPoints(
+  filters: IncidentFilters,
+  options?: { enabled?: boolean }
+) {
+  return useQuery({
+    queryKey: ['incidents', 'points', filters],
+    queryFn: async () => {
+      const params = buildIncidentParams(filters);
+      params.delete('sort');
+      params.delete('order');
+      params.delete('page');
+      params.delete('page_size');
+      const qs = params.toString();
+      const res = await api.get<IncidentPointsResponse>(
+        `/incidents/points${qs ? `?${qs}` : ''}`
+      );
+      return res.data;
+    },
+    enabled: options?.enabled ?? true,
+  });
+}

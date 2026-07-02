@@ -10,8 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.errors import NotFoundError, ValidationError
 from ..models import Incident
 from ..schemas.base import Paginated
-from ..schemas.incident import FunnelCounts, IncidentListItem
+from ..schemas.incident import (
+    FunnelCounts,
+    IncidentListItem,
+    IncidentPoint,
+    IncidentPointsResponse,
+)
 from .audit import audit
+
+# Максимум точек инцидентов, отдаваемых карте за раз (карта не грузит весь реестр).
+MAX_POINTS = 3000
 
 # Порядок статусов в БД для сортировки `status` (new < found < none < exported)
 _STATUS_ORDER = case(
@@ -271,6 +279,67 @@ async def list_regions(session: AsyncSession) -> list[str]:
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+def _short_address(region: str, city: str, street: str) -> str:
+    """Краткий адрес для подписи точки на карте: непустые город/улица через запятую.
+
+    Регион на карте избыточен (кластеризация по субъектам и так видна), поэтому в
+    подпись идут только город и улица.
+    """
+    parts = [p.strip() for p in (city, street) if p and p.strip()]
+    return ", ".join(parts)
+
+
+async def list_points(
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    source: list[str] | None = None,
+    status: list[str] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    region: str | None = None,
+) -> IncidentPointsResponse:
+    """Лёгкие координаты инцидентов для карты: те же фильтры, что у списка (без sort/page).
+
+    Учитываются только строки с непустыми координатами. total — их число по фильтру;
+    points — первые MAX_POINTS таких строк; capped=True — total превысил лимит и points обрезаны.
+    """
+    filters = _base_filters(search, source, date_from, date_to, region)
+    if status:
+        filters.append(Incident.status.in_(status))
+    filters.append(Incident.coords != "")
+    where_clause = and_(*filters)
+
+    total = (
+        await session.execute(select(func.count(Incident.id)).where(where_clause))
+    ).scalar_one()
+
+    stmt = (
+        select(
+            Incident.id,
+            Incident.coords,
+            Incident.status,
+            Incident.region,
+            Incident.city,
+            Incident.street,
+        )
+        .where(where_clause)
+        .order_by(asc(Incident.id))
+        .limit(MAX_POINTS)
+    )
+    result = await session.execute(stmt)
+    points = [
+        IncidentPoint(
+            id=row.id,
+            coords=row.coords,
+            status=row.status,
+            address=_short_address(row.region, row.city, row.street),
+        )
+        for row in result.all()
+    ]
+    return IncidentPointsResponse(points=points, total=total, capped=total > MAX_POINTS)
 
 
 async def get_incident(session: AsyncSession, incident_id: UUID) -> Incident:

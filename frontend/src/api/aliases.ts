@@ -69,6 +69,28 @@ export interface IncidentListItem {
   received_at: string;
 }
 
+/**
+ * Лёгкая точка инцидента для карты (GET /incidents/points) — id + координаты
+ * «lat, lon» текстом + статус + краткий адрес (город, улица). Без фото/пагинации.
+ */
+export interface IncidentPoint {
+  id: string;
+  coords: string;
+  status: Status;
+  address: string;
+}
+
+/**
+ * Ответ GET /incidents/points — координаты инцидентов для карты (без пагинации).
+ * total — число инцидентов с непустыми координатами по фильтру; points — первые не
+ * более лимита точек; capped=true — точки обрезаны по лимиту (показано меньше total).
+ */
+export interface IncidentPointsResponse {
+  points: IncidentPoint[];
+  total: number;
+  capped: boolean;
+}
+
 /** Пагинированный ответ. */
 export interface Paginated<T> {
   items: T[];

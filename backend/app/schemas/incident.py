@@ -50,6 +50,25 @@ class IncidentDetail(ORMBase):
     updated_at: datetime
 
 
+class IncidentPoint(ORMBase):
+    """Лёгкая точка инцидента для карты: id + координаты «lat, lon» + статус + краткий адрес."""
+    id: UUID
+    coords: str
+    status: str
+    address: str
+
+
+class IncidentPointsResponse(BaseModel):
+    """Точки инцидентов для карты (отдельный лёгкий эндпоинт, без пагинации).
+
+    total — число инцидентов с непустыми координатами по текущему фильтру; points —
+    первые не более лимита таких точек; capped=True — total превысил лимит и points обрезаны.
+    """
+    points: list[IncidentPoint]
+    total: int
+    capped: bool
+
+
 class IncidentStatusUpdate(BaseModel):
     status: IncidentStatus
 

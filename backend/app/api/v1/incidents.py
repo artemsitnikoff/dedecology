@@ -24,6 +24,7 @@ from ...schemas.incident import (
     FunnelCounts,
     IncidentDetail,
     IncidentListItem,
+    IncidentPointsResponse,
     IncidentStatusUpdate,
 )
 from ...services import incident as incident_service
@@ -124,6 +125,34 @@ async def list_regions(
 ):
     """DISTINCT непустые регионы (А→Я) — наполняет дропдаун фильтра региона."""
     return await incident_service.list_regions(session)
+
+
+@router.get("/points", response_model=IncidentPointsResponse, tags=["Админский реестр"])
+async def list_incident_points(
+    search: str | None = Query(None),
+    source: list[str] | None = Query(None),
+    status: list[str] | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    region: str | None = Query(None),
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Лёгкие координаты инцидентов для карты (без пагинации, обрезка до лимита).
+
+    Те же фильтры, что у списка (search/source/status/region/period), без sort/page.
+    Объявлен ДО /{incident_id} — статический роут раньше параметрического, иначе
+    FastAPI трактует «points» как UUID → 422.
+    """
+    return await incident_service.list_points(
+        session,
+        search=search,
+        source=source,
+        status=status,
+        date_from=_as_datetime(date_from),
+        date_to=_as_datetime(date_to),
+        region=region,
+    )
 
 
 @router.get("/export", tags=["Экспорт (вне мобильного API)"])

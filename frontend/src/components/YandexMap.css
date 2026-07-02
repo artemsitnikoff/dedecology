@@ -1,0 +1,38 @@
+/* Настоящая Яндекс.Карта + честная плашка при отсутствии ключа/сбое загрузки. */
+
+.de-ymap {
+  width: 100%;
+  height: 100%;
+  min-height: 460px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--ark-gray-200);
+}
+
+.de-ymap-fallback {
+  width: 100%;
+  height: 100%;
+  min-height: 460px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+}
+
+.de-ymap-fallback-inner {
+  max-width: 440px;
+  text-align: center;
+  color: var(--fg-2);
+  font-size: var(--fs-14);
+  line-height: 1.5;
+}
+
+.de-ymap-fallback-title {
+  font-weight: 600;
+  color: var(--fg-1);
+  margin-bottom: var(--space-2);
+}

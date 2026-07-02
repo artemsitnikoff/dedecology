@@ -490,6 +490,149 @@
         ]
       }
     },
+    "/api/v1/incidents/points": {
+      "get": {
+        "tags": [
+          "Админский реестр"
+        ],
+        "summary": "List Incident Points",
+        "description": "Лёгкие координаты инцидентов для карты (без пагинации, обрезка до лимита).\n\nТе же фильтры, что у списка (search/source/status/region/period), без sort/page.\nОбъявлен ДО /{incident_id} — статический роут раньше параметрического, иначе\nFastAPI трактует «points» как UUID → 422.",
+        "operationId": "list_incident_points_api_v1_incidents_points_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentPointsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/incidents/export": {
       "get": {
         "tags": [
@@ -2986,6 +3129,63 @@
         ],
         "title": "IncidentListItem",
         "description": "Строка таблицы инцидентов."
+      },
+      "IncidentPoint": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "coords",
+          "status",
+          "address"
+        ],
+        "title": "IncidentPoint",
+        "description": "Лёгкая точка инцидента для карты: id + координаты «lat, lon» + статус + краткий адрес."
+      },
+      "IncidentPointsResponse": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "capped": {
+            "type": "boolean",
+            "title": "Capped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "points",
+          "total",
+          "capped"
+        ],
+        "title": "IncidentPointsResponse",
+        "description": "Точки инцидентов для карты (отдельный лёгкий эндпоинт, без пагинации).\n\ntotal — число инцидентов с непустыми координатами по текущему фильтру; points —\nпервые не более лимита таких точек; capped=True — total превысил лимит и points обрезаны."
       },
       "IncidentStatusUpdate": {
         "properties": {

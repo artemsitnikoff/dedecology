@@ -155,6 +155,80 @@
   color: var(--fg-3);
 }
 
+/* ---------- Сегмент «Список / Карта» ---------- */
+.de-inc-seg {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--ark-gray-100);
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  flex: none;
+}
+.de-inc-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--fg-2);
+}
+.de-inc-seg-btn.active {
+  background: var(--bg-1);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- Область карты (настоящая Яндекс.Карта) ---------- */
+.de-inc-map-area {
+  flex: 1;
+  min-height: 0;
+  padding: 14px 28px 22px;
+  display: flex;
+}
+.de-inc-map-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+}
+.de-inc-ymap {
+  flex: 1;
+  min-height: 460px;
+}
+.de-inc-map-cap {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  background: var(--fg-1);
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ark-white);
+}
+.de-inc-map-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-2);
+  font-size: var(--fs-14);
+}
+.de-inc-map-state.error {
+  color: var(--ark-red-600);
+}
+
 /* ---------- Воронка ---------- */
 .de-inc-funnel {
   display: flex;
