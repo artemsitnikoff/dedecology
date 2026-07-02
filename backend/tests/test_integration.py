@@ -1218,3 +1218,33 @@ async def test_get_running_job_ignores_stale():
     stale = mno_jobs.utcnow() - timedelta(seconds=mno_jobs.STALE_SECONDS + 60)
     r.hashes["mno:job:job-live"]["updated_at"] = stale.isoformat()
     assert (await mno_jobs.get_running_job(r, "__all__")) is None
+
+
+# --- ранняя остановка обхода по плато (не молотим избыточный «хвост») -----------
+
+
+@pytest.mark.asyncio
+async def test_crawler_stops_on_plateau(monkeypatch):
+    """STALL_ROUNDS раундов подряд без новых МНО → обход прекращается, а не молотит хвост."""
+    monkeypatch.setattr(fgis, "START_CELLS", [(0, 0, 10, 10)])
+    monkeypatch.setattr(fgis, "START_Z", 4)
+    monkeypatch.setattr(fgis, "TILE_CONCURRENCY", 1)  # 1 ячейка/раунд — детерминизм
+    monkeypatch.setattr(fgis, "STALL_ROUNDS", 3)
+
+    calls = {"n": 0}
+
+    async def fake_fetch_tile(filter_id, bbox, z):
+        calls["n"] += 1
+        # Каждый тайл: уже виденный "a" (новых нет) + >100 кластер (дробится → очередь
+        # НЕ пустеет). Так без ранней остановки обход молотил бы до лимита тайлов.
+        return [
+            {"properties": {"layer": 5, "id": "a"}},
+            {"properties": {"layer": 5, "ids": ["a"], "iconContent": "500"}},
+        ]
+
+    monkeypatch.setattr(fgis, "fetch_tile", fake_fetch_tile)
+
+    ids, issues = await fgis.enumerate_region_mno_ids("f", 51)
+    assert ids == {"a"}
+    assert any("плато" in i for i in issues)
+    assert calls["n"] < 50  # остановились рано, а не на TILE_REQUEST_LIMIT (6000)
