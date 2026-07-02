@@ -8,13 +8,20 @@ upsert из fgis/mno_sync, но состояние прогресса ведёт
 (mark_region_done), и при ретрае воркера (max_tries) они пропускаются (is_region_done).
 """
 
+import asyncio
 import logging
+import time
 
 from sqlalchemy import select
 
 from ..database import AsyncSessionLocal
 from ..models import Mno
 from . import fgis, mno_sync
+
+# Максимум на сетевую дозагрузку деталей ОДНОГО батча. Если ФГИС не ответил за это время —
+# НЕ висим бесконечно (как было: последовательный фолбэк по 100 id × 40с ≈ час), а логируем,
+# откатываем сессию и идём дальше; пропущенные id доберутся при повторном запуске.
+DETAIL_TIMEOUT = 120
 from .mno_jobs import (
     initial_progress,
     is_cancelled,
@@ -57,21 +64,61 @@ async def _crawl_region(redis, job_id, prog, session, region_id: int) -> None:
     def _prog(discovered: int) -> None:
         prog["discovered"] = base_disc + discovered
 
+    batch_no = 0
+
     async def _on_batch(batch: list[str]) -> None:
         # Отмена из UI: проверяем ДО обработки батча — так прогон обрывается в пределах
         # ~100 обнаруженных id (отзывчиво), не дожидаясь конца региона.
         if await is_cancelled(redis, job_id):
             raise _CancelledSync()
+        nonlocal batch_no
+        batch_no += 1
+        t0 = time.monotonic()
         # Пропускаем уже записанные МНО (fgis_id в БД) — детали тянем ТОЛЬКО для новых.
         # Так возобновление после обрыва/деплоя дёшево: регион промотывается мимо сделанного.
         existing = await _existing_fgis_ids(session, batch)
         prog["skipped"] += len(existing)  # уже были в БД — видимый прогресс на re-скане
         fresh = [mno_id for mno_id in batch if mno_id not in existing]
+        n_fetched = 0
+        status = "ok"
         if fresh:
-            objs = await fgis.cluster_details(fresh, region_id)
-            prog["fetched"] += len(objs)
-            prog["upserted"] += await mno_sync._upsert_batch(session, region_id, objs)
-            await session.commit()
+            try:
+                # Таймаут на дозагрузку деталей: одна зависшая/битая пачка НЕ вешает регион
+                # на десятки минут — по таймауту логируем и пропускаем (доберётся при повторе).
+                objs = await asyncio.wait_for(
+                    fgis.cluster_details(fresh, region_id), timeout=DETAIL_TIMEOUT
+                )
+                n_fetched = len(objs)
+                prog["fetched"] += n_fetched
+                prog["upserted"] += await mno_sync._upsert_batch(session, region_id, objs)
+                await session.commit()
+            except asyncio.TimeoutError:
+                # ФГИС не ответил за DETAIL_TIMEOUT — откат сессии (иначе PendingRollbackError
+                # каскадом убьёт следующие батчи) и идём дальше.
+                await session.rollback()
+                status = "timeout"
+                logger.error(
+                    "[mno_worker] регион %s батч #%s: детали ФГИС не ответили за %sс — "
+                    "ПРОПУСК %s id (доберутся при повторном запуске)",
+                    region_id, batch_no, DETAIL_TIMEOUT, len(fresh),
+                )
+            except Exception as e:  # noqa: BLE001 — сбой ОДНОГО батча не роняет регион
+                # ВИДИМАЯ причина + полный traceback (напр. длина поля, как было раньше).
+                await session.rollback()  # вернуть сессию в рабочее состояние
+                status = f"error:{type(e).__name__}"
+                logger.exception(
+                    "[mno_worker] регион %s батч #%s: СБОЙ батча (%s свежих id) — откат, "
+                    "пропуск. Первые id: %s",
+                    region_id, batch_no, len(fresh), fresh[:5],
+                )
+        # Лог КАЖДОГО батча: видно движение, тайминг и где встало (последняя строка = точка затыка).
+        logger.info(
+            "[mno_worker] регион %s батч #%s [%s]: размер=%s existing=%s fresh=%s детали=%s "
+            "| итог disc=%s fetch=%s upsert=%s skip=%s | %.1fс",
+            region_id, batch_no, status, len(batch), len(existing), len(fresh), n_fetched,
+            prog["discovered"], prog["fetched"], prog["upserted"], prog["skipped"],
+            time.monotonic() - t0,
+        )
         await write_progress(redis, job_id, prog)
 
     async def _tick() -> None:

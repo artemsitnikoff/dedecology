@@ -323,6 +323,7 @@ async def enumerate_region_mno_ids(
     issues: list[str] = []
     truncated = 0
     tile_requests = 0
+    rounds = 0                      # раундов обхода (для периодического лога прогресса)
 
     def _add(pid: str | None) -> None:
         """Регистрирует НОВЫЙ id: в общий set seen и в очередь pending на потоковый флаш."""
@@ -348,6 +349,7 @@ async def enumerate_region_mno_ids(
         while queue and len(cells) < TILE_CONCURRENCY:
             cells.append(queue.popleft())
         tile_requests += len(cells)
+        rounds += 1
         results = await asyncio.gather(
             *(fetch_tile(filter_id, bbox, z) for bbox, z in cells)
         )
@@ -382,6 +384,13 @@ async def enumerate_region_mno_ids(
         # проверить отмену, пока on_batch молчит.
         if on_tick is not None:
             await on_tick()
+        # Периодический лог хода обхода: видно, движется ли краул (растут tiles/seen) или
+        # встал на конкретном раунде (последняя строка = точка затыка + размер очереди).
+        if rounds % 25 == 0:
+            logger.info(
+                "[fgis] обход: раунд %s, тайлов %s, очередь %s, обнаружено %s, усечено %s",
+                rounds, tile_requests, len(queue), len(seen), truncated,
+            )
 
     # Слить остаток (последний неполный батч).
     if on_batch is not None and pending:

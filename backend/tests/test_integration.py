@@ -553,8 +553,14 @@ class _FakeDBSession:
     async def __aexit__(self, *a):
         return False
 
+    def __init__(self):
+        self.rollbacks = 0
+
     async def commit(self):
         return None
+
+    async def rollback(self):
+        self.rollbacks += 1
 
     async def execute(self, *a, **k):
         # _existing_fgis_ids: пустой результат → в БД ничего нет, все id новые.
@@ -617,6 +623,40 @@ async def test_run_sync_region_error_captured(monkeypatch):
     prog = await mno_jobs.read_progress(fake, "j-err")
     assert prog["state"] == "error"
     assert "ФГИС недоступна" in prog["error"]
+    assert prog["finished_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_run_sync_region_batch_error_rolls_back_and_continues(monkeypatch):
+    """Сбой ОДНОГО батча (длина поля/сеть) НЕ роняет регион: сессия откатывается, батч
+    пропускается, регион завершается state=done. Раньше такой сбой рушил транзакцию
+    каскадом (PendingRollbackError) и/или вешал синк — теперь ловим, откатываем, логируем."""
+    session = _FakeDBSession()
+    monkeypatch.setattr(mno_worker, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(fgis, "create_filter", AsyncMock(return_value="filter-uuid"))
+
+    async def fake_enumerate(
+        filter_id, region_id, *, on_progress=None, on_batch=None, on_tick=None
+    ):
+        if on_progress:
+            on_progress(3)
+        if on_batch:
+            await on_batch(["a", "b", "c"])  # один батч, падающий на дозагрузке деталей
+        return {"a", "b", "c"}, []
+
+    monkeypatch.setattr(fgis, "enumerate_region_mno_ids", fake_enumerate)
+    # cluster_details падает — имитируем битый батч (поле длиной / сетевой сбой).
+    monkeypatch.setattr(
+        fgis, "cluster_details", AsyncMock(side_effect=RuntimeError("value too long"))
+    )
+
+    fake = FakeRedis()
+    await mno_worker.run_sync_region(fake, "j-batch", "51", "Мурманская область")
+
+    prog = await mno_jobs.read_progress(fake, "j-batch")
+    assert prog["state"] == "done"       # регион НЕ упал из-за одного батча
+    assert prog["upserted"] == 0         # сбойный батч ничего не записал
+    assert session.rollbacks == 1        # сессию откатили (не сломали каскадом)
     assert prog["finished_at"] is not None
 
 
