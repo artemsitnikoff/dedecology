@@ -267,6 +267,22 @@
             }
           },
           {
+            "name": "incident_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Incident Type"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,
@@ -1907,6 +1923,26 @@
         }
       }
     },
+    "/api/v1/intake/incident-types": {
+      "get": {
+        "tags": [
+          "Отправка фотоотчёта"
+        ],
+        "summary": "Incident Types",
+        "description": "ПУБЛИЧНО: справочник типов инцидента [{code, label}] для дропдауна формы/фильтра.\n\nСтатичный справочник (services/incident_types.py); подпись фронт резолвит по коду.\nПубличный (intake-роутер без auth) — нужен неавторизованной форме волонтёра.",
+        "operationId": "incident_types_api_v1_intake_incident_types_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/intake/form": {
       "post": {
         "tags": [
@@ -2703,6 +2739,16 @@
             "title": "Coords",
             "default": ""
           },
+          "incident_type": {
+            "type": "string",
+            "title": "Incident Type",
+            "default": ""
+          },
+          "comment": {
+            "type": "string",
+            "title": "Comment",
+            "default": ""
+          },
           "photo_time": {
             "type": "string",
             "title": "Photo Time",
@@ -2946,6 +2992,17 @@
             ],
             "title": "Comment"
           },
+          "incident_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Type"
+          },
           "photo_time": {
             "anyOf": [
               {
@@ -3095,6 +3152,17 @@
               }
             ],
             "title": "Comment"
+          },
+          "incident_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Type"
           },
           "photo_time": {
             "anyOf": [

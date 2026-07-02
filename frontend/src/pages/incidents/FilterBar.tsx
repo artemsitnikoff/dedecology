@@ -1,6 +1,6 @@
 import { Icon } from '@/components/ui/Icon';
 import { SOURCE } from '@/lib/status';
-import type { Source } from '@/api/aliases';
+import type { Source, IncidentType } from '@/api/aliases';
 
 type Props = {
   /** Выбранные источники (multi-select). */
@@ -11,6 +11,11 @@ type Props = {
   /** Справочник регионов для дропдауна (А→Я). */
   regions: string[];
   onRegion: (region: string) => void;
+  /** Выбранный тип инцидента — код; '' — все типы. */
+  incidentType: string;
+  /** Справочник типов инцидента для дропдауна (в порядке справочника). */
+  incidentTypes: IncidentType[];
+  onIncidentType: (code: string) => void;
   dateFrom: string;
   dateTo: string;
   onDateFrom: (v: string) => void;
@@ -33,6 +38,9 @@ export function FilterBar({
   region,
   regions,
   onRegion,
+  incidentType,
+  incidentTypes,
+  onIncidentType,
   dateFrom,
   dateTo,
   onDateFrom,
@@ -71,6 +79,24 @@ export function FilterBar({
           {regions.map((r) => (
             <option key={r} value={r}>
               {r}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="de-inc-filter-sep" />
+
+      <div className="de-inc-filter-group">
+        <span className="de-inc-filter-label">Тип инцидента</span>
+        <select
+          className="de-inc-select"
+          value={incidentType}
+          onChange={(e) => onIncidentType(e.target.value)}
+        >
+          <option value="">Все типы</option>
+          {incidentTypes.map((t) => (
+            <option key={t.code} value={t.code}>
+              {t.label}
             </option>
           ))}
         </select>

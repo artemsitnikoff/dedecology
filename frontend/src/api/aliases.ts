@@ -19,6 +19,18 @@ export type Role = 'admin' | 'user';
 /** Статус пользователя. */
 export type UserStatus = 'active' | 'invited';
 
+/**
+ * Запись справочника типов инцидента (GET /intake/incident-types) — код + русская
+ * подпись. В инциденте хранится КОД (Incident.incident_type); подпись фронт резолвит
+ * по этому справочнику (как federal_districts). Публичный — доступен и на форме без auth.
+ */
+export interface IncidentType {
+  /** Стабильный код типа («fire», «overflow», …). */
+  code: string;
+  /** Русская подпись для UI («Возгорание в контейнере»). */
+  label: string;
+}
+
 /** Инцидент (детальное представление, GET /incidents/{id} — все поля, включая bins). */
 export interface Incident {
   id: string;
@@ -39,6 +51,8 @@ export interface Incident {
   msg_url: string | null;
   /** Прочая не-адресная информация из текста обращения (Радар №…, ФИО заявителя, описание проблемы, заметки); null/пусто — не показываем. */
   comment: string | null;
+  /** Код типа инцидента (см. IncidentType); null — тип не задан. Подпись резолвим по справочнику. */
+  incident_type: string | null;
   /** Форма «баки раздельного сбора»; null для Макса. Скрыто в таблице (ТЗ §11), есть в модели. */
   bins: boolean | null;
   /** ISO-строка — «поступило». */
@@ -66,6 +80,8 @@ export interface IncidentListItem {
   msg_url: string | null;
   /** Прочая не-адресная инфа (Радар №…, ФИО из текста, описание проблемы). */
   comment: string | null;
+  /** Код типа инцидента (см. IncidentType); null — тип не задан. Подпись резолвим по справочнику. */
+  incident_type: string | null;
   received_at: string;
 }
 

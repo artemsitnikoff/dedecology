@@ -263,6 +263,46 @@ async def test_list_forwards_region(client):
     assert spy.call_args.kwargs["region"] == "Самарская область"
 
 
+# --- Фильтр по типу инцидента (одиночный, ТОЧНОЕ совпадение по коду) -----------
+
+
+def test_base_filters_incident_type_exact_match():
+    """incident_type → равенство Incident.incident_type == код (пред-статусный фильтр)."""
+    filters = _base_filters(None, None, None, None, incident_type="fire")
+    assert len(filters) == 1
+    clause = filters[0]
+    assert clause.operator is eq
+    assert clause.right.value == "fire"
+
+
+def test_base_filters_incident_type_blank_no_filter():
+    """Пусто/пробелы/None → фильтр типа НЕ добавляется."""
+    assert _base_filters(None, None, None, None, incident_type=None) == []
+    assert _base_filters(None, None, None, None, incident_type="") == []
+    assert _base_filters(None, None, None, None, incident_type="   ") == []
+
+
+def test_base_filters_incident_type_combines_with_region():
+    """incident_type честится вместе с region (оба пред-статусные → оба в where)."""
+    filters = _base_filters(
+        None, None, None, None, region="Самарская область", incident_type="fire"
+    )
+    assert len(filters) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_incident_type(client):
+    """GET /incidents?incident_type=... пробрасывает код в сервис списка (сужение)."""
+    page = Paginated[IncidentListItem](
+        items=[_list_item()], total=1, page=1, page_size=100, pages=1
+    )
+    spy = AsyncMock(return_value=page)
+    with patch("app.api.v1.incidents.incident_service.list_incidents", new=spy):
+        resp = await client.get("/api/v1/incidents?incident_type=fire")
+    assert resp.status_code == 200
+    assert spy.call_args.kwargs["incident_type"] == "fire"
+
+
 @pytest.mark.asyncio
 async def test_funnel_forwards_region(client):
     """GET /incidents/funnel?region=... пробрасывает region (влияет на счётчики)."""

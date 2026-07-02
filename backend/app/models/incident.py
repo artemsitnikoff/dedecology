@@ -40,6 +40,10 @@ class Incident(Base, TimestampMixin):
     # ФИО заявителя (если есть в тексте), описание проблемы («Баки раздельного
     # сбора отсутствуют»), заметки. Раньше AI это выкидывал; NULL — нет/не извлечено.
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Тип инцидента: КОД из справочника services/incident_types.py (напр. «fire»).
+    # Заполняется публичной формой волонтёра; русская подпись резолвится по коду на
+    # фронте. NULL — тип не задан (старые инциденты / Макс-бот, где типа нет).
+    incident_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # дата/время фотофиксации (ключ сортировки + фильтра периода)
     photo_time: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     photos: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))

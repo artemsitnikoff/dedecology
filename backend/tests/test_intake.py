@@ -459,6 +459,8 @@ async def test_public_form_creates_incident(client):
                 "city": "г. Самара",
                 "street": "ул. Ленина, 1",
                 "coords": "53.2, 50.1",
+                "incident_type": "fire",
+                "comment": "Баки переполнены",
                 "photo_time": "2026-04-26T08:05:00",
                 "bins": "yes",
                 "website": "",
@@ -478,6 +480,9 @@ async def test_public_form_creates_incident(client):
     kwargs = create.call_args.kwargs
     assert kwargs["fio"] == "Иванов Иван"
     assert kwargs["region"] == "Самарская область"
+    # Роут прокидывает новые Form-поля в сервис.
+    assert kwargs["incident_type"] == "fire"
+    assert kwargs["comment"] == "Баки переполнены"
     assert len(kwargs["photo_files"]) == 1
 
 
@@ -696,6 +701,70 @@ async def test_public_service_overlong_fields_truncated(fake_session):
     assert len(incident.region) == 255
     assert len(incident.city) == 255
     assert len(incident.street) == 500
+
+
+@pytest.mark.asyncio
+async def test_public_service_saves_valid_incident_type_and_comment(fake_session):
+    """Валидный код типа + comment (стрипнутый) сохраняются на инциденте."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="",
+        photo_time="",
+        bins="",
+        incident_type="fire",
+        comment="  Баки переполнены  ",
+        photo_files=[],
+    )
+    assert incident.incident_type == "fire"
+    assert incident.comment == "Баки переполнены"
+
+
+@pytest.mark.asyncio
+async def test_public_service_garbage_incident_type_is_none(fake_session):
+    """Неизвестный код типа не пишется (мусор → None); пустой comment → None."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="",
+        coords="",
+        photo_time="",
+        bins="",
+        incident_type="not_a_type",
+        comment="   ",
+        photo_files=[],
+    )
+    assert incident.incident_type is None
+    assert incident.comment is None
+
+
+@pytest.mark.asyncio
+async def test_public_service_incident_type_defaults_none(fake_session):
+    """Без incident_type/comment (значения по умолчанию) → оба None."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="",
+        coords="",
+        photo_time="",
+        bins="",
+        photo_files=[],
+    )
+    assert incident.incident_type is None
+    assert incident.comment is None
 
 
 # --------------------------------------------------------------------------- #

@@ -3,6 +3,7 @@ import { STATUS, SOURCE } from '@/lib/status';
 import { formatDate, formatTime, fullAddr, maxLink } from '@/lib/format';
 import { thumbUrl } from '@/lib/photo';
 import { useIncident } from '@/api/hooks/useIncident';
+import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
 import { useSetStatus } from '@/api/mutations/incidents';
 import type { Incident, Status } from '@/api/aliases';
 
@@ -68,6 +69,7 @@ type ContentProps = {
 /** Содержимое карточки (рендерится только когда деталь загружена). */
 function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
   const setStatus = useSetStatus();
+  const { data: incidentTypes = [] } = useIncidentTypes();
   const statusMeta = STATUS[d.status];
   const sourceMeta = SOURCE[d.source];
   const link = maxLink(d.msg_url);
@@ -76,8 +78,13 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
   const single = d.photo_urls.length === 1;
   const actions = TRANSITIONS[d.status];
 
+  // Резолвим код типа в подпись по справочнику; нет типа / неизвестный код → «—».
+  const typeLabel =
+    (d.incident_type && incidentTypes.find((t) => t.code === d.incident_type)?.label) || '—';
+
   const fields: Array<[string, string]> = [
     ['Заявитель', d.fio],
+    ['Тип инцидента', typeLabel],
     ['Регион', d.region],
     ['Город / н.п.', d.city],
     ['Адрес', d.street],

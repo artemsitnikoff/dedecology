@@ -113,6 +113,20 @@
   letter-spacing: 0.01em;
 }
 
+/* Выпадающий список типа инцидента: тот же контейнер, что и .de-rf-input. */
+.de-rf-select {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* Многострочный комментарий: та же рамка, но фиксированный минимум и вертикальный ресайз. */
+.de-rf-textarea {
+  min-height: 84px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
 /* --- Выпадающий список подсказок --- */
 .de-rf-dropdown {
   position: absolute;

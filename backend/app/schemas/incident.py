@@ -20,6 +20,7 @@ class IncidentListItem(ORMBase):
     street: str
     coords: str
     comment: str | None = None
+    incident_type: str | None = None
     photo_time: Optional[datetime]
     photos: int
     photo_urls: list[str]
@@ -39,6 +40,7 @@ class IncidentDetail(ORMBase):
     street: str
     coords: str
     comment: str | None = None
+    incident_type: str | None = None
     photo_time: Optional[datetime]
     photos: int
     photo_urls: list[str]

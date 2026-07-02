@@ -25,6 +25,7 @@ from .dadata import clean_address, geocode_address
 from .geo import parse_latlon
 from . import parse_log
 from .incident_parse import ai_parse_incident
+from .incident_types import is_valid_incident_type
 
 logger = logging.getLogger(__name__)
 
@@ -579,14 +580,18 @@ async def create_incident_from_public_form(
     photo_time,
     bins,
     photo_files: list,
+    incident_type: str = "",
+    comment: str = "",
     actor_user_id=None,
 ) -> Incident:
     """Создаёт Incident (source='form') из публичной формы волонтёра + фото.
 
     region/city/street берутся из явных полей, если непусты, иначе выводятся
-    эвристикой из full_address. Фото валидируются (тип/размер/количество) и
-    сохраняются в {STORAGE_DIR}/incidents/{id}/. flush() здесь, commit() —
-    в роутере. Невалидные фото → ValidationError + очистка частичного каталога.
+    эвристикой из full_address. incident_type — код из справочника
+    incident_types.py: пишется, только если код валиден (мусор → NULL). comment —
+    прочая информация (стрипнутая; пусто → NULL). Фото валидируются (тип/размер/
+    количество) и сохраняются в {STORAGE_DIR}/incidents/{id}/. flush() здесь,
+    commit() — в роутере. Невалидные фото → ValidationError + очистка каталога.
     """
     fio = _clean_str(fio)
     full_address = _clean_str(full_address)
@@ -594,6 +599,11 @@ async def create_incident_from_public_form(
     city = _clean_str(city)
     street = _clean_str(street)
     coords = _clean_str(coords)
+    # Тип инцидента: код из справочника. Неизвестный/пустой код → NULL (мусор не пишем).
+    type_code = _clean_str(incident_type)
+    incident_type_value = type_code if is_valid_incident_type(type_code) else None
+    # Прочая информация из формы (необязательное поле): стрипнутая строка или NULL.
+    comment_value = _clean_str(comment) or None
 
     if not (region or city or street):
         region, city, street = _parse_address(full_address)
@@ -631,6 +641,8 @@ async def create_incident_from_public_form(
         coords=coords or "",
         lat=lat,
         lon=lon,
+        comment=comment_value,
+        incident_type=incident_type_value,
         photo_time=parsed_photo_time,
         photos=0,
         photo_urls=[],

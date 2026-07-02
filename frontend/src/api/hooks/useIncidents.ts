@@ -17,6 +17,8 @@ export interface IncidentFilters {
   source?: Source[];
   /** Одиночный регион — точное совпадение по Incident.region. */
   region?: string;
+  /** Одиночный тип инцидента — код (см. IncidentType); точное совпадение по Incident.incident_type. */
+  incident_type?: string;
   /** Одиночный статус из воронки. */
   status?: Status;
   date_from?: string;
@@ -39,6 +41,7 @@ export function buildIncidentParams(filters: IncidentFilters): URLSearchParams {
     for (const s of filters.source) params.append('source', s);
   }
   if (filters.region) params.set('region', filters.region);
+  if (filters.incident_type) params.set('incident_type', filters.incident_type);
   if (filters.status) params.set('status', filters.status);
   if (filters.date_from) params.set('date_from', filters.date_from);
   if (filters.date_to) params.set('date_to', filters.date_to);

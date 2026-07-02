@@ -29,6 +29,7 @@ from ...services import dadata as dadata_service
 from ...services import incident as incident_service
 from ...services import intake as intake_service
 from ...services import quotes as quotes_service
+from ...services.incident_types import list_incident_types
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,16 @@ async def suggest_address(
     return {"suggestions": suggestions}
 
 
+@router.get("/incident-types", tags=["Отправка фотоотчёта"])
+async def incident_types():
+    """ПУБЛИЧНО: справочник типов инцидента [{code, label}] для дропдауна формы/фильтра.
+
+    Статичный справочник (services/incident_types.py); подпись фронт резолвит по коду.
+    Публичный (intake-роутер без auth) — нужен неавторизованной форме волонтёра.
+    """
+    return list_incident_types()
+
+
 @router.post("/form", tags=["Отправка фотоотчёта"])
 async def public_form(
     session: AsyncSession = Depends(get_db),
@@ -163,6 +174,8 @@ async def public_form(
     city: str = Form(""),
     street: str = Form(""),
     coords: str = Form(""),
+    incident_type: str = Form(""),
+    comment: str = Form(""),
     photo_time: str = Form(""),
     bins: str = Form(""),
     website: str = Form(""),  # honeypot — у людей всегда пусто
@@ -184,6 +197,8 @@ async def public_form(
         city=city,
         street=street,
         coords=coords,
+        incident_type=incident_type,
+        comment=comment,
         photo_time=photo_time,
         bins=bins,
         photo_files=photos,

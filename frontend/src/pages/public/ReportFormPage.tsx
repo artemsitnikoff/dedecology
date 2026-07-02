@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { submitIntakeForm } from '@/api/intake';
 import type { AddressSuggestion, SuggestOptions } from '@/api/intake';
+import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
 import { useAddressSuggest } from './useAddressSuggest';
 import { compressImage } from '@/lib/image';
 import './report-form.css';
@@ -106,8 +107,13 @@ function AddressField({ label, required, value, onChange, onPick, opts, placehol
 }
 
 export default function ReportFormPage() {
+  // Справочник типов инцидента для дропдауна (публичный, без auth).
+  const { data: incidentTypes = [] } = useIncidentTypes();
+
   // --- Поля формы ---
   const [fio, setFio] = useState('');
+  const [incidentType, setIncidentType] = useState('');
+  const [comment, setComment] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
   const [street, setStreet] = useState('');
@@ -208,6 +214,10 @@ export default function ReportFormPage() {
       setSubmitError('Пожалуйста, укажите заявителя.');
       return;
     }
+    if (!incidentType) {
+      setSubmitError('Пожалуйста, выберите тип инцидента.');
+      return;
+    }
     if (!region.trim()) {
       setSubmitError('Пожалуйста, укажите регион.');
       return;
@@ -232,6 +242,8 @@ export default function ReportFormPage() {
         .join(', ');
       const fd = new FormData();
       fd.append('fio', fio.trim());
+      fd.append('incident_type', incidentType);
+      fd.append('comment', comment.trim());
       fd.append('full_address', fullAddress);
       fd.append('region', region.trim());
       fd.append('city', city.trim());
@@ -296,6 +308,27 @@ export default function ReportFormPage() {
                   placeholder="Иванов Иван Иванович"
                   autoComplete="name"
                 />
+              </label>
+
+              {/* Тип инцидента — обязательный выбор из справочника */}
+              <label className="de-rf-field">
+                <span className="de-rf-label">
+                  Тип инцидента <span className="de-rf-req">*</span>
+                </span>
+                <select
+                  className="de-rf-input de-rf-select"
+                  value={incidentType}
+                  onChange={(e) => setIncidentType(e.target.value)}
+                >
+                  <option value="" disabled>
+                    Выберите тип инцидента…
+                  </option>
+                  {incidentTypes.map((t) => (
+                    <option key={t.code} value={t.code}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               {/* Регион с автодополнением */}
@@ -376,6 +409,18 @@ export default function ReportFormPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Комментарий — необязательная прочая информация */}
+              <label className="de-rf-field">
+                <span className="de-rf-label">Комментарий</span>
+                <textarea
+                  className="de-rf-input de-rf-textarea"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="Дополнительная информация: описание проблемы, ориентиры и т.п."
+                  rows={3}
+                />
+              </label>
 
               {/* Фото */}
               <div className="de-rf-field">

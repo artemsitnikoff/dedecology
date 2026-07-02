@@ -6,6 +6,7 @@ import type { IncidentFilters, SortKey, SortOrder } from '@/api/hooks/useInciden
 import { useIncidentPoints } from '@/api/hooks/useIncidentPoints';
 import { useFunnelCounts } from '@/api/hooks/useFunnelCounts';
 import { useRegions } from '@/api/hooks/useRegions';
+import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
 import { exportAll, exportSelected, useBulkStatus, useBulkDelete } from '@/api/mutations/incidents';
 import type { Source, Status } from '@/api/aliases';
 import { YandexMap } from '@/components/YandexMap';
@@ -54,6 +55,7 @@ export function IncidentsPage() {
   const search = searchParams.get('search') ?? '';
   const sources = parseSources(searchParams.getAll('source'));
   const region = searchParams.get('region') ?? '';
+  const incidentType = searchParams.get('incident_type') ?? '';
   const status = parseStatus(searchParams.get('status'));
   const dateFrom = searchParams.get('date_from') ?? '';
   const dateTo = searchParams.get('date_to') ?? '';
@@ -65,13 +67,14 @@ export function IncidentsPage() {
       search: search || undefined,
       source: sources.length ? sources : undefined,
       region: region || undefined,
+      incident_type: incidentType || undefined,
       status: status ?? undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       sort,
       order,
     }),
-    [search, sources, region, status, dateFrom, dateTo, sort, order]
+    [search, sources, region, incidentType, status, dateFrom, dateTo, sort, order]
   );
 
   // Стабильная ссылка на searchParams для use в колбэках без пересоздания.
@@ -117,6 +120,17 @@ export function IncidentsPage() {
       patchParams((p) => {
         if (v) p.set('region', v);
         else p.delete('region');
+      });
+    },
+    [patchParams]
+  );
+
+  const setIncidentTypeParam = useCallback(
+    (v: string) => {
+      patchParams((p) => {
+        if (v) p.set('incident_type', v);
+        else p.delete('incident_type');
+        p.delete('page'); // смена фильтра → на первую страницу
       });
     },
     [patchParams]
@@ -169,6 +183,7 @@ export function IncidentsPage() {
     patchParams((p) => {
       p.delete('source');
       p.delete('region');
+      p.delete('incident_type');
       p.delete('status');
       p.delete('date_from');
       p.delete('date_to');
@@ -179,6 +194,7 @@ export function IncidentsPage() {
   const incidentsQuery = useIncidents(filters);
   const funnelQuery = useFunnelCounts(filters);
   const regionsQuery = useRegions();
+  const incidentTypesQuery = useIncidentTypes();
   // Нефильтрованный общий итог («из N») — те же пустые фильтры, что и в Sidebar
   // (один queryKey → дедуп). all = grand total по всем обращениям.
   const grandTotalQuery = useFunnelCounts({});
@@ -267,6 +283,7 @@ export function IncidentsPage() {
   const filterCount =
     (sources.length ? 1 : 0) +
     (region ? 1 : 0) +
+    (incidentType ? 1 : 0) +
     (status ? 1 : 0) +
     (dateFrom || dateTo ? 1 : 0);
   const hasFilters = filterCount > 0;
@@ -386,6 +403,9 @@ export function IncidentsPage() {
         region={region}
         regions={regionsQuery.data ?? []}
         onRegion={setRegionParam}
+        incidentType={incidentType}
+        incidentTypes={incidentTypesQuery.data ?? []}
+        onIncidentType={setIncidentTypeParam}
         dateFrom={dateFrom}
         dateTo={dateTo}
         onDateFrom={setDateFrom}
