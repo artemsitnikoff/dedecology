@@ -57,17 +57,17 @@ export function useStartMnoSyncAll() {
 }
 
 /**
- * POST /integration/mno/sync/cancel {scope:'all'} — отмена фоновой синхронизации МНО.
- * Бэк выставляет флаг отмены (задача корректно останавливается в пределах ближайшего
- * батча) и снимает указатель `mno:ptr:__all__` → get_running_job=None, кнопка запуска
- * снова активна. Сброс локального jobId + инвалидация (running-all/overview) — на
- * стороне страницы (в onSuccess вызова), чтобы UI сразу разблокировался.
+ * POST /integration/mno/sync/cancel {scope} — отмена фоновой синхронизации МНО.
+ * scope = 'all' (прогон всех регионов) ЛИБО код региона (напр. '40') — ДОЛЖЕН совпадать
+ * с ключом идущей задачи, иначе бэк ищет указатель не по тому ключу и «не находит»
+ * (cancelled=false). Бэк выставляет флаг отмены (задача останавливается на ближайшем
+ * батче) и снимает указатель `mno:ptr:{scope}` → get_running_job=None, запуск снова активен.
  */
 export function useCancelMnoSync() {
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (scope: string) => {
       const res = await api.post<MnoCancelResult>('/integration/mno/sync/cancel', {
-        scope: 'all',
+        scope,
       });
       return res.data;
     },

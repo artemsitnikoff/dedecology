@@ -192,7 +192,10 @@ export function IntegrationPage() {
   // Отмена фоновой синхронизации МНО: снимает флаг/указатель на бэке, разблокирует запуск.
   const handleCancelMno = () => {
     if (cancelMno.isPending) return;
-    cancelMno.mutate(undefined, {
+    // Отменяем ИМЕННО идущую задачу: 'all' для прогона всех регионов, иначе КОД РЕГИОНА
+    // идущей задачи (иначе бэк ищет указатель по __all__ и одиночный синк «не находит»).
+    const scope = status?.scope === 'all' ? 'all' : status?.region_code || mnoRegion;
+    cancelMno.mutate(scope, {
       onSuccess: (res) => {
         // Сброс локального jobId → опрос статуса гаснет, кнопка запуска снова активна.
         setJobId(null);
