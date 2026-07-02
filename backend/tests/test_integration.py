@@ -1226,34 +1226,37 @@ async def test_get_running_job_ignores_stale():
     assert (await mno_jobs.get_running_job(r, "__all__")) is None
 
 
-# --- ранняя остановка обхода по плато (не молотим избыточный «хвост») -----------
+# --- плотный регион: обход НЕ останавливается на «пустых» раундах дробления --------
 
 
 @pytest.mark.asyncio
-async def test_crawler_stops_on_plateau(monkeypatch):
-    """STALL_ROUNDS раундов подряд без новых МНО → обход прекращается, а не молотит хвост."""
-    monkeypatch.setattr(fgis, "START_CELLS", [(0, 0, 10, 10)])
+async def test_crawler_drills_dense_without_early_stop(monkeypatch):
+    """Регресс на баг с «плато»: в плотном регионе десятки раундов ПОДРЯД идут без новых
+    id (большие городские кластеры лишь дробятся 2×2, точки появляются только на глубоком
+    зуме). Ранняя остановка «по плато» обрывала обход на грубом зуме → города недобирались
+    (в базе оседали только сельские точки). Теперь обход обязан спуститься до MAX_Z по всем
+    ветвям и собрать ВСЕ глубокие id — очередь дренируется полностью, без ранней остановки."""
+    monkeypatch.setattr(fgis, "START_CELLS", [(0.0, 0.0, 10.0, 10.0)])
     monkeypatch.setattr(fgis, "START_Z", 4)
+    monkeypatch.setattr(fgis, "MAX_Z", 10)  # z4→6→8→10 (три уровня дробления)
     monkeypatch.setattr(fgis, "TILE_CONCURRENCY", 1)  # 1 ячейка/раунд — детерминизм
-    monkeypatch.setattr(fgis, "STALL_ROUNDS", 3)
-
-    calls = {"n": 0}
 
     async def fake_fetch_tile(filter_id, bbox, z):
-        calls["n"] += 1
-        # Каждый тайл: уже виденный "a" (новых нет) + >100 кластер (дробится → очередь
-        # НЕ пустеет). Так без ранней остановки обход молотил бы до лимита тайлов.
-        return [
-            {"properties": {"layer": 5, "id": "a"}},
-            {"properties": {"layer": 5, "ids": ["a"], "iconContent": "500"}},
-        ]
+        if z < fgis.MAX_Z:
+            # Грубые зумы: сплошной кластер >100 → только дробится, НОВЫХ id за раунд нет.
+            # 21 такой раунд подряд (z4:1 + z6:4 + z8:16) — раньше «плато» тут и обрывалось.
+            return [{"properties": {"layer": 5, "ids": ["dummy"], "iconContent": "999"}}]
+        # MAX_Z: уникальная точка на ячейку — «городские» МНО, которые обязаны попасть в сбор.
+        min_lon, min_lat, _, _ = bbox
+        return [{"properties": {"layer": 5, "id": f"mno-{min_lon:.3f}-{min_lat:.3f}"}}]
 
     monkeypatch.setattr(fgis, "fetch_tile", fake_fetch_tile)
 
-    ids, issues = await fgis.enumerate_region_mno_ids("f", 51)
-    assert ids == {"a"}
-    assert any("плато" in i for i in issues)
-    assert calls["n"] < 50  # остановились рано, а не на TILE_REQUEST_LIMIT (6000)
+    ids, issues = await fgis.enumerate_region_mno_ids("f", 54)
+    # По всем ветвям спустились до MAX_Z: 4³ = 64 листовые ячейки → 64 уникальных id.
+    assert len(ids) == 64
+    assert all(i.startswith("mno-") for i in ids)  # «dummy»-кластеры лишь дробились, не добавлялись
+    assert issues == []  # штатный обход: очередь дренировалась, без обрыва/усечения
 
 
 # --- финализация осиротевших задач при старте воркера (анти-залипание) ---------

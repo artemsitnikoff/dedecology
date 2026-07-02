@@ -45,13 +45,13 @@ START_CELLS: list[tuple[float, float, float, float]] = [
     (148, 41, 180, 82),
 ]
 START_Z = 4
-MAX_Z = 13
+MAX_Z = 14                 # дожимаем плотные кластеры: на z13 ещё встречались >100 (города)
 CLUSTER_LIMIT = 100        # массив ids в кластере обрезан на 100
-TILE_REQUEST_LIMIT = 6000  # общий гард на число tile-запросов за обход
+# Гард против рантайм-runaway. НЕ штатный стоп: штатно обход завершается САМ, когда очередь
+# пуста (все кластеры дожаты до <=100 или до MAX_Z). Раньше был занижен (6000) → на плотных
+# регионах обход не успевал спуститься в города; поднят.
+TILE_REQUEST_LIMIT = 50000
 TILE_CONCURRENCY = 6       # одновременных tile-запросов (ФГИС медленный → параллелим обход)
-# Раундов ПОДРЯД без новых МНО → регион исчерпан, дальнейший обход лишь домалывает
-# избыточный «хвост» (повторно накрывает найденное) → останавливаемся и идём дальше.
-STALL_ROUNDS = 20
 
 # JSONP-обёртка: callback({...});  → group(1) = JSON внутри.
 _JSONP_RE = re.compile(r"^callback\((.*)\);?\s*$", re.DOTALL)
@@ -319,7 +319,6 @@ async def enumerate_region_mno_ids(
     issues: list[str] = []
     truncated = 0
     tile_requests = 0
-    rounds_no_new = 0               # раундов подряд без новых МНО (для ранней остановки)
 
     def _add(pid: str | None) -> None:
         """Регистрирует НОВЫЙ id: в общий set seen и в очередь pending на потоковый флаш."""
@@ -345,7 +344,6 @@ async def enumerate_region_mno_ids(
         while queue and len(cells) < TILE_CONCURRENCY:
             cells.append(queue.popleft())
         tile_requests += len(cells)
-        before = len(seen)  # для детекта плато (нет новых id за раунд)
         results = await asyncio.gather(
             *(fetch_tile(filter_id, bbox, z) for bbox, z in cells)
         )
@@ -380,18 +378,6 @@ async def enumerate_region_mno_ids(
         # проверить отмену, пока on_batch молчит.
         if on_tick is not None:
             await on_tick()
-        # Ранняя остановка по плато: STALL_ROUNDS раундов подряд без новых МНО → регион
-        # исчерпан, очередь лишь домалывает избыточный хвост (повторно накрывает найденное).
-        if len(seen) == before:
-            rounds_no_new += 1
-            if rounds_no_new >= STALL_ROUNDS:
-                issues.append(
-                    f"обход остановлен по плато: {STALL_ROUNDS} раундов без новых МНО "
-                    "(регион исчерпан, хвост избыточен)"
-                )
-                break
-        else:
-            rounds_no_new = 0
 
     # Слить остаток (последний неполный батч).
     if on_batch is not None and pending:
