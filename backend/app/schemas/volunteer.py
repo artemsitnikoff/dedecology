@@ -16,7 +16,6 @@ from .base import ORMBase
 
 
 class VolunteerRegister(BaseModel):
-    fio: str = Field(min_length=1, max_length=255)
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
 
@@ -58,7 +57,6 @@ class VolunteerProfile(ORMBase):
     """Профиль волонтёра для мобильного приложения (/me, онбординг, вложен в логин)."""
 
     id: UUID
-    fio: str
     email: str
     phone: str | None
     email_verified: bool
@@ -101,9 +99,9 @@ class VolunteerListItem(ORMBase):
     """Строка справочника «Волонтёры» в админке."""
 
     id: UUID
-    fio: str
     email: str
     phone: str | None
     email_verified: bool
     is_active: bool
+    last_seen_at: datetime | None
     created_at: datetime

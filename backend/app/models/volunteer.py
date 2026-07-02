@@ -1,7 +1,8 @@
 import uuid
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, text
+from sqlalchemy import String, Boolean, TIMESTAMP, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,8 +25,6 @@ class Volunteer(Base, TimestampMixin):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
-    # «Заявитель» — как fio у пользователя админки.
-    fio: Mapped[str] = mapped_column(String(255), nullable=False)
     # Уникальный обязательный email (подтверждается по ссылке из письма).
     # unique + index → единый уникальный индекс ix_volunteers_email.
     email: Mapped[str] = mapped_column(
@@ -41,4 +40,9 @@ class Volunteer(Base, TimestampMixin):
     # Флаг блокировки волонтёра админом (false → вход запрещён 403 BLOCKED).
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
+    )
+    # «Последняя авторизация»: обновляется при успешном логине и при любом запросе
+    # волонтёра по его JWT (в get_current_volunteer, с троттлингом ≤1 раз/мин).
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
     )

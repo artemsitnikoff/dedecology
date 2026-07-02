@@ -197,8 +197,6 @@ export interface UserCreate {
  */
 export interface Volunteer {
   id: string;
-  /** ФИО заявителя. */
-  fio: string;
   /** Email — уникальный, подтверждается по ссылке из письма. */
   email: string;
   /** Телефон — необязательный (проставляется при онбординге в приложении); null — не задан. */
@@ -207,6 +205,8 @@ export interface Volunteer {
   email_verified: boolean;
   /** Блокировка: false — волонтёр заблокирован и не может войти в приложение. */
   is_active: boolean;
+  /** ISO-строка — последняя авторизация (последний запрос волонтёра по JWT / успешный логин); null — ещё ни разу. */
+  last_seen_at: string | null;
   /** ISO-строка — момент регистрации. */
   created_at: string;
 }

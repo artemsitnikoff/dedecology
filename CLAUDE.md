@@ -72,7 +72,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   массовое изменение/создание/удаление пользователя/смену профиля.
 - Миграции: `0001_initial` (сначала `CREATE EXTENSION pgcrypto`) · `0002` notified_at+quote ·
   `0003` msg_url · `0004` is_superadmin (бэкфилл = старейший admin = pulse@reo.ru) · `0005` comment ·
-  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` таблица volunteers (мобильные волонтёры).
+  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at (−fio).
 
 ## 5. API (`/api/v1`, конверт ошибок `{error:{code,message,details}}`)
 - **auth:** `POST /auth/login` → `{access_token,token_type}` + HttpOnly refresh-cookie (path
@@ -120,7 +120,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
 **Backend** (локально есть `.venv` python3.14 для проверок; прод — Docker python:3.12):
 ```bash
 cd backend
-.venv/bin/python -m pytest -q          # тесты (оффлайн, без внешней БД) — сейчас 376/376 зелёные
+.venv/bin/python -m pytest -q          # тесты (оффлайн, без внешней БД) — сейчас 379/379 зелёные
 .venv/bin/python -m compileall -q app  # синтаксис
 # в Docker/проде: alembic upgrade head ; python -m app.seed
 ```

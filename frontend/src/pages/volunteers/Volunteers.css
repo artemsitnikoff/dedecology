@@ -55,7 +55,7 @@
   border: 2px solid var(--bg-1);
 }
 .de-vol-table {
-  min-width: 1080px;
+  min-width: 1260px;
 }
 .de-vol-thead {
   display: flex;
@@ -101,12 +101,9 @@
   flex: none;
 }
 /* Ширины/выравнивание колонок — общие для thead и строк. */
-.de-vol-c-fio {
-  flex: 1;
-  min-width: 180px;
-}
 .de-vol-c-email {
-  width: 240px;
+  flex: 1;
+  min-width: 220px;
 }
 .de-vol-c-phone {
   width: 150px;
@@ -117,8 +114,11 @@
 .de-vol-c-status {
   width: 150px;
 }
+.de-vol-c-seen {
+  width: 170px;
+}
 .de-vol-c-date {
-  width: 120px;
+  width: 150px;
 }
 .de-vol-c-actions {
   width: 260px;
@@ -126,11 +126,6 @@
   justify-content: flex-end;
 }
 /* Текст строк (не задевает мелкий uppercase шапки). */
-.de-vol-row .de-vol-c-fio {
-  font-size: 13.5px;
-  color: var(--fg-1);
-  font-weight: 500;
-}
 .de-vol-row .de-vol-c-email {
   font-size: var(--fs-13);
   color: var(--fg-2);
@@ -146,6 +141,7 @@
   font-size: var(--fs-13);
   color: var(--fg-2);
 }
+.de-vol-row .de-vol-c-seen,
 .de-vol-row .de-vol-c-date {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

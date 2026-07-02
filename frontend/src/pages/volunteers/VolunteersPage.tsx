@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatTime } from '@/lib/format';
 import { useAuthStore } from '@/store/authStore';
 import { useVolunteers } from '@/api/hooks/volunteers';
 import { useDeleteVolunteer, useSetVolunteerActive } from '@/api/mutations/volunteers';
@@ -25,6 +25,12 @@ function pluralVol(n: number): string {
   return 'волонтёров';
 }
 
+/** «ДД.ММ.ГГГГ ЧЧ:ММ» или «—» — момент последней авторизации волонтёра (как в других таблицах). */
+function fmtDateTime(iso: string | null | undefined): string {
+  const d = formatDate(iso);
+  return d ? `${d} ${formatTime(iso)}` : '—';
+}
+
 /* ---------- Строка таблицы ---------- */
 type RowProps = {
   v: Volunteer;
@@ -42,7 +48,6 @@ const VolunteerRow = memo(function VolunteerRow({
 }: RowProps) {
   return (
     <div className="de-vol-row">
-      <div className="de-vol-cell de-vol-c-fio">{v.fio}</div>
       <div className="de-vol-cell de-vol-c-email" title={v.email}>
         {v.email}
       </div>
@@ -67,6 +72,7 @@ const VolunteerRow = memo(function VolunteerRow({
           {v.is_active ? 'Активен' : 'Заблокирован'}
         </span>
       </div>
+      <div className="de-vol-cell de-vol-c-seen">{fmtDateTime(v.last_seen_at)}</div>
       <div className="de-vol-cell de-vol-c-date">{formatDate(v.created_at) || '—'}</div>
       {isAdmin && (
         <div className="de-vol-cell de-vol-c-actions">
@@ -121,7 +127,7 @@ export function VolunteersPage() {
       {
         onSuccess: () =>
           showToast(
-            next ? `Волонтёр «${v.fio}» разблокирован.` : `Волонтёр «${v.fio}» заблокирован.`
+            next ? `Волонтёр «${v.email}» разблокирован.` : `Волонтёр «${v.email}» заблокирован.`
           ),
         onError: () => showToast('Не удалось изменить статус волонтёра.'),
       }
@@ -130,11 +136,11 @@ export function VolunteersPage() {
 
   const handleDelete = () => {
     if (!toDelete) return;
-    const fio = toDelete.fio;
+    const email = toDelete.email;
     deleteVolunteer.mutate(toDelete.id, {
       onSuccess: () => {
         setToDelete(null);
-        showToast(`Волонтёр «${fio}» удалён из справочника.`);
+        showToast(`Волонтёр «${email}» удалён из справочника.`);
       },
       onError: () => showToast('Не удалось удалить волонтёра.'),
     });
@@ -168,12 +174,12 @@ export function VolunteersPage() {
         ) : (
           <div className="de-vol-table">
             <div className="de-vol-thead">
-              <div className="de-vol-th de-vol-c-fio">Заявитель</div>
               <div className="de-vol-th de-vol-c-email">Email</div>
               <div className="de-vol-th de-vol-c-phone">Телефон</div>
               <div className="de-vol-th de-vol-c-verified">Почта подтв.</div>
               <div className="de-vol-th de-vol-c-status">Статус</div>
-              <div className="de-vol-th de-vol-c-date">Дата</div>
+              <div className="de-vol-th de-vol-c-seen">Посл. авторизация</div>
+              <div className="de-vol-th de-vol-c-date">Дата регистрации</div>
               {isAdmin && <div className="de-vol-th de-vol-c-actions">Действия</div>}
             </div>
             {volunteers.map((v) => (
@@ -231,9 +237,9 @@ function ConfirmDeleteModal({ volunteer, pending, onClose, onConfirm }: ConfirmP
         </div>
         <div className="de-vol-modal-body">
           <div className="de-vol-confirm-text">
-            Волонтёр <b>«{volunteer.fio}»</b> ({volunteer.email}) будет удалён из справочника.
-            Учётная запись в мобильном приложении перестанет действовать. Если нужно временно
-            ограничить доступ — используйте блокировку.
+            Волонтёр <b>«{volunteer.email}»</b> будет удалён из справочника. Учётная запись в
+            мобильном приложении перестанет действовать. Если нужно временно ограничить доступ —
+            используйте блокировку.
           </div>
         </div>
         <div className="de-vol-modal-foot">

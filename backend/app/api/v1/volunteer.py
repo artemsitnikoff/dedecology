@@ -66,7 +66,7 @@ async def register_volunteer(
     sent = deliver_email(
         volunteer.email,
         subject="ЭкоПульс — подтверждение адреса почты",
-        body=f"Здравствуйте, {volunteer.fio}!\n\n"
+        body="Здравствуйте!\n\n"
         f"Подтвердите адрес электронной почты, перейдя по ссылке:\n{verify_url}\n\n"
         f"Если вы не регистрировались в ЭкоПульс — просто проигнорируйте это письмо.",
     )
@@ -98,6 +98,8 @@ async def login_volunteer(
 ):
     """Вход волонтёра. 401 неверные данные · 403 EMAIL_NOT_VERIFIED · 403 BLOCKED."""
     volunteer = await authenticate(session, data.email, data.password)
+    # authenticate проставил last_seen_at (последняя авторизация) — фиксируем.
+    await session.commit()
     access_token = create_volunteer_access_token(str(volunteer.id))
     return VolunteerLoginResponse(
         access_token=access_token,
@@ -129,7 +131,7 @@ async def request_reset(
     sent = deliver_email(
         volunteer.email,
         subject="ЭкоПульс — восстановление пароля",
-        body=f"Здравствуйте, {volunteer.fio}!\n\n"
+        body="Здравствуйте!\n\n"
         f"Для смены пароля перейдите по ссылке:\n{reset_url}\n\n"
         f"Если вы не запрашивали сброс пароля — просто проигнорируйте это письмо.",
     )

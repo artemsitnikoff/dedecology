@@ -7,6 +7,7 @@
 """
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -36,9 +37,8 @@ from app.schemas.volunteer import VolunteerRegister
 from app.services import volunteer as vol_service
 
 
-def _volunteer(email_verified=True, is_active=True, phone=None):
+def _volunteer(email_verified=True, is_active=True, phone=None, last_seen_at=None):
     v = Volunteer(
-        fio="Петров Пётр",
         email="vol@example.com",
         password_hash="x",
         phone=phone,
@@ -47,6 +47,7 @@ def _volunteer(email_verified=True, is_active=True, phone=None):
     )
     v.id = uuid4()
     v.created_at = datetime.now(timezone.utc)
+    v.last_seen_at = last_seen_at
     return v
 
 
@@ -73,7 +74,7 @@ async def test_register_returns_token_when_email_not_sent(client):
     with patch("app.api.v1.volunteer.register", new=AsyncMock(return_value=vol)):
         resp = await client.post(
             "/api/v1/volunteer/register",
-            json={"fio": "Петров Пётр", "email": "vol@example.com", "password": "secret123"},
+            json={"email": "vol@example.com", "password": "secret123"},
         )
     assert resp.status_code == 201
     body = resp.json()
@@ -94,7 +95,7 @@ async def test_register_duplicate_email_409(client):
     ):
         resp = await client.post(
             "/api/v1/volunteer/register",
-            json={"fio": "X", "email": "dup@example.com", "password": "secret123"},
+            json={"email": "dup@example.com", "password": "secret123"},
         )
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "CONFLICT"
@@ -104,7 +105,7 @@ async def test_register_duplicate_email_409(client):
 async def test_register_short_password_422(client):
     resp = await client.post(
         "/api/v1/volunteer/register",
-        json={"fio": "X", "email": "x@example.com", "password": "abc"},
+        json={"email": "x@example.com", "password": "abc"},
     )
     assert resp.status_code == 422
 
@@ -316,6 +317,60 @@ async def test_get_current_volunteer_rejects_missing_bearer(client):
     assert resp.status_code in (401, 403)  # HTTPBearer сам отдаёт 403 при отсутствии заголовка
 
 
+def _session_returning(volunteer) -> MagicMock:
+    """Фейк-сессия, чей execute().scalar_one_or_none() возвращает данного волонтёра."""
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = volunteer
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock()
+    return session
+
+
+@pytest.mark.asyncio
+async def test_get_current_volunteer_sets_last_seen_when_empty():
+    """last_seen_at пуст → обновляется и коммитится (последняя авторизация = этот запрос)."""
+    vol = _volunteer(last_seen_at=None)
+    session = _session_returning(vol)
+    token = create_volunteer_access_token(str(vol.id))
+
+    returned = await get_current_volunteer(
+        token=SimpleNamespace(credentials=token), session=session
+    )
+    assert returned is vol
+    assert vol.last_seen_at is not None
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_current_volunteer_throttles_last_seen():
+    """last_seen_at обновлён недавно (<60с) → повторной записи/commit нет (троттлинг)."""
+    recent = datetime.now(timezone.utc)
+    vol = _volunteer(last_seen_at=recent)
+    session = _session_returning(vol)
+    token = create_volunteer_access_token(str(vol.id))
+
+    returned = await get_current_volunteer(
+        token=SimpleNamespace(credentials=token), session=session
+    )
+    assert returned is vol
+    assert vol.last_seen_at == recent  # не переписан
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_current_volunteer_updates_stale_last_seen():
+    """last_seen_at старше 60с → обновляется и коммитится."""
+    stale = datetime.now(timezone.utc) - timedelta(minutes=5)
+    vol = _volunteer(last_seen_at=stale)
+    session = _session_returning(vol)
+    token = create_volunteer_access_token(str(vol.id))
+
+    await get_current_volunteer(token=SimpleNamespace(credentials=token), session=session)
+    assert vol.last_seen_at > stale
+    session.commit.assert_awaited_once()
+
+
 # =========================================================================
 # Админ-справочник /volunteers (require_admin)
 # =========================================================================
@@ -333,6 +388,10 @@ async def test_admin_list_volunteers(client):
     assert body[0]["is_active"] is True
     assert body[0]["email_verified"] is True
     assert "created_at" in body[0]
+    # «Последняя авторизация» присутствует в строке справочника (null, вход не совершался).
+    assert "last_seen_at" in body[0]
+    assert body[0]["last_seen_at"] is None
+    assert "fio" not in body[0]  # поле «Заявитель» у волонтёра убрано
 
 
 @pytest.mark.asyncio
@@ -415,7 +474,7 @@ def test_mailer_returns_false_without_smtp():
 @pytest.mark.asyncio
 async def test_service_register_hashes_password_and_sets_flags():
     session = _no_existing_session()
-    data = VolunteerRegister(fio="Петров Пётр", email="vol@example.com", password="secret123")
+    data = VolunteerRegister(email="vol@example.com", password="secret123")
     vol = await vol_service.register(session, data)
     assert vol.email_verified is False
     assert vol.is_active is True
@@ -430,7 +489,7 @@ async def test_service_register_duplicate_conflict():
     result = MagicMock()
     result.scalar_one_or_none.return_value = _volunteer()  # email уже есть
     session.execute = AsyncMock(return_value=result)
-    data = VolunteerRegister(fio="X", email="vol@example.com", password="secret123")
+    data = VolunteerRegister(email="vol@example.com", password="secret123")
     with pytest.raises(ConflictError):
         await vol_service.register(session, data)
 
@@ -442,8 +501,10 @@ async def test_service_authenticate_flow():
     verified.password_hash = get_password_hash("secret123")
 
     with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=verified)):
-        # успех
+        # успех + проставлена «последняя авторизация»
+        assert verified.last_seen_at is None
         assert await vol_service.authenticate(session, "vol@example.com", "secret123") is verified
+        assert verified.last_seen_at is not None
         # неверный пароль → 401
         with pytest.raises(InvalidCredentialsError):
             await vol_service.authenticate(session, "vol@example.com", "wrong")

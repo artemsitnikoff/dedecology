@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import Depends
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,5 +89,13 @@ async def get_current_volunteer(
 
     if volunteer is None or not volunteer.is_active:
         raise unauthenticated
+
+    # «Последняя авторизация» = последний запрос волонтёра по его JWT. Пишем с
+    # троттлингом (≤1 раз в минуту), чтобы не коммитить на КАЖДЫЙ запрос.
+    now = datetime.now(timezone.utc)
+    last_seen = volunteer.last_seen_at
+    if last_seen is None or (now - last_seen).total_seconds() > 60:
+        volunteer.last_seen_at = now
+        await session.commit()
 
     return volunteer

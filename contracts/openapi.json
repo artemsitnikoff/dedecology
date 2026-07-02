@@ -5278,10 +5278,6 @@
             "format": "uuid",
             "title": "Id"
           },
-          "fio": {
-            "type": "string",
-            "title": "Fio"
-          },
           "email": {
             "type": "string",
             "title": "Email"
@@ -5305,6 +5301,18 @@
             "type": "boolean",
             "title": "Is Active"
           },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -5314,11 +5322,11 @@
         "type": "object",
         "required": [
           "id",
-          "fio",
           "email",
           "phone",
           "email_verified",
           "is_active",
+          "last_seen_at",
           "created_at"
         ],
         "title": "VolunteerListItem",
@@ -5386,10 +5394,6 @@
             "format": "uuid",
             "title": "Id"
           },
-          "fio": {
-            "type": "string",
-            "title": "Fio"
-          },
           "email": {
             "type": "string",
             "title": "Email"
@@ -5413,7 +5417,6 @@
         "type": "object",
         "required": [
           "id",
-          "fio",
           "email",
           "phone",
           "email_verified"
@@ -5423,12 +5426,6 @@
       },
       "VolunteerRegister": {
         "properties": {
-          "fio": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Fio"
-          },
           "email": {
             "type": "string",
             "format": "email",
@@ -5443,7 +5440,6 @@
         },
         "type": "object",
         "required": [
-          "fio",
           "email",
           "password"
         ],
