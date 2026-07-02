@@ -1285,3 +1285,40 @@ async def test_finalize_orphaned_jobs_unblocks_ui():
     # Маркер готового региона ЖИВ (прогресс не потерян) + done-set цел.
     assert await mno_jobs.is_region_recently_synced(r, "22") is True
     assert await mno_jobs.is_region_done(r, "orphan", "22") is True
+
+
+# --- upsert: защитная подрезка полей (длинный адрес ФГИС не роняет INSERT) ------
+
+
+@pytest.mark.asyncio
+async def test_upsert_batch_clips_long_fields():
+    """Длинные значения ФГИС подрезаются под лимиты колонок (иначе INSERT падал и рушил
+    транзакцию региона). address — TEXT, не режется."""
+    from app.models import Mno
+
+    added: list = []
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = None  # такого fgis_id нет → insert
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=res)
+    session.add = MagicMock(side_effect=lambda m: added.append(m))
+    session.flush = AsyncMock()
+
+    obj = {
+        "id": "fid-1",
+        "name": "Н" * 600,
+        "registryNumber": "R" * 100,
+        "area": "Г" * 300,
+        "address": "А" * 2000,  # длинный адрес-список — сохраняется ЦЕЛИКОМ (TEXT)
+        "location": {"latitude": 1.0, "longitude": 2.0},
+    }
+    n = await mno_sync._upsert_batch(session, 11, [obj])
+
+    assert n == 1
+    m = added[0]
+    assert isinstance(m, Mno)
+    assert len(m.name) == 500      # подрезано под String(500)
+    assert len(m.reg) == 64        # под String(64)
+    assert len(m.city) == 255      # под String(255)
+    assert m.coords == "1.0, 2.0"
+    assert len(m.address) == 2000  # адрес НЕ режется (TEXT)

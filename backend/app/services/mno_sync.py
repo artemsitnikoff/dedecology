@@ -47,12 +47,15 @@ async def _upsert_batch(
         coords = f"{lat}, {lon}" if lat is not None and lon is not None else ""
         city = str(o.get("area") or o.get("population") or "")
         values = {
-            "reg": o.get("registryNumber") or "",
-            "name": o.get("name") or "",
+            # Защитная подрезка под лимиты колонок: ФГИС присылает длинные значения
+            # (особенно адрес-списки домов) — без этого INSERT падает и рушит транзакцию
+            # региона (32 региона легли именно так). address — TEXT (миграция 0008), не режем.
+            "reg": (o.get("registryNumber") or "")[:64],
+            "name": (o.get("name") or "")[:500],
             "region_code": str(region_id),
-            "city": city,
+            "city": city[:255],
             "address": o.get("address") or "",
-            "coords": coords,
+            "coords": coords[:64],
             "synced": True,
             "sync_date": now,
         }

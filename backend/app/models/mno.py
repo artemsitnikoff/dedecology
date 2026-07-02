@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, Integer, text
+from sqlalchemy import String, Boolean, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,7 +31,9 @@ class Mno(Base, TimestampMixin):
         String(8), nullable=False, server_default=text("''"), index=True
     )
     city: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
-    address: Mapped[str] = mapped_column(String(500), nullable=False, server_default=text("''"))
+    # TEXT (не String(500)): ФГИС кладёт в адрес длинные списки домов (>500 символов),
+    # иначе INSERT падает StringDataRightTruncationError и рушит транзакцию региона (см. 0008).
+    address: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     # "широта, долгота" текстом (как у инцидента)
     coords: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))
     # ID в ФГИС. NULL — МНО заведено вручную и в ФГИС ещё не выгружено.
