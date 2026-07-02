@@ -234,6 +234,10 @@ export default function ReportFormPage() {
       setSubmitError('Пожалуйста, укажите координаты (подставятся при выборе улицы из подсказок).');
       return;
     }
+    if (!comment.trim()) {
+      setSubmitError('Пожалуйста, заполните комментарий.');
+      return;
+    }
     setSubmitError(null);
     setSubmitting(true);
     try {
@@ -308,27 +312,6 @@ export default function ReportFormPage() {
                   placeholder="Иванов Иван Иванович"
                   autoComplete="name"
                 />
-              </label>
-
-              {/* Тип инцидента — обязательный выбор из справочника */}
-              <label className="de-rf-field">
-                <span className="de-rf-label">
-                  Тип инцидента <span className="de-rf-req">*</span>
-                </span>
-                <select
-                  className="de-rf-input de-rf-select"
-                  value={incidentType}
-                  onChange={(e) => setIncidentType(e.target.value)}
-                >
-                  <option value="" disabled>
-                    Выберите тип инцидента…
-                  </option>
-                  {incidentTypes.map((t) => (
-                    <option key={t.code} value={t.code}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
               </label>
 
               {/* Регион с автодополнением */}
@@ -410,14 +393,37 @@ export default function ReportFormPage() {
                 </div>
               </div>
 
-              {/* Комментарий — необязательная прочая информация */}
+              {/* Тип инцидента — обязательный выбор из справочника (перед комментарием) */}
               <label className="de-rf-field">
-                <span className="de-rf-label">Комментарий</span>
+                <span className="de-rf-label">
+                  Тип инцидента <span className="de-rf-req">*</span>
+                </span>
+                <select
+                  className="de-rf-input de-rf-select"
+                  value={incidentType}
+                  onChange={(e) => setIncidentType(e.target.value)}
+                >
+                  <option value="" disabled>
+                    Выберите тип инцидента…
+                  </option>
+                  {incidentTypes.map((t) => (
+                    <option key={t.code} value={t.code}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {/* Комментарий — обязательная прочая информация */}
+              <label className="de-rf-field">
+                <span className="de-rf-label">
+                  Комментарий <span className="de-rf-req">*</span>
+                </span>
                 <textarea
                   className="de-rf-input de-rf-textarea"
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  placeholder="Дополнительная информация: описание проблемы, ориентиры и т.п."
+                  placeholder="Опишите проблему: что не так, ориентиры и т.п."
                   rows={3}
                 />
               </label>
