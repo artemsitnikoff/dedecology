@@ -355,6 +355,7 @@ async def enumerate_region_mno_ids(
             *(fetch_tile(filter_id, bbox, z) for bbox, z in cells)
         )
         for (bbox, z), features in zip(cells, results):
+            needs_split = False  # хотя бы один кластер >100 → ячейку дробим ОДИН раз (ниже)
             for f in features:
                 p = f.get("properties") or {}
                 # На СТАРТ-зуме суммируем полное число объектов (iconContent кластера или
@@ -371,11 +372,16 @@ async def enumerate_region_mno_ids(
                             _add(cid)
                         truncated += 1
                     else:
-                        next_z = min(z + 2, MAX_Z)
-                        for sub in split_bbox_2x2(bbox):
-                            queue.append((sub, next_z))
+                        needs_split = True
                 else:  # одиночный объект
                     _add(p.get("id"))
+            # Дробим ячейку ОДИН раз за тайл, если хоть один кластер >100 — а НЕ по разу на
+            # КАЖДЫЙ такой кластер (иначе в очередь падало 4×N дубликатов одних и тех же
+            # под-ячеек: очередь взрывалась, обход полз часами и не сходился к итогу).
+            if needs_split:
+                next_z = min(z + 2, MAX_Z)
+                for sub in split_bbox_2x2(bbox):
+                    queue.append((sub, next_z))
         if on_progress is not None:
             on_progress(len(seen))
         # Потоковый флаш (СЕРИАЛЬНО, после параллельного раунда): пока накоплено >= batch_size
