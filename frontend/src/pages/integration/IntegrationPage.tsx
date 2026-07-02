@@ -6,7 +6,7 @@ import { formatDate, formatTime } from '@/lib/format';
 import {
   useIntegrationOverview,
   useMnoSyncStatus,
-  useRunningAllJob,
+  useRunningAnyJob,
 } from '@/api/hooks/integration';
 import {
   useSyncRegions,
@@ -78,9 +78,9 @@ export function IntegrationPage() {
   const statusQuery = useMnoSyncStatus(jobId);
   const status = statusQuery.data;
 
-  // Переподключение к идущей фоновой задаче «Все регионы» после перезагрузки (F5).
+  // Переподключение к ЛЮБОЙ идущей фоновой задаче (регион или «все») после перезагрузки (F5).
   // Бэк-задача серверная и НЕ прерывается — теряется лишь job_id во фронт-состоянии.
-  const runningAllQuery = useRunningAllJob();
+  const runningAnyQuery = useRunningAnyJob();
 
   const overview = overviewQuery.data;
   const perRegion = useMemo(() => overview?.per_region ?? [], [overview]);
@@ -141,19 +141,21 @@ export function IntegrationPage() {
     }
   }, [jobId, status, qc, showToast]);
 
-  // Переподключение к идущей задаче «Все регионы» после F5: если ручная задача не активна
-  // (jobId пуст) и на сервере есть ИДУЩАЯ фоновая синхронизация — подхватываем её job_id и
-  // выставляем селектор в ALL_REGIONS, чтобы опрос useMnoSyncStatus(jobId) продолжил прогресс.
+  // Переподключение к ЛЮБОЙ идущей задаче после F5: если ручная задача не активна (jobId пуст)
+  // и на сервере есть ИДУЩАЯ фоновая синхронизация — подхватываем её job_id и восстанавливаем
+  // селектор региона, чтобы опрос useMnoSyncStatus(jobId) продолжил показывать прогресс.
   // Уже завершённую задачу (done/error) НЕ подхватываем — только running.
   useEffect(() => {
-    const running = runningAllQuery.data;
+    const running = runningAnyQuery.data;
     // Только ЖИВУЮ идущую задачу переподхватываем; зависшую (stale) — игнорим,
     // чтобы она не блокировала кнопку запуска после F5.
     if (jobId != null || !running || running.state !== 'running' || isJobStale(running))
       return;
     setJobId(running.job_id);
-    setMnoRegion(ALL_REGIONS);
-  }, [runningAllQuery.data, jobId]);
+    // region_code = "__all__" (= ALL_REGIONS) для прогона «все», иначе код региона — оба
+    // значения совпадают со значениями селектора, поэтому проставляем как есть.
+    setMnoRegion(running.region_code);
+  }, [runningAnyQuery.data, jobId]);
 
   const handleSyncRegions = () => {
     if (syncRegions.isPending) return;
@@ -196,7 +198,7 @@ export function IntegrationPage() {
         setJobId(null);
         // Разрешаем обработать завершение будущей новой задачи.
         handledJobRef.current = null;
-        qc.invalidateQueries({ queryKey: ['integration', 'mno', 'running-all'] });
+        qc.invalidateQueries({ queryKey: ['integration', 'mno', 'running-any'] });
         qc.invalidateQueries({ queryKey: ['integration', 'overview'] });
         showToast(
           res.cancelled ? 'Синхронизация отменена.' : 'Активной синхронизации не было.'

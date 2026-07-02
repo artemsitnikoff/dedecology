@@ -473,6 +473,30 @@ async def test_mno_jobs_get_running_job():
 
 
 @pytest.mark.asyncio
+async def test_mno_jobs_get_any_running_job():
+    """get_any_running_job находит ЛЮБУЮ живую задачу сканом указателей (для подхвата
+    после F5 без знания ключа) — раньше одиночный регион терялся."""
+    fake = FakeRedis()
+    # Активной задачи нет → None.
+    assert await mno_jobs.get_any_running_job(fake) is None
+
+    # Идёт синк ОДНОГО региона (ключ = код региона, не "__all__").
+    prog = mno_jobs.initial_progress("j-54", "54", "Новосибирская область")
+    await mno_jobs.write_progress(fake, "j-54", prog)
+    await mno_jobs.set_pointer(fake, "54", "j-54")
+
+    any_running = await mno_jobs.get_any_running_job(fake)
+    assert any_running is not None and any_running["job_id"] == "j-54"
+    assert any_running["region_code"] == "54"
+
+    # Завершилась → скан больше её не отдаёт.
+    prog["state"] = "done"
+    prog["finished_at"] = mno_jobs.utcnow()
+    await mno_jobs.write_progress(fake, "j-54", prog)
+    assert await mno_jobs.get_any_running_job(fake) is None
+
+
+@pytest.mark.asyncio
 async def test_mno_jobs_done_set():
     """mark_region_done / is_region_done — основа resume прогона «все регионы»."""
     fake = FakeRedis()

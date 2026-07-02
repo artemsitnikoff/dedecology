@@ -2749,6 +2749,41 @@
         ]
       }
     },
+    "/api/v1/integration/mno/sync/active": {
+      "get": {
+        "tags": [
+          "Интеграция ФГИС (супер-админ)"
+        ],
+        "summary": "Mno Sync Active",
+        "description": "Любая ИДУЩАЯ фоновая синхронизация (регион ИЛИ «все») — для переподключения UI после F5.\n\nСкан указателей в Redis: возвращает первую живую running-задачу или null (не ошибка).\nРаньше фронт подхватывал после F5 только прогон «Все регионы», а синк одного региона\nтерялся и UI предлагал запуск заново — этот роут закрывает оба случая.",
+        "operationId": "mno_sync_active_api_v1_integration_mno_sync_active_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MnoSyncStatus"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Mno Sync Active Api V1 Integration Mno Sync Active Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/integration/mno/sync/status": {
       "get": {
         "tags": [

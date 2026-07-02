@@ -171,6 +171,19 @@ async def cancel_mno_sync(payload: MnoCancelRequest):
     return MnoCancelResult(cancelled=bool(job_id), job_id=job_id)
 
 
+@router.get("/mno/sync/active", response_model=MnoSyncStatus | None, tags=[TAG])
+async def mno_sync_active():
+    """Любая ИДУЩАЯ фоновая синхронизация (регион ИЛИ «все») — для переподключения UI после F5.
+
+    Скан указателей в Redis: возвращает первую живую running-задачу или null (не ошибка).
+    Раньше фронт подхватывал после F5 только прогон «Все регионы», а синк одного региона
+    терялся и UI предлагал запуск заново — этот роут закрывает оба случая.
+    """
+    redis = get_redis()
+    prog = await mno_jobs.get_any_running_job(redis)
+    return MnoSyncStatus(**prog) if prog is not None else None
+
+
 @router.get("/mno/sync/status", response_model=MnoSyncStatus, tags=[TAG])
 async def mno_sync_status(
     job_id: str | None = Query(None),

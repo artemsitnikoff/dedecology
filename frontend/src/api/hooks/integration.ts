@@ -42,23 +42,18 @@ export function useMnoSyncStatus(jobId: string | null) {
 }
 
 /**
- * GET /integration/mno/sync/status?region_code=__all__ — последняя задача «Все регионы».
- * Нужен для переподключения к идущей фоновой синхронизации после перезагрузки страницы (F5):
- * бэк-задача серверная и НЕ прерывается, теряется лишь job_id во фронт-состоянии.
- * Нет активной задачи → бэк отвечает 404, и мы возвращаем null (это НЕ ошибка запроса).
+ * GET /integration/mno/sync/active — ЛЮБАЯ идущая фоновая синхронизация (регион ИЛИ «все»).
+ * Нужен для переподключения к ней после перезагрузки страницы (F5): бэк-задача серверная и
+ * НЕ прерывается, теряется лишь job_id во фронт-состоянии. Раньше подхватывался только прогон
+ * «Все регионы», а синк одного региона терялся → UI предлагал запуск заново. Нет активной
+ * задачи → бэк отвечает null (это НЕ ошибка).
  */
-export function useRunningAllJob() {
+export function useRunningAnyJob() {
   return useQuery({
-    queryKey: ['integration', 'mno', 'running-all'],
+    queryKey: ['integration', 'mno', 'running-any'],
     queryFn: async (): Promise<MnoSyncStatus | null> => {
-      try {
-        const res = await api.get<MnoSyncStatus>(
-          '/integration/mno/sync/status?region_code=__all__'
-        );
-        return res.data;
-      } catch {
-        return null; // 404 (нет задачи) → null, не ошибка
-      }
+      const res = await api.get<MnoSyncStatus | null>('/integration/mno/sync/active');
+      return res.data ?? null;
     },
     staleTime: 0,
   });

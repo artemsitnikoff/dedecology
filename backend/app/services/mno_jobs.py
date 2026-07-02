@@ -197,6 +197,22 @@ async def get_running_job(redis, key: str) -> dict | None:
     return None
 
 
+async def get_any_running_job(redis) -> dict | None:
+    """Прогресс ЛЮБОЙ живой активной задачи (скан всех указателей mno:ptr:*).
+
+    Нужен фронту для переподключения после F5 к ИДУЩЕЙ синхронизации — региона ИЛИ «все
+    регионы» — не зная её ключа (раньше подхватывался только прогон «__all__», а одиночный
+    регион терялся). Возвращает первую running-и-не-протухшую задачу, иначе None."""
+    for ptr in await redis.keys("mno:ptr:*"):
+        job_id = await redis.get(ptr)
+        if not job_id:
+            continue
+        prog = await read_progress(redis, job_id)
+        if prog is not None and prog.get("state") == "running" and not is_stale(prog):
+            return prog
+    return None
+
+
 async def mark_region_done(redis, job_id: str, region_code: str) -> None:
     """Отмечает регион пройденным в этом прогоне (для resume при ретрае воркера)."""
     await redis.sadd(_done_key(job_id), region_code)
