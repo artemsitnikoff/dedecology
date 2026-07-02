@@ -72,7 +72,7 @@ class MnoSyncStatus(BaseModel):
     job_id: str
     region_code: str
     region_name: str
-    state: str  # running | done | error | cancelled
+    state: str  # running | done | error | cancelled | interrupted
     discovered: int
     fetched: int
     upserted: int

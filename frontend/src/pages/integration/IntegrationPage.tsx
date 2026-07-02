@@ -132,6 +132,10 @@ export function IntegrationPage() {
     } else if (status.state === 'cancelled') {
       // Отмена — не ошибка: честно сообщаем и уже записанное сохраняется.
       showToast(`Синхронизация МНО отменена — записано ${status.upserted}.`);
+    } else if (status.state === 'interrupted') {
+      // Воркер был перезапущён (деплой/краш) — не ошибка. Данные целы, готовые регионы
+      // помечены; повторный запуск докачает остальные.
+      showToast('Синхронизация прервана (рестарт сервиса) — запустите «Все регионы» ещё раз.');
     } else {
       showToast(`Ошибка синхронизации МНО: ${status.error || 'неизвестная ошибка'}`);
     }
@@ -212,7 +216,9 @@ export function IntegrationPage() {
         ? 'Ошибка'
         : status?.state === 'cancelled'
           ? 'Отменено'
-          : 'Идёт синхронизация';
+          : status?.state === 'interrupted'
+            ? 'Прервано'
+            : 'Идёт синхронизация';
 
   return (
     <div className="de-intg-wrap">

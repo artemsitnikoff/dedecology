@@ -95,6 +95,12 @@ class FakeRedis:
                     removed += 1
         return removed
 
+    async def keys(self, pattern):
+        import fnmatch
+
+        allkeys = set(self.hashes) | set(self.strings) | set(self.sets)
+        return [k for k in allkeys if fnmatch.fnmatch(k, pattern)]
+
 
 @pytest.fixture(autouse=True)
 def _reset_arq_pool():
@@ -1248,3 +1254,34 @@ async def test_crawler_stops_on_plateau(monkeypatch):
     assert ids == {"a"}
     assert any("плато" in i for i in issues)
     assert calls["n"] < 50  # остановились рано, а не на TILE_REQUEST_LIMIT (6000)
+
+
+# --- финализация осиротевших задач при старте воркера (анти-залипание) ---------
+
+
+@pytest.mark.asyncio
+async def test_finalize_orphaned_jobs_unblocks_ui():
+    """Осиротевшая running-задача → interrupted, указатель снят, region_synced цел."""
+    r = FakeRedis()
+    await mno_jobs.set_pointer(r, "__all__", "orphan")
+    await mno_jobs.write_progress(
+        r,
+        "orphan",
+        mno_jobs.initial_progress(
+            "orphan", "__all__", "Все регионы", scope="all", regions_total=85
+        ),
+    )
+    await mno_jobs.mark_region_synced(r, "22")  # готовый регион — должен уцелеть
+    await mno_jobs.mark_region_done(r, "orphan", "22")  # done-set — не трогаем
+
+    finalized = await mno_jobs.finalize_orphaned_jobs(r)
+    assert finalized == 1
+
+    prog = await mno_jobs.read_progress(r, "orphan")
+    assert prog["state"] == "interrupted"  # задача помечена прерванной
+    # Указатель снят → get_running_job → None → кнопка запуска активна.
+    assert await mno_jobs.get_pointer(r, "__all__") is None
+    assert await mno_jobs.get_running_job(r, "__all__") is None
+    # Маркер готового региона ЖИВ (прогресс не потерян) + done-set цел.
+    assert await mno_jobs.is_region_recently_synced(r, "22") is True
+    assert await mno_jobs.is_region_done(r, "orphan", "22") is True

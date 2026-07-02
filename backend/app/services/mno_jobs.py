@@ -240,3 +240,32 @@ async def mark_region_synced(redis, code: str) -> None:
 async def is_region_recently_synced(redis, code: str) -> bool:
     """Синхронизирован ли регион недавно (маркер ещё жив) — тогда прогон его пропускает."""
     return bool(await redis.get(_region_synced_key(code)))
+
+
+# --- Финализация осиротевших задач при старте воркера --------------------------
+
+
+async def finalize_orphaned_jobs(redis) -> int:
+    """При старте воркера: любая задача со state=running — осиротевшая (воркер убит
+    деплоем/крашем на середине, чистого завершения не было). Метим её 'interrupted' и
+    снимаем ВСЕ указатели → кнопка запуска в UI разблокируется МГНОВЕННО (без 10-мин
+    ожидания stale и без SSH). Маркеры region_synced НЕ трогаем (готовые регионы живы).
+    Возвращает число финализированных задач."""
+    finalized = 0
+    for key in await redis.keys("mno:job:*"):
+        if key.endswith(":done"):  # done-set для resume — не трогаем
+            continue
+        snapshot = await redis.hgetall(key)
+        if snapshot.get("state") == "running":
+            snapshot["state"] = "interrupted"
+            snapshot["finished_at"] = utcnow().isoformat()
+            snapshot["updated_at"] = utcnow().isoformat()
+            await redis.hset(key, mapping=snapshot)
+            finalized += 1
+    # Снимаем все указатели — они вели на осиротевшие задачи; свежий запуск создаст новые.
+    pointers = await redis.keys("mno:ptr:*")
+    if pointers:
+        await redis.delete(*pointers)
+    if finalized:
+        logger.info("[mno_jobs] при старте финализировано осиротевших задач: %s", finalized)
+    return finalized

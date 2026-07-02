@@ -273,7 +273,7 @@ export interface RegionsSyncResult {
 }
 
 /** Состояние фоновой задачи синхронизации МНО ('cancelled' — отменена из UI). */
-export type MnoSyncState = 'running' | 'done' | 'error' | 'cancelled';
+export type MnoSyncState = 'running' | 'done' | 'error' | 'cancelled' | 'interrupted';
 
 /** Ответ на запуск фоновой синхронизации МНО (POST /integration/mno/sync). */
 export interface MnoSyncJob {
