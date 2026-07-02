@@ -12,9 +12,7 @@
                                («все регионы»), чтобы ретрай воркера возобновлялся,
                                пропуская уже сделанное;
   ``mno:cancel:{job_id}``    — флаг отмены задачи из UI (воркер прекращает краул на
-                               ближайшем батче/регионе);
-  ``mno:region_synced:{code}`` — постоянный маркер «регион синхронизирован» (TTL 30 сут):
-                               пока жив, регион ПРОПУСКАЕТСЯ в прогоне «все регионы».
+                               ближайшем батче/регионе).
 
 Все функции async и принимают redis-клиент (decode_responses=True) — так их удобно
 покрывать офлайн FakeRedis без реального Redis.
@@ -27,10 +25,6 @@ logger = logging.getLogger(__name__)
 
 # TTL снимка задачи / указателя / done-set / cancel-флага — сутки (потом Redis сам подчистит).
 JOB_TTL = 24 * 60 * 60
-
-# TTL постоянного маркера «регион синхронизирован» — 30 суток. Пока маркер жив, регион
-# ПРОПУСКАЕТСЯ в прогоне «все регионы» (не пере-сканируем уже сделанное).
-REGION_SYNCED_TTL = 30 * 24 * 60 * 60
 
 # Задача считается «зависшей» (воркер умер/оборван деплоем/крашем), если её прогресс
 # (updated_at) не обновлялся дольше этого. Тогда get_running_job её НЕ отдаёт → UI сам
@@ -65,10 +59,6 @@ def _done_key(job_id: str) -> str:
 
 def _cancel_key(job_id: str) -> str:
     return f"mno:cancel:{job_id}"
-
-
-def _region_synced_key(code: str) -> str:
-    return f"mno:region_synced:{code}"
 
 
 def utcnow() -> datetime:
@@ -245,19 +235,6 @@ async def clear_job(redis, key: str, job_id: str | None) -> None:
     await redis.delete(_ptr_key(key))
 
 
-# --- Постоянный маркер «регион синхронизирован» (пропуск пройденных насовсем) ---
-
-
-async def mark_region_synced(redis, code: str) -> None:
-    """Метит регион успешно синхронизированным (маркер живёт REGION_SYNCED_TTL)."""
-    await redis.set(_region_synced_key(code), utcnow().isoformat(), ex=REGION_SYNCED_TTL)
-
-
-async def is_region_recently_synced(redis, code: str) -> bool:
-    """Синхронизирован ли регион недавно (маркер ещё жив) — тогда прогон его пропускает."""
-    return bool(await redis.get(_region_synced_key(code)))
-
-
 # --- Финализация осиротевших задач при старте воркера --------------------------
 
 
@@ -265,7 +242,7 @@ async def finalize_orphaned_jobs(redis) -> int:
     """При старте воркера: любая задача со state=running — осиротевшая (воркер убит
     деплоем/крашем на середине, чистого завершения не было). Метим её 'interrupted' и
     снимаем ВСЕ указатели → кнопка запуска в UI разблокируется МГНОВЕННО (без 10-мин
-    ожидания stale и без SSH). Маркеры region_synced НЕ трогаем (готовые регионы живы).
+    ожидания stale и без SSH).
     Возвращает число финализированных задач."""
     finalized = 0
     for key in await redis.keys("mno:job:*"):

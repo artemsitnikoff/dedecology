@@ -201,12 +201,12 @@ docker compose -f docker-compose.prod.yml logs -f worker
 - Сбой батча (сеть/длина поля) → `session.rollback()` + пропуск, регион не падает каскадом.
 - Возобновление дешёвое: уже записанные МНО (по `fgis_id`) пропускаются (счётчик `skipped`).
 
-**Убить очередь / зависшую задачу** (данные в Postgres и маркеры `region_synced` НЕ трогаем):
+**Убить очередь / зависшую задачу** (данные в Postgres НЕ трогаем):
 ```bash
 docker compose -f docker-compose.prod.yml exec redis sh -c 'redis-cli del arq:queue; for k in $(redis-cli --scan --pattern "mno:ptr:*") $(redis-cli --scan --pattern "mno:cancel:*") $(redis-cli --scan --pattern "arq:job:*"); do redis-cli del "$k"; done; echo cleared'
 docker compose -f docker-compose.prod.yml restart worker    # добьёт КРУТЯЩУЮСЯ задачу
 ```
-⚠️ НЕ `flushall` — снесёт `mno:region_synced:*` (маркеры собранных регионов) и внутренности arq.
+⚠️ НЕ `flushall` — снесёт внутренности arq (очередь и состояние всех задач).
 
 **Грабли: worker может крутить СТАРЫЙ код.** `worker` переиспользует образ `dedecology-backend:latest`
 (без своего `build:`), а `docker compose up -d` не всегда пересоздаёт его под свежесобранный образ.

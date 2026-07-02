@@ -26,9 +26,7 @@ from .mno_jobs import (
     initial_progress,
     is_cancelled,
     is_region_done,
-    is_region_recently_synced,
     mark_region_done,
-    mark_region_synced,
     utcnow,
     write_progress,
 )
@@ -185,19 +183,12 @@ async def run_sync_all(redis, job_id, region_pairs) -> None:
                     prog["regions_done"] += 1
                     await write_progress(redis, job_id, prog)
                     continue
-                # ПРОПУСК НАСОВСЕМ: регион синхронизирован недавно (маркер ещё жив) — не
-                # пере-сканируем готовое (большой первый регион не блокирует остальные).
-                if await is_region_recently_synced(redis, code):
-                    prog["regions_done"] += 1
-                    await write_progress(redis, job_id, prog)
-                    continue
                 prog["current_region"] = name
                 await write_progress(redis, job_id, prog)
                 try:
                     await _crawl_region(redis, job_id, prog, session, int(code))
                     prog["regions_done"] += 1
                     await mark_region_done(redis, job_id, code)
-                    await mark_region_synced(redis, code)
                 except _CancelledSync:  # отмена сработала в пределах региона (на батче)
                     prog["state"] = "cancelled"
                     logger.info("[mno_worker] all: синхронизация отменена из UI")

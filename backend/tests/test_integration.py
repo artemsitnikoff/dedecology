@@ -518,16 +518,6 @@ async def test_mno_jobs_cancel_roundtrip():
 
 
 @pytest.mark.asyncio
-async def test_mno_jobs_region_synced_marker():
-    """mark_region_synced / is_region_recently_synced — постоянный маркер пропуска региона."""
-    fake = FakeRedis()
-    assert await mno_jobs.is_region_recently_synced(fake, "51") is False
-    await mno_jobs.mark_region_synced(fake, "51")
-    assert await mno_jobs.is_region_recently_synced(fake, "51") is True
-    assert await mno_jobs.is_region_recently_synced(fake, "63") is False
-
-
-@pytest.mark.asyncio
 async def test_mno_jobs_clear_job_drops_pointer():
     """clear_job снимает указатель → get_running_job=None (UI разблокирован)."""
     fake = FakeRedis()
@@ -772,9 +762,9 @@ async def test_run_sync_all_per_region_error_does_not_abort(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_sync_all_skips_recently_synced_region(monkeypatch):
-    """ПРОПУСК НАСОВСЕМ: регион с живым region_synced-маркером не краулится (regions_done++),
-    а успешно пройденный регион метится mark_region_synced."""
+async def test_run_sync_all_crawls_every_region(monkeypatch):
+    """Прогон «Все регионы» краулит КАЖДЫЙ регион (пропуск region_synced убран — от повторов
+    защищает пропуск по fgis_id на уровне батчей, а не «пропуск целого региона на 30 дней»)."""
     monkeypatch.setattr(mno_worker, "AsyncSessionLocal", lambda: _FakeDBSession())
 
     crawled: list[int] = []
@@ -797,21 +787,15 @@ async def test_run_sync_all_skips_recently_synced_region(monkeypatch):
     monkeypatch.setattr(mno_sync, "_upsert_batch", AsyncMock(return_value=1))
 
     fake = FakeRedis()
-    # 51 уже синхронизирован недавно → пропустить целиком, НЕ пере-сканировать.
-    await mno_jobs.mark_region_synced(fake, "51")
-
     await mno_worker.run_sync_all(
         fake, "all-s", [["51", "Мурманская область"], ["63", "Самарская область"]]
     )
 
-    # 51 пропущен (create_filter для него не звался), краулился только 63.
-    assert crawled == [63]
+    # Оба региона краулятся (ничего не пропускается «насовсем»).
+    assert crawled == [51, 63]
     prog = await mno_jobs.read_progress(fake, "all-s")
-    # 51 засчитан по маркеру + 63 обойдён = 2.
     assert prog["regions_done"] == 2
     assert prog["state"] == "done"
-    # 63 успешно пройден → теперь тоже помечен синхронизированным.
-    assert await mno_jobs.is_region_recently_synced(fake, "63") is True
 
 
 @pytest.mark.asyncio
@@ -835,8 +819,6 @@ async def test_run_sync_all_cancelled_on_batch_stops(monkeypatch):
     # Прогон оборван на первом регионе: ни один не досчитан, второй не тронут.
     assert prog["regions_done"] == 0
     assert prog["finished_at"] is not None
-    # Первый регион НЕ помечен синхронизированным (краул прерван на батче).
-    assert await mno_jobs.is_region_recently_synced(fake, "51") is False
 
 
 # --- Эндпоинты (мок сервиса / Redis / arq-пула) --------------------------------
@@ -1360,7 +1342,7 @@ async def test_crawler_stops_when_region_total_reached(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_finalize_orphaned_jobs_unblocks_ui():
-    """Осиротевшая running-задача → interrupted, указатель снят, region_synced цел."""
+    """Осиротевшая running-задача → interrupted, указатель снят, done-set цел."""
     r = FakeRedis()
     await mno_jobs.set_pointer(r, "__all__", "orphan")
     await mno_jobs.write_progress(
@@ -1370,7 +1352,6 @@ async def test_finalize_orphaned_jobs_unblocks_ui():
             "orphan", "__all__", "Все регионы", scope="all", regions_total=85
         ),
     )
-    await mno_jobs.mark_region_synced(r, "22")  # готовый регион — должен уцелеть
     await mno_jobs.mark_region_done(r, "orphan", "22")  # done-set — не трогаем
 
     finalized = await mno_jobs.finalize_orphaned_jobs(r)
@@ -1381,8 +1362,7 @@ async def test_finalize_orphaned_jobs_unblocks_ui():
     # Указатель снят → get_running_job → None → кнопка запуска активна.
     assert await mno_jobs.get_pointer(r, "__all__") is None
     assert await mno_jobs.get_running_job(r, "__all__") is None
-    # Маркер готового региона ЖИВ (прогресс не потерян) + done-set цел.
-    assert await mno_jobs.is_region_recently_synced(r, "22") is True
+    # done-set (resume для ретрая ЭТОГО прогона) цел.
     assert await mno_jobs.is_region_done(r, "orphan", "22") is True
 
 
