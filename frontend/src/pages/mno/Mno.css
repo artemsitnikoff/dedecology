@@ -511,6 +511,17 @@
   font-size: 11.5px;
   color: var(--fg-2);
 }
+/* Колонка «Обращения» в реестре: число обращений по МНО; >0 — кликабельно (→ /incidents?mno_id). */
+.de-mno-c-incidents {
+  width: 110px;
+  justify-content: center;
+}
+.de-mno-inc-zero {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-13);
+  color: var(--fg-3);
+}
 .de-mno-c-sync {
   width: 146px;
   padding: 8px 10px;

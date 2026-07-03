@@ -31,7 +31,7 @@ function pageWindow(current: number, totalPages: number): Array<number | 'gap'> 
 }
 
 /** Заголовки таблицы МНО (порядок прототипа). coords/sync — без сортировки. */
-type HeadKey = MnoSortKey | 'coords' | 'sync';
+type HeadKey = MnoSortKey | 'coords' | 'incidents' | 'sync';
 interface Head {
   key: HeadKey;
   label: string;
@@ -45,6 +45,7 @@ const HEADS: Head[] = [
   { key: 'city', label: 'Город', cellClass: 'de-mno-c-city' },
   { key: 'address', label: 'Адрес', cellClass: 'de-mno-c-address' },
   { key: 'coords', label: 'Координаты', cellClass: 'de-mno-c-coords', nosort: true },
+  { key: 'incidents', label: 'Обращения', cellClass: 'de-mno-c-incidents', nosort: true },
   { key: 'sync', label: 'Синхронизация', cellClass: 'de-mno-c-sync', nosort: true },
 ];
 
@@ -80,8 +81,16 @@ type RowProps = {
   active: boolean;
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
+  onIncidents: (id: string) => void;
 };
-const MnoRow = memo(function MnoRow({ m, selected, active, onToggle, onOpen }: RowProps) {
+const MnoRow = memo(function MnoRow({
+  m,
+  selected,
+  active,
+  onToggle,
+  onOpen,
+  onIncidents,
+}: RowProps) {
   return (
     <div
       className={`de-mno-row ${selected ? 'selected' : active ? 'active' : ''}`}
@@ -108,6 +117,23 @@ const MnoRow = memo(function MnoRow({ m, selected, active, onToggle, onOpen }: R
         {m.address}
       </div>
       <div className="de-mno-cell de-mno-c-coords">{m.coords}</div>
+      <div
+        className="de-mno-cell de-mno-c-incidents"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {m.incidents > 0 ? (
+          <button
+            type="button"
+            className="de-mno-inc-badge de-mno-inc-badge-link"
+            title="Показать обращения по этому МНО"
+            onClick={() => onIncidents(m.id)}
+          >
+            {m.incidents}
+          </button>
+        ) : (
+          <span className="de-mno-inc-zero">0</span>
+        )}
+      </div>
       <div className="de-mno-cell de-mno-c-sync">
         {m.source === 'volunteer' ? (
           // МНО добавлено волонтёром на форме — помечаем, чтобы эколог проверил (source из контракта).
@@ -479,6 +505,7 @@ export function MnoPage() {
                   active={detailId === m.id}
                   onToggle={toggleSel}
                   onOpen={setDetailId}
+                  onIncidents={openIncidentsForMno}
                 />
               ))}
             </div>

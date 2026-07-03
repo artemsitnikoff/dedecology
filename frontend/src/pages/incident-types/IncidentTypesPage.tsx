@@ -32,12 +32,12 @@ type RowProps = {
 const IncidentTypeRow = memo(function IncidentTypeRow({ t, isAdmin, busy, onEdit, onDelete }: RowProps) {
   return (
     <div className="de-it-row">
-      <div className="de-it-cell de-it-c-label">{t.label}</div>
       <div className="de-it-cell de-it-c-code">
         <span className="de-it-code-badge" title={t.code}>
           {t.code}
         </span>
       </div>
+      <div className="de-it-cell de-it-c-label">{t.label}</div>
       <div className="de-it-cell de-it-c-order">{t.sort_order}</div>
       {isAdmin && (
         <div className="de-it-cell de-it-c-actions">
@@ -155,8 +155,8 @@ export function IncidentTypesPage() {
         ) : (
           <div className="de-it-table">
             <div className="de-it-thead">
-              <div className="de-it-th de-it-c-label">Название</div>
               <div className="de-it-th de-it-c-code">Код</div>
+              <div className="de-it-th de-it-c-label">Название</div>
               <div className="de-it-th de-it-c-order">Порядок</div>
               {isAdmin && <div className="de-it-th de-it-c-actions">Действия</div>}
             </div>
