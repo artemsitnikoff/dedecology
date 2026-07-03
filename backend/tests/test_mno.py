@@ -9,6 +9,7 @@ from sqlalchemy.sql.operators import eq
 
 from app.models import Mno
 from app.schemas.base import Paginated
+from app.core.errors import ValidationError
 from app.schemas.mno import (
     MnoCreate,
     MnoDetail,
@@ -16,6 +17,7 @@ from app.schemas.mno import (
     MnoPoint,
     MnoPointsResponse,
     MnoSyncResult,
+    MnoVolunteerCreate,
 )
 from app.services import mno as mno_service
 from app.services.mno import _filters
@@ -433,6 +435,7 @@ def _orm_mno(**kw) -> Mno:
         city="пгт Усть-Кинельский",
         address="Спортивная улица, 4",
         coords="53.232000, 50.170300",
+        source="fgis",
         fgis_id=None,
         synced=False,
         sync_date=None,
@@ -513,6 +516,110 @@ async def test_create_mno_service_sets_defaults():
     assert detail.fgis_id is None
     assert detail.incidents == 0
     assert detail.region_name == "Самарская область"
+
+
+# --- source (происхождение) + волонтёрское создание (public /intake/mno) --------
+
+
+def test_to_list_item_passes_source():
+    """_to_list_item пробрасывает происхождение МНО (source) в строку/карточку."""
+    m = _orm_mno(source="volunteer")
+    item = mno_service._to_list_item(m, {"63": "Самарская область"})
+    assert item.source == "volunteer"
+
+
+def _volunteer_session():
+    """Fake session: add копит объекты, flush присваивает Mno.id, execute → имена регионов."""
+    added: list = []
+    session = AsyncMock()
+    session.add = MagicMock(side_effect=added.append)
+
+    async def _flush():
+        for o in added:
+            if isinstance(o, Mno) and o.id is None:
+                o.id = uuid4()
+
+    session.flush = AsyncMock(side_effect=_flush)
+    names_res = MagicMock()
+    names_res.all.return_value = [("63", "Самарская область")]
+    session.execute = AsyncMock(return_value=names_res)
+    return session, added
+
+
+@pytest.mark.asyncio
+async def test_create_mno_from_volunteer_sets_source_and_defaults():
+    """create_mno_from_volunteer: source='volunteer', synced=False, fgis_id=None, reg='',
+    incidents=0; числовые lat/lon распарсены; карточка отдаётся с source."""
+    session, added = _volunteer_session()
+    data = MnoVolunteerCreate(
+        name="Площадка волонтёра",
+        region_code="63",
+        city="г. Самара",
+        address="ул. Ленина, 1",
+        coords="53.2, 50.6",
+    )
+    detail = await mno_service.create_mno_from_volunteer(session, data)
+
+    assert detail.source == "volunteer"
+    assert detail.synced is False
+    assert detail.fgis_id is None
+    assert detail.reg == ""
+    assert detail.incidents == 0
+    assert detail.region_name == "Самарская область"
+
+    created = next(o for o in added if isinstance(o, Mno))
+    assert created.source == "volunteer"
+    assert created.synced is False
+    assert created.fgis_id is None
+    assert created.lat == 53.2 and created.lon == 50.6
+
+
+@pytest.mark.asyncio
+async def test_create_mno_from_volunteer_requires_address_and_coords():
+    """Пустые address/coords → ValidationError (400), БД НЕ трогаем."""
+    session, added = _volunteer_session()
+
+    with pytest.raises(ValidationError):
+        await mno_service.create_mno_from_volunteer(
+            session, MnoVolunteerCreate(address="   ", coords="53.2, 50.6")
+        )
+    with pytest.raises(ValidationError):
+        await mno_service.create_mno_from_volunteer(
+            session, MnoVolunteerCreate(address="ул. Ленина, 1", coords="")
+        )
+    session.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_mno_from_volunteer_garbage_coords_null_latlon():
+    """Мусорные (не-числовые) coords → lat/lon=None, но МНО всё равно создаётся."""
+    session, added = _volunteer_session()
+    data = MnoVolunteerCreate(address="ул. Ленина, 1", coords="это не координаты")
+    detail = await mno_service.create_mno_from_volunteer(session, data)
+
+    created = next(o for o in added if isinstance(o, Mno))
+    assert created.lat is None and created.lon is None
+    assert detail.source == "volunteer"
+
+
+@pytest.mark.asyncio
+async def test_create_mno_from_volunteer_truncates_overlong_fields():
+    """Сверхдлинные поля отсекаются под ширину колонок (нет DataError на INSERT)."""
+    session, added = _volunteer_session()
+    data = MnoVolunteerCreate(
+        name="н" * 600,
+        region_code="6" * 20,
+        city="г" * 400,
+        address="ул. Ленина, 1",
+        coords="5" * 200,  # без запятой → lat/lon=None, но непусто → проходит валидацию
+    )
+    await mno_service.create_mno_from_volunteer(session, data)
+
+    created = next(o for o in added if isinstance(o, Mno))
+    assert len(created.name) == 500
+    assert len(created.region_code) == 8
+    assert len(created.city) == 255
+    assert len(created.coords) == 64
 
 
 # --- Живой счётчик обращений (incidents = COUNT инцидентов по mno_id) -----------

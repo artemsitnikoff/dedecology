@@ -492,6 +492,95 @@ async def test_mno_points_public_no_bbox_empty(client):
 
 
 # --------------------------------------------------------------------------- #
+# Публичное добавление МНО волонтёром: POST /intake/mno                         #
+# --------------------------------------------------------------------------- #
+
+
+def _volunteer_detail(**kw):
+    """MnoDetail волонтёрского МНО (source='volunteer') для мока сервиса."""
+    from app.schemas.mno import MnoDetail
+
+    base = dict(
+        id=uuid4(),
+        reg="",
+        name="Площадка волонтёра",
+        region_code="63",
+        region_name="Самарская область",
+        city="г. Самара",
+        address="ул. Ленина, 1",
+        coords="53.2, 50.6",
+        source="volunteer",
+        fgis_id=None,
+        synced=False,
+        sync_date=None,
+        incidents=0,
+    )
+    base.update(kw)
+    return MnoDetail(**base)
+
+
+@pytest.mark.asyncio
+async def test_public_mno_creates_volunteer(client):
+    """POST /intake/mno публичный (БЕЗ токена) → 200; сервис вызван, ответ source='volunteer'."""
+    created = _volunteer_detail()
+    spy = AsyncMock(return_value=created)
+    with patch(
+        "app.api.v1.intake.mno_service.create_mno_from_volunteer", new=spy
+    ):
+        resp = await client.post(
+            "/api/v1/intake/mno",
+            json={
+                "name": "Площадка волонтёра",
+                "region_code": "63",
+                "city": "г. Самара",
+                "address": "ул. Ленина, 1",
+                "coords": "53.2, 50.6",
+            },
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "volunteer"
+    assert body["synced"] is False
+    assert body["fgis_id"] is None
+    assert body["id"] == str(created.id)
+    # Тело передано в сервис как MnoVolunteerCreate.
+    spy.assert_awaited_once()
+    payload = spy.call_args.args[1]
+    assert payload.address == "ул. Ленина, 1"
+    assert payload.coords == "53.2, 50.6"
+
+
+@pytest.mark.asyncio
+async def test_public_mno_honeypot_drops(client):
+    """Заполненный honeypot website → 200 ok, но сервис НЕ вызывается."""
+    spy = AsyncMock()
+    with patch(
+        "app.api.v1.intake.mno_service.create_mno_from_volunteer", new=spy
+    ):
+        resp = await client.post(
+            "/api/v1/intake/mno",
+            json={
+                "address": "ул. Ленина, 1",
+                "coords": "53.2, 50.6",
+                "website": "http://spam.example",
+            },
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    spy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_public_mno_requires_address_and_coords(client):
+    """Пустые address/coords → 400 VALIDATION_ERROR (реальный сервис, до записи в БД)."""
+    resp = await client.post(
+        "/api/v1/intake/mno", json={"address": "", "coords": ""}
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+# --------------------------------------------------------------------------- #
 # Публичная форма волонтёра: POST /form                                        #
 # --------------------------------------------------------------------------- #
 

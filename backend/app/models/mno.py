@@ -40,6 +40,13 @@ class Mno(Base, TimestampMixin):
     # карты по индексу ix_mno_lat_lon. NULL — coords пусты/невалидны (точка не на карте).
     lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Происхождение МНО (миграция 0017): 'fgis' — синхронизировано из ФГИС / по
+    # умолчанию (ручное/сидовое); 'volunteer' — добавлено волонтёром на публичной
+    # форме (POST /intake/mno). Админка показывает бейдж «Добавлен волонтёром».
+    # server_default 'fgis' → все существующие строки бэкфиллятся как 'fgis'.
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'fgis'")
+    )
     # ID в ФГИС. NULL — МНО заведено вручную и в ФГИС ещё не выгружено.
     fgis_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # Синхронизировано с ФГИС (ЗАГЛУШКА — реальной интеграции нет, см. сервис)

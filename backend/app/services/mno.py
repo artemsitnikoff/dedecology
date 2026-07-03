@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.errors import NotFoundError
+from ..core.errors import NotFoundError, ValidationError
 from ..models import Incident, Mno, Region
 from ..schemas.base import Paginated
 from ..schemas.mno import (
@@ -24,6 +24,7 @@ from ..schemas.mno import (
     MnoPoint,
     MnoPointsResponse,
     MnoSyncResult,
+    MnoVolunteerCreate,
 )
 from .audit import audit
 from .geo import parse_bbox, parse_latlon
@@ -123,6 +124,7 @@ def _to_list_item(
         city=m.city,
         address=m.address,
         coords=m.coords,
+        source=m.source,
         fgis_id=m.fgis_id,
         synced=m.synced,
         sync_date=m.sync_date,
@@ -369,6 +371,10 @@ async def create_mno(session: AsyncSession, data, actor_user_id: uuid.UUID) -> M
         region_code=(data.region_code or "").strip(),
         city=(data.city or "").strip(),
         address=(data.address or "").strip(),
+        # Ручное админ-создание — происхождение по умолчанию 'fgis' (не волонтёрское).
+        # Ставим явно: server_default применяется на стороне БД, а _to_list_item ниже
+        # читает атрибут синхронно ДО refresh (иначе source=None → ошибка схемы).
+        source="fgis",
         fgis_id=None,
         synced=False,
         sync_date=None,
@@ -389,6 +395,71 @@ async def create_mno(session: AsyncSession, data, actor_user_id: uuid.UUID) -> M
             "synced": mno.synced,
         },
         actor_user_id=actor_user_id,
+    )
+    region_names = await _region_names(session)
+    item = _to_list_item(mno, region_names)
+    return MnoDetail(**item.model_dump())
+
+
+async def create_mno_from_volunteer(
+    session: AsyncSession, data: MnoVolunteerCreate
+) -> MnoDetail:
+    """Создаёт МНО, добавленное волонтёром на ПУБЛИЧНОЙ форме (source='volunteer').
+
+    Публичный приём (без auth, в ряду с /intake/form): если нужного МНО нет на карте,
+    волонтёр добавляет новое. Помечаем source='volunteer' (в отличие от 'fgis' —
+    синхронизированных из ФГИС), чтобы эколог в админке видел бейдж «Добавлен
+    волонтёром» и мог проверить точку. Проставляем: synced=False, fgis_id=None,
+    reg='' (офиц. реестрового № нет), incidents=0.
+
+    address и coords ОБЯЗАТЕЛЬНЫ: пустые → ValidationError (400 VALIDATION_ERROR).
+    Мусорные coords → lat/lon=None (parse_latlon не бросает — точка просто не на карте).
+    Тексты подрезаются под ширину колонок (публичный ввод не должен ронять INSERT):
+    name[:500], city[:255], region_code[:8], coords[:64]; address — TEXT, не режем.
+    Аудит — системный (actor_type='system': действующего пользователя нет). flush()
+    здесь, commit() — в роутере.
+    """
+    address = (data.address or "").strip()
+    coords = (data.coords or "").strip()
+    if not address or not coords:
+        raise ValidationError(
+            "Адрес и координаты обязательны",
+            details={"address": bool(address), "coords": bool(coords)},
+        )
+    coords = coords[:64]
+    # Числовые lat/lon для bbox-фильтра карты (NULL, если coords невалидны — не бросаем).
+    lat, lon = parse_latlon(coords)
+    mno = Mno(
+        source="volunteer",
+        reg="",  # официального реестрового № у волонтёрского МНО нет
+        name=(data.name or "").strip()[:500],
+        region_code=(data.region_code or "").strip()[:8],
+        city=(data.city or "").strip()[:255],
+        address=address,  # TEXT — не режем
+        coords=coords,
+        lat=lat,
+        lon=lon,
+        fgis_id=None,
+        synced=False,
+        sync_date=None,
+        incidents=0,
+    )
+    session.add(mno)
+    await session.flush()
+    await audit(
+        session,
+        action="create",
+        entity_type="mno",
+        entity_id=mno.id,
+        after={
+            "name": mno.name,
+            "address": mno.address,
+            "coords": mno.coords,
+            "source": mno.source,
+            "synced": mno.synced,
+        },
+        actor_user_id=None,
+        actor_type="system",
     )
     region_names = await _region_names(session)
     item = _to_list_item(mno, region_names)

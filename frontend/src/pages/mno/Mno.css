@@ -545,6 +545,11 @@
   background: var(--ark-gray-200);
   color: var(--fg-2);
 }
+/* МНО, добавленное волонтёром на публичной форме (source==='volunteer') — сигнал экологу проверить. */
+.de-mno-pill.volunteer {
+  background: var(--ark-violet-100);
+  color: var(--ark-violet-500);
+}
 .de-mno-pill-dot {
   display: inline-block;
   width: 7px;

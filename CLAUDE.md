@@ -72,7 +72,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   массовое изменение/создание/удаление пользователя/смену профиля.
 - Миграции: `0001_initial` (сначала `CREATE EXTENSION pgcrypto`) · `0002` notified_at+quote ·
   `0003` msg_url · `0004` is_superadmin (бэкфилл = старейший admin = pulse@reo.ru) · `0005` comment ·
-  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at · `0014` incidents.mno_reg · `0015` volunteers.email_code · `0016` incidents.mno_id (связь инцидент↔ТКО).
+  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at · `0014` incidents.mno_reg · `0015` volunteers.email_code · `0016` incidents.mno_id · `0017` mno.source (МНО от волонтёра).
 
 ## 5. API (`/api/v1`, конверт ошибок `{error:{code,message,details}}`)
 - **auth:** `POST /auth/login` → `{access_token,token_type}` + HttpOnly refresh-cookie (path

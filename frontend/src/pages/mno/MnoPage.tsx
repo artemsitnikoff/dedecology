@@ -109,13 +109,21 @@ const MnoRow = memo(function MnoRow({ m, selected, active, onToggle, onOpen }: R
       </div>
       <div className="de-mno-cell de-mno-c-coords">{m.coords}</div>
       <div className="de-mno-cell de-mno-c-sync">
-        <span className={`de-mno-pill ${m.synced ? 'fgis' : 'manual'}`}>
-          <span
-            className="de-mno-pill-dot"
-            style={{ background: m.synced ? 'var(--ark-green-500)' : 'var(--ark-gray-500)' }}
-          />
-          {m.synced ? 'ФГИС' : 'Вручную'}
-        </span>
+        {m.source === 'volunteer' ? (
+          // МНО добавлено волонтёром на форме — помечаем, чтобы эколог проверил (source из контракта).
+          <span className="de-mno-pill volunteer">
+            <span className="de-mno-pill-dot" style={{ background: 'var(--ark-violet-500)' }} />
+            Добавлен волонтёром
+          </span>
+        ) : (
+          <span className={`de-mno-pill ${m.synced ? 'fgis' : 'manual'}`}>
+            <span
+              className="de-mno-pill-dot"
+              style={{ background: m.synced ? 'var(--ark-green-500)' : 'var(--ark-gray-500)' }}
+            />
+            {m.synced ? 'ФГИС' : 'Вручную'}
+          </span>
+        )}
         <span className="de-mno-sync-date">{m.synced ? formatDate(m.sync_date) || '—' : '—'}</span>
       </div>
     </div>
@@ -629,13 +637,21 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
                   <Icon name="pin" size={12} />
                   МНО
                 </span>
-                <span className={`de-mno-pill ${data.synced ? 'fgis' : 'manual'}`}>
-                  <span
-                    className="de-mno-pill-dot"
-                    style={{ background: data.synced ? 'var(--ark-green-500)' : 'var(--ark-gray-500)' }}
-                  />
-                  {data.synced ? 'Синхронизировано с ФГИС' : 'Добавлено вручную'}
-                </span>
+                {data.source === 'volunteer' ? (
+                  // Добавлено волонтёром на публичной форме — бейдж-сигнал для проверки экологом.
+                  <span className="de-mno-pill volunteer">
+                    <span className="de-mno-pill-dot" style={{ background: 'var(--ark-violet-500)' }} />
+                    Добавлен волонтёром
+                  </span>
+                ) : (
+                  <span className={`de-mno-pill ${data.synced ? 'fgis' : 'manual'}`}>
+                    <span
+                      className="de-mno-pill-dot"
+                      style={{ background: data.synced ? 'var(--ark-green-500)' : 'var(--ark-gray-500)' }}
+                    />
+                    {data.synced ? 'Синхронизировано с ФГИС' : 'Добавлено вручную'}
+                  </span>
+                )}
                 <span className="de-mno-drawer-reg">№ {data.reg}</span>
               </div>
               <h2 className="de-mno-drawer-title">{data.name}</h2>
@@ -667,7 +683,14 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
                   ['Адрес МНО', data.address || '—'],
                   ['Координаты', data.coords],
                   ['ID в ФГИС', data.fgis_id || '— (нет в ФГИС)'],
-                  ['Синхронизация', data.synced ? `ФГИС, ${formatDate(data.sync_date) || '—'}` : 'Добавлено вручную'],
+                  [
+                    'Синхронизация',
+                    data.source === 'volunteer'
+                      ? 'Добавлено волонтёром'
+                      : data.synced
+                        ? `ФГИС, ${formatDate(data.sync_date) || '—'}`
+                        : 'Добавлено вручную',
+                  ],
                   ['Обращений по МНО', String(data.incidents)],
                 ] as Array<[string, string]>
               ).map(([k, v]) => (

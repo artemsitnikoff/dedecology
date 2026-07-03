@@ -25,7 +25,7 @@ from ...schemas.incident import (
     MarkNotifiedResult,
     PendingNotifyResponse,
 )
-from ...schemas.mno import MnoFormPointsResponse
+from ...schemas.mno import MnoFormPointsResponse, MnoVolunteerCreate
 from ...services import dadata as dadata_service
 from ...services import incident as incident_service
 from ...services import incident_type as incident_type_service
@@ -189,6 +189,26 @@ async def mno_points(
     не тянуть весь реестр МНО в неавторизованный эндпоинт (см. list_form_points).
     """
     return await mno_service.list_form_points(session, bbox=bbox)
+
+
+@router.post("/mno", tags=["Отправка фотоотчёта"])
+async def create_volunteer_mno(
+    payload: MnoVolunteerCreate,
+    session: AsyncSession = Depends(get_db),
+):
+    """ПУБЛИЧНО: волонтёр добавляет МНО, если нужного нет на карте (source='volunteer').
+
+    В ряду с /intake/form — без auth, honeypot website. Заполненный website → бот →
+    отдаём ok, ничего не создаём. Иначе создаём МНО (source='volunteer', synced=False,
+    fgis_id=None) и возвращаем его карточку (MnoDetail) — приложение кладёт id в mno_id
+    отчёта. Пустые address/coords → 400 VALIDATION_ERROR (проверка в сервисе).
+    """
+    if payload.website.strip():
+        logger.info("intake public mno honeypot triggered — dropping submission")
+        return {"ok": True}
+    mno = await mno_service.create_mno_from_volunteer(session, payload)
+    await session.commit()
+    return mno
 
 
 @router.post("/form", tags=["Отправка фотоотчёта"])

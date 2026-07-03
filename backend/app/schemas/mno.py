@@ -19,6 +19,10 @@ class MnoListItem(ORMBase):
     city: str
     address: str
     coords: str
+    # Происхождение: 'fgis' (из ФГИС/по умолчанию) | 'volunteer' (добавлен волонтёром
+    # на форме). Админка показывает бейдж «Добавлен волонтёром». Дефолт 'fgis' совпадает
+    # с server_default колонки — _to_list_item всегда подставляет реальное m.source.
+    source: str = "fgis"
     fgis_id: Optional[str] = None
     synced: bool
     sync_date: Optional[datetime] = None
@@ -41,6 +45,23 @@ class MnoCreate(BaseModel):
     region_code: str = ""
     city: str = ""
     address: str = ""
+
+
+class MnoVolunteerCreate(BaseModel):
+    """Создание МНО волонтёром на ПУБЛИЧНОЙ форме (POST /intake/mno).
+
+    Обязательны address + coords — но проверка НЕ через min_length (это дало бы 422),
+    а в сервисе: пустые → ValidationError → 400 VALIDATION_ERROR (по контракту приёма).
+    website — honeypot (у людей всегда пусто). name/region_code/city — необязательны.
+    source='volunteer', synced=false, fgis_id=null, reg='', incidents=0 проставляются
+    сервисом — НЕ из тела.
+    """
+    address: str = ""
+    coords: str = ""
+    name: str = ""
+    region_code: str = ""
+    city: str = ""
+    website: str = ""  # honeypot — у людей всегда пусто
 
 
 class MnoSyncResult(BaseModel):
