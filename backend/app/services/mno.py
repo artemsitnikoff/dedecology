@@ -256,7 +256,13 @@ async def list_form_points(
         await session.execute(select(func.count(Mno.id)).where(*filters))
     ).scalar_one()
     stmt = (
-        select(Mno.id, Mno.coords, Mno.reg, Mno.address, Mno.name)
+        select(
+            Mno.id, Mno.coords, Mno.reg, Mno.address, Mno.name, Mno.city,
+            Region.name.label("region_name"),
+        )
+        # LEFT JOIN за именем субъекта (region_code → Region.code); нет региона в справочнике
+        # → region пустой, точка всё равно возвращается.
+        .outerjoin(Region, Mno.region_code == Region.code)
         .where(*filters)
         .order_by(asc(Mno.id))
         .limit(FORM_MAX_POINTS)
@@ -269,6 +275,8 @@ async def list_form_points(
             reg=row.reg,
             address=row.address,
             name=row.name,
+            region=row.region_name or "",
+            city=row.city or "",
         )
         for row in result.all()
     ]

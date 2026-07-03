@@ -15,7 +15,13 @@ import './mno-picker.css';
 // точку. Нет ключа карты → внутри YandexMap честная плашка (без фейков).
 
 /** Данные выбранного МНО, которые модалка отдаёт форме. */
-export type MnoPick = { reg: string; address: string; coords: string };
+export type MnoPick = {
+  reg: string;
+  address: string;
+  coords: string;
+  region: string;
+  city: string;
+};
 
 type Props = {
   /** Клик по точке МНО → подстановка в форму (и закрытие модалки). */
@@ -131,7 +137,13 @@ export function MnoPickerModal({ onSelect, onClose }: Props) {
   const handlePointClick = (id: string) => {
     const p = byId.get(id);
     if (!p) return;
-    onSelect({ reg: p.reg, address: p.address, coords: p.coords });
+    onSelect({
+      reg: p.reg,
+      address: p.address,
+      coords: p.coords,
+      region: p.region,
+      city: p.city,
+    });
     onClose();
   };
 

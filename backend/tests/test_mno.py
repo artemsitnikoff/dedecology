@@ -333,7 +333,7 @@ async def test_list_form_points_bbox_garbage_empty():
 
 @pytest.mark.asyncio
 async def test_list_form_points_applies_bbox_and_returns_fields():
-    """Валидный bbox → lat/lon-фильтр; точки несут reg/address/name/coords."""
+    """Валидный bbox → lat/lon-фильтр; точки несут reg/address/name/coords/region/city."""
     count_res = MagicMock()
     count_res.scalar_one.return_value = 1
     row = MagicMock(
@@ -341,6 +341,8 @@ async def test_list_form_points_applies_bbox_and_returns_fields():
         coords="53.231410, 50.166820",
         reg="63-04-001162",
         address="Бульварная улица, 18",
+        city="Самара",
+        region_name="Самарская область",  # из LEFT JOIN Region по region_code
     )
     row.name = "Площадка A"  # name= в конструкторе MagicMock служебный — задаём явно
     points_res = MagicMock()
@@ -358,6 +360,8 @@ async def test_list_form_points_applies_bbox_and_returns_fields():
     assert point.address == "Бульварная улица, 18"
     assert point.name == "Площадка A"
     assert point.coords == "53.231410, 50.166820"
+    assert point.region == "Самарская область"
+    assert point.city == "Самара"
     # Оба запроса (COUNT и выборка) фильтруют по числовым lat/lon.
     count_sql = str(session.execute.call_args_list[0].args[0])
     points_sql = str(session.execute.call_args_list[1].args[0])

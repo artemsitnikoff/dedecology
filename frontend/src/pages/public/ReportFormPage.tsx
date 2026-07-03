@@ -170,11 +170,13 @@ export default function ReportFormPage() {
     setCoords(fromGeo || s.coords || '');
   };
 
-  // Выбор МНО на карте: адрес МНО → «Улица, дом», координаты и рег-номер — в форму.
+  // Выбор МНО на карте: подставляем ВСЁ из площадки — регион, город, улицу, координаты и рег-номер.
   // Колбэки стабильны (useCallback) — модалка рендерится только пока открыта.
   const openPicker = useCallback(() => setPickerOpen(true), []);
   const closePicker = useCallback(() => setPickerOpen(false), []);
   const handleMnoSelect = useCallback((m: MnoPick) => {
+    if (m.region) setRegion(m.region);
+    if (m.city) setCity(m.city);
     setStreet(m.address);
     setCoords(m.coords);
     setMnoReg(m.reg);
@@ -332,6 +334,28 @@ export default function ReportFormPage() {
                 />
               </label>
 
+              {/* Выбор МНО на карте (перед регионом): подставляет регион+город+улицу+координаты+рег-номер */}
+              <div className="de-rf-field">
+                <button type="button" className="de-rf-mno-btn" onClick={openPicker}>
+                  <span aria-hidden>📍</span> Выбрать МНО на карте
+                </button>
+                {mnoReg && (
+                  <div className="de-rf-mno-chip">
+                    <span className="de-rf-mno-chip-txt">
+                      Выбрано МНО: <b className="de-rf-mono">{mnoReg}</b>
+                    </span>
+                    <button
+                      type="button"
+                      className="de-rf-mno-chip-x"
+                      aria-label="Сбросить выбор МНО"
+                      onClick={clearMno}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Регион с автодополнением */}
               <AddressField
                 label="Регион"
@@ -353,28 +377,6 @@ export default function ReportFormPage() {
                 opts={{ kind: 'city', region: regionPlain }}
                 placeholder="Начните вводить город…"
               />
-
-              {/* Выбор МНО на карте (перед адресом): подставляет улицу + координаты + рег-номер */}
-              <div className="de-rf-field">
-                <button type="button" className="de-rf-mno-btn" onClick={openPicker}>
-                  <span aria-hidden>📍</span> Выбрать МНО на карте
-                </button>
-                {mnoReg && (
-                  <div className="de-rf-mno-chip">
-                    <span className="de-rf-mno-chip-txt">
-                      Выбрано МНО: <b className="de-rf-mono">{mnoReg}</b>
-                    </span>
-                    <button
-                      type="button"
-                      className="de-rf-mno-chip-x"
-                      aria-label="Сбросить выбор МНО"
-                      onClick={clearMno}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )}
-              </div>
 
               {/* Улица, дом с автодополнением */}
               <AddressField
