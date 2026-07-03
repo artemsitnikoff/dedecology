@@ -20,6 +20,7 @@ from app.core.errors import (
     ForbiddenError,
     InvalidCredentialsError,
     InvalidTokenError,
+    NotFoundError,
 )
 from app.core.permissions import require_admin
 from app.core.security import (
@@ -30,7 +31,7 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
-from app.deps import get_current_volunteer
+from app.deps import get_current_user, get_current_volunteer
 from app.main import app
 from app.models import Volunteer
 from app.schemas.volunteer import VolunteerRegister
@@ -557,3 +558,122 @@ async def test_service_reset_password_token_flow():
     verify_tok = create_purpose_token(str(vol.id), "verify_email", timedelta(hours=1))
     with pytest.raises(InvalidTokenError):
         await vol_service.reset_password(session, verify_tok, "whatever")
+
+
+# =========================================================================
+# Админ-триггер сброса пароля волонтёра ПО ID (/volunteers/{id}/reset-password)
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_service_admin_reset_password_returns_token_without_smtp():
+    """Успех: SMTP нет → email_sent=false, валидный reset-токен вернулся + email волонтёра.
+
+    Прямой смены пароля НЕТ — password_hash не меняется (только письмо/токен)."""
+    vol = _volunteer()
+    original_hash = vol.password_hash
+    session = _session_returning(vol)  # реальный get_by_id вернёт этого волонтёра
+
+    email, email_sent, token, reset_url = await vol_service.admin_reset_password(
+        session, vol.id
+    )
+
+    assert email == vol.email
+    assert email_sent is False  # SMTP не настроен → письмо не ушло (честно)
+    # Токен реально валиден: декодится к id волонтёра с purpose reset_password
+    assert decode_purpose_token(token, "reset_password") == str(vol.id)
+    assert token in reset_url
+    assert vol.password_hash == original_hash  # пароль НЕ тронут (только ссылка сброса)
+
+
+@pytest.mark.asyncio
+async def test_service_admin_reset_password_not_found_404():
+    """Нет волонтёра с таким id → NotFoundError (404) из get_by_id."""
+    session = _no_existing_session()  # scalar_one_or_none() → None
+    with pytest.raises(NotFoundError):
+        await vol_service.admin_reset_password(session, uuid4())
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_volunteer_password_endpoint_returns_link_when_not_sent(client):
+    """Эндпоинт (admin): письмо не ушло → reset_url/reset_token в ответе (без фейка)."""
+    with patch(
+        "app.services.volunteer.admin_reset_password",
+        new=AsyncMock(
+            return_value=(
+                "vol@example.com",
+                False,
+                "tok123",
+                "https://ecopulse.reo.ru/reset?token=tok123",
+            )
+        ),
+    ):
+        resp = await client.post(f"/api/v1/volunteers/{uuid4()}/reset-password")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["email"] == "vol@example.com"
+    assert body["email_sent"] is False
+    assert body["reset_token"] == "tok123"
+    assert body["reset_url"].endswith("tok123")
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_volunteer_password_endpoint_hides_token_when_sent(client):
+    """Эндпоинт (admin): письмо ушло (email_sent=true) → токен/ссылку в ответ НЕ кладём."""
+    with patch(
+        "app.services.volunteer.admin_reset_password",
+        new=AsyncMock(return_value=("vol@example.com", True, "tok123", "https://x/reset?token=tok123")),
+    ):
+        resp = await client.post(f"/api/v1/volunteers/{uuid4()}/reset-password")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["email_sent"] is True
+    assert body["reset_token"] is None
+    assert body["reset_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_volunteer_password_404(client):
+    """Нет волонтёра → 404 NOT_FOUND (проброс NotFoundError из сервиса)."""
+    with patch(
+        "app.services.volunteer.admin_reset_password",
+        new=AsyncMock(side_effect=NotFoundError("Волонтёр")),
+    ):
+        resp = await client.post(f"/api/v1/volunteers/{uuid4()}/reset-password")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_volunteer_password_forbidden_for_non_admin(client):
+    """Не-admin → 403 (гейт require_admin на роутере /volunteers)."""
+    async def _deny():
+        raise ForbiddenError("Требуется роль администратора")
+
+    app.dependency_overrides[require_admin] = _deny
+    try:
+        resp = await client.post(f"/api/v1/volunteers/{uuid4()}/reset-password")
+    finally:
+        # Вернём проходной override из фикстуры client (teardown всё равно очистит).
+        app.dependency_overrides[require_admin] = lambda: None
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_admin_reset_volunteer_password_unauthenticated_401(client):
+    """Гейт require_admin: невалидный Bearer-токен → 401 (реальный get_current_user)."""
+    # Снимаем проходные override'ы, чтобы отработала настоящая auth-цепочка.
+    app.dependency_overrides.pop(require_admin, None)
+    app.dependency_overrides.pop(get_current_user, None)
+    try:
+        resp = await client.post(
+            f"/api/v1/volunteers/{uuid4()}/reset-password",
+            headers={"Authorization": "Bearer garbage.token.value"},
+        )
+    finally:
+        # teardown фикстуры client всё равно очистит overrides.
+        app.dependency_overrides[require_admin] = lambda: None
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "INVALID_CREDENTIALS"

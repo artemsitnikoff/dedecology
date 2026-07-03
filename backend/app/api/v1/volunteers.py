@@ -10,7 +10,11 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database import get_db
-from ...schemas.volunteer import VolunteerListItem, VolunteerSetActive
+from ...schemas.volunteer import (
+    VolunteerAdminResetResult,
+    VolunteerListItem,
+    VolunteerSetActive,
+)
 from ...services import volunteer as volunteer_service
 
 router = APIRouter()
@@ -48,3 +52,30 @@ async def delete_volunteer(
     await volunteer_service.delete(session, volunteer_id)
     await session.commit()
     return Response(status_code=204)
+
+
+@router.post(
+    "/{volunteer_id}/reset-password",
+    response_model=VolunteerAdminResetResult,
+    tags=[_TAG],
+)
+async def reset_volunteer_password(
+    volunteer_id: UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    """Админ-триггер: шлёт волонтёру ссылку для сброса пароля. Нет волонтёра → 404.
+
+    Прямой смены пароля здесь НЕТ — только письмо со ссылкой (как публичный reset-request).
+    Пароль/БД не меняются, поэтому commit не нужен. Если письмо НЕ ушло (SMTP не настроен),
+    reset_token/reset_url возвращаются в ответе — админ передаст ссылку волонтёру вручную.
+    """
+    email, email_sent, token, reset_url = await volunteer_service.admin_reset_password(
+        session, volunteer_id
+    )
+    return VolunteerAdminResetResult(
+        ok=True,
+        email=email,
+        email_sent=email_sent,
+        reset_token=None if email_sent else token,
+        reset_url=None if email_sent else reset_url,
+    )

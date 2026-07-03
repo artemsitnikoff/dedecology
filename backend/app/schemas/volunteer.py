@@ -95,6 +95,22 @@ class OkResponse(BaseModel):
     ok: bool = True
 
 
+class VolunteerAdminResetResult(BaseModel):
+    """Результат админ-триггера сброса пароля волонтёра (/volunteers/{id}/reset-password).
+
+    Прямой смены пароля здесь нет — админ лишь инициирует отправку ссылки сброса
+    волонтёру. email — почта волонтёра (для тоста «отправлено на …»).
+    """
+
+    ok: bool = True
+    email: str
+    email_sent: bool
+    # Токен/ссылка — ТОЛЬКО при email_sent=false (как в VolunteerResetRequestResponse):
+    # SMTP не настроен → письмо не ушло, админ видит ссылку и передаёт её волонтёру вручную.
+    reset_token: str | None = None
+    reset_url: str | None = None
+
+
 class VolunteerListItem(ORMBase):
     """Строка справочника «Волонтёры» в админке."""
 

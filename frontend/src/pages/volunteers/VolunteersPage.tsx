@@ -4,8 +4,12 @@ import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate, formatTime } from '@/lib/format';
 import { useAuthStore } from '@/store/authStore';
 import { useVolunteers } from '@/api/hooks/volunteers';
-import { useDeleteVolunteer, useSetVolunteerActive } from '@/api/mutations/volunteers';
-import type { Volunteer } from '@/api/aliases';
+import {
+  useDeleteVolunteer,
+  useResetVolunteerPassword,
+  useSetVolunteerActive,
+} from '@/api/mutations/volunteers';
+import type { Volunteer, VolunteerAdminResetResult } from '@/api/aliases';
 import './Volunteers.css';
 
 /**
@@ -38,6 +42,7 @@ type RowProps = {
   busy: boolean;
   onToggleActive: (v: Volunteer) => void;
   onDelete: (v: Volunteer) => void;
+  onResetPassword: (v: Volunteer) => void;
 };
 const VolunteerRow = memo(function VolunteerRow({
   v,
@@ -45,6 +50,7 @@ const VolunteerRow = memo(function VolunteerRow({
   busy,
   onToggleActive,
   onDelete,
+  onResetPassword,
 }: RowProps) {
   return (
     <div className="de-vol-row">
@@ -76,6 +82,15 @@ const VolunteerRow = memo(function VolunteerRow({
       <div className="de-vol-cell de-vol-c-date">{formatDate(v.created_at) || '—'}</div>
       {isAdmin && (
         <div className="de-vol-cell de-vol-c-actions">
+          <button
+            type="button"
+            className="de-vol-row-btn"
+            disabled={busy}
+            onClick={() => onResetPassword(v)}
+          >
+            <Icon name="key" size={13} />
+            Сбросить пароль
+          </button>
           <button
             type="button"
             className="de-vol-row-btn"
@@ -112,13 +127,20 @@ export function VolunteersPage() {
   const listQuery = useVolunteers();
   const setActive = useSetVolunteerActive();
   const deleteVolunteer = useDeleteVolunteer();
+  const resetPassword = useResetVolunteerPassword();
 
   const volunteers = useMemo(() => listQuery.data ?? [], [listQuery.data]);
 
   // Подтверждение удаления — целевой волонтёр или null.
   const [toDelete, setToDelete] = useState<Volunteer | null>(null);
 
-  const rowBusy = setActive.isPending || deleteVolunteer.isPending;
+  // Сброс пароля: целевой волонтёр (модалка открыта) или null.
+  const [toReset, setToReset] = useState<Volunteer | null>(null);
+  // Результат сброса, когда SMTP не настроен (email_sent=false) — модалка переходит в
+  // режим «передайте ссылку вручную». null — фаза подтверждения / письмо ушло.
+  const [resetResult, setResetResult] = useState<VolunteerAdminResetResult | null>(null);
+
+  const rowBusy = setActive.isPending || deleteVolunteer.isPending || resetPassword.isPending;
 
   const handleToggleActive = (v: Volunteer) => {
     const next = !v.is_active;
@@ -144,6 +166,42 @@ export function VolunteersPage() {
       },
       onError: () => showToast('Не удалось удалить волонтёра.'),
     });
+  };
+
+  const handleResetPassword = () => {
+    if (!toReset) return;
+    const email = toReset.email;
+    resetPassword.mutate(toReset.id, {
+      onSuccess: (data) => {
+        if (data.email_sent) {
+          // Письмо ушло — закрываем модалку и подтверждаем тостом.
+          closeReset();
+          showToast(`Ссылка сброса отправлена на ${email}`);
+        } else {
+          // SMTP не настроен — письмо НЕ отправлено. Показываем ссылку/токен для
+          // ручной передачи (без фейка «письмо отправлено»).
+          setResetResult(data);
+        }
+      },
+      onError: () => showToast('Не удалось отправить ссылку для сброса пароля.'),
+    });
+  };
+
+  const closeReset = () => {
+    setToReset(null);
+    setResetResult(null);
+  };
+
+  // Копирование ссылки/токена в буфер обмена с честной обратной связью в тосте.
+  const handleCopy = (text: string) => {
+    if (!navigator.clipboard) {
+      showToast('Копирование недоступно — выделите ссылку вручную.');
+      return;
+    }
+    navigator.clipboard.writeText(text).then(
+      () => showToast('Скопировано в буфер обмена.'),
+      () => showToast('Не удалось скопировать — выделите ссылку вручную.')
+    );
   };
 
   return (
@@ -190,6 +248,7 @@ export function VolunteersPage() {
                 busy={rowBusy}
                 onToggleActive={handleToggleActive}
                 onDelete={setToDelete}
+                onResetPassword={setToReset}
               />
             ))}
           </div>
@@ -202,6 +261,17 @@ export function VolunteersPage() {
           pending={deleteVolunteer.isPending}
           onClose={() => setToDelete(null)}
           onConfirm={handleDelete}
+        />
+      )}
+
+      {toReset && (
+        <ResetPasswordModal
+          volunteer={toReset}
+          result={resetResult}
+          pending={resetPassword.isPending}
+          onClose={closeReset}
+          onConfirm={handleResetPassword}
+          onCopy={handleCopy}
         />
       )}
 
@@ -255,6 +325,126 @@ function ConfirmDeleteModal({ volunteer, pending, onClose, onConfirm }: ConfirmP
             {pending ? 'Удаление…' : 'Удалить'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Модалка сброса пароля волонтёра ----------
+   Две фазы в одной модалке:
+   1) подтверждение (result == null) — «Отправить волонтёру ссылку для сброса?»;
+   2) ручная передача (result?.email_sent === false) — SMTP не настроен, письмо НЕ
+      ушло: показываем копируемую ссылку/токен с честной подписью.
+   При email_sent === true модалка вообще не входит во 2-ю фазу — родитель её закрывает
+   и показывает тост. */
+type ResetProps = {
+  volunteer: Volunteer;
+  result: VolunteerAdminResetResult | null;
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  onCopy: (text: string) => void;
+};
+function ResetPasswordModal({
+  volunteer,
+  result,
+  pending,
+  onClose,
+  onConfirm,
+  onCopy,
+}: ResetProps) {
+  // Фаза ручной передачи: письмо не ушло (SMTP не настроен).
+  const manual = result != null && !result.email_sent;
+
+  return (
+    <div className="de-vol-modal-overlay" onClick={onClose}>
+      <div className="de-vol-modal" style={{ width: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="de-vol-modal-head">
+          <div style={{ flex: 1 }}>
+            <h2>{manual ? 'Письмо не отправлено' : 'Сбросить пароль волонтёра?'}</h2>
+            <div className="de-vol-modal-head-sub">
+              {manual
+                ? 'SMTP не настроен — передайте ссылку вручную'
+                : 'Ссылка для сброса уйдёт на почту волонтёру'}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="de-vol-modal-close"
+            aria-label="Закрыть"
+            onClick={onClose}
+          >
+            <Icon name="x" size={17} />
+          </button>
+        </div>
+
+        <div className="de-vol-modal-body">
+          {manual ? (
+            <>
+              <div className="de-vol-confirm-text">
+                Ссылка для сброса пароля создана, но <b>письмо НЕ отправлено</b> (SMTP не настроен).
+                Передайте её волонтёру <b>«{volunteer.email}»</b> вручную — по ссылке он сам задаст
+                новый пароль.
+              </div>
+              {result?.reset_url && (
+                <ResetLinkField label="Ссылка для сброса" value={result.reset_url} onCopy={onCopy} />
+              )}
+              {result?.reset_token && (
+                <ResetLinkField label="Токен" value={result.reset_token} onCopy={onCopy} />
+              )}
+            </>
+          ) : (
+            <div className="de-vol-confirm-text">
+              Отправить волонтёру <b>«{volunteer.email}»</b> ссылку для сброса пароля? Прямую смену
+              пароля мы не делаем — по ссылке волонтёр сам задаст новый пароль.
+            </div>
+          )}
+        </div>
+
+        <div className="de-vol-modal-foot">
+          {manual ? (
+            <button type="button" className="de-vol-modal-submit" onClick={onClose}>
+              Готово
+            </button>
+          ) : (
+            <>
+              <button type="button" className="de-vol-modal-cancel" onClick={onClose}>
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="de-vol-modal-submit"
+                disabled={pending}
+                onClick={onConfirm}
+              >
+                {pending ? 'Отправка…' : 'Отправить ссылку'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Копируемое поле (ссылка/токен) для ручной передачи волонтёру ---------- */
+type ResetLinkFieldProps = {
+  label: string;
+  value: string;
+  onCopy: (text: string) => void;
+};
+function ResetLinkField({ label, value, onCopy }: ResetLinkFieldProps) {
+  return (
+    <div className="de-vol-reset-field">
+      <div className="de-vol-reset-label">{label}</div>
+      <div className="de-vol-reset-copyrow">
+        <code className="de-vol-reset-code" title={value}>
+          {value}
+        </code>
+        <button type="button" className="de-vol-reset-copy" onClick={() => onCopy(value)}>
+          <Icon name="copy" size={13} />
+          Копировать
+        </button>
       </div>
     </div>
   );

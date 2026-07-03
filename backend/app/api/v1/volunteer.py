@@ -33,15 +33,14 @@ from ...schemas.volunteer import (
 )
 from ...services.mailer import deliver_email
 from ...services.volunteer import (
-    PURPOSE_RESET_PASSWORD,
     PURPOSE_VERIFY_EMAIL,
-    RESET_PASSWORD_TOKEN_TTL,
     VERIFY_EMAIL_TOKEN_TTL,
     authenticate,
     complete_onboarding,
     register,
     request_password_reset,
     reset_password,
+    send_reset_email,
     verify_email,
 )
 
@@ -124,23 +123,13 @@ async def request_reset(
     if volunteer is None:
         return VolunteerResetRequestResponse(ok=True, email_sent=False)
 
-    token = create_purpose_token(
-        str(volunteer.id), PURPOSE_RESET_PASSWORD, RESET_PASSWORD_TOKEN_TTL
-    )
-    reset_url = f"{settings.APP_PUBLIC_URL}/reset?token={token}"
-    sent = deliver_email(
-        volunteer.email,
-        subject="ЭкоПульс — восстановление пароля",
-        body="Здравствуйте!\n\n"
-        f"Для смены пароля перейдите по ссылке:\n{reset_url}\n\n"
-        f"Если вы не запрашивали сброс пароля — просто проигнорируйте это письмо.",
-    )
-
+    # Токен/письмо — общий хелпер (тот же код, что у админ-триггера).
+    email_sent, token, reset_url = send_reset_email(volunteer)
     return VolunteerResetRequestResponse(
         ok=True,
-        email_sent=sent,
-        reset_token=None if sent else token,
-        reset_url=None if sent else reset_url,
+        email_sent=email_sent,
+        reset_token=None if email_sent else token,
+        reset_url=None if email_sent else reset_url,
     )
 
 

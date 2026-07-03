@@ -3271,6 +3271,55 @@
         }
       }
     },
+    "/api/v1/volunteers/{volunteer_id}/reset-password": {
+      "post": {
+        "tags": [
+          "Справочники"
+        ],
+        "summary": "Reset Volunteer Password",
+        "description": "Админ-триггер: шлёт волонтёру ссылку для сброса пароля. Нет волонтёра → 404.\n\nПрямой смены пароля здесь НЕТ — только письмо со ссылкой (как публичный reset-request).\nПароль/БД не меняются, поэтому commit не нужен. Если письмо НЕ ушло (SMTP не настроен),\nreset_token/reset_url возвращаются в ответе — админ передаст ссылку волонтёру вручную.",
+        "operationId": "reset_volunteer_password_api_v1_volunteers__volunteer_id__reset_password_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "volunteer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Volunteer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerAdminResetResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -5305,6 +5354,52 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VolunteerAdminResetResult": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "email_sent": {
+            "type": "boolean",
+            "title": "Email Sent"
+          },
+          "reset_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Token"
+          },
+          "reset_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "email_sent"
+        ],
+        "title": "VolunteerAdminResetResult",
+        "description": "Результат админ-триггера сброса пароля волонтёра (/volunteers/{id}/reset-password).\n\nПрямой смены пароля здесь нет — админ лишь инициирует отправку ссылки сброса\nволонтёру. email — почта волонтёра (для тоста «отправлено на …»)."
       },
       "VolunteerListItem": {
         "properties": {

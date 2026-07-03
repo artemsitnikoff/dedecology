@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
-import type { Volunteer } from '@/api/aliases';
+import type { Volunteer, VolunteerAdminResetResult } from '@/api/aliases';
 
 /**
  * PATCH /volunteers/{id}/active — блокировка/разблокировка волонтёра (флаг is_active).
@@ -29,6 +29,21 @@ export function useDeleteVolunteer() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['volunteers'] });
+    },
+  });
+}
+
+/**
+ * POST /volunteers/{id}/reset-password — АДМИНСКИЙ триггер сброса пароля волонтёра.
+ * Пароль напрямую НЕ меняется: бэк генерит reset-токен и шлёт волонтёру письмо со
+ * ссылкой. Если SMTP не настроен (email_sent=false) — ответ несёт reset_url/reset_token
+ * для ручной передачи. Инвалидация списка не нужна — пароль в справочнике не показывается.
+ */
+export function useResetVolunteerPassword() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post<VolunteerAdminResetResult>(`/volunteers/${id}/reset-password`);
+      return res.data;
     },
   });
 }

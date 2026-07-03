@@ -55,7 +55,7 @@
   border: 2px solid var(--bg-1);
 }
 .de-vol-table {
-  min-width: 1260px;
+  min-width: 1420px;
 }
 .de-vol-thead {
   display: flex;
@@ -121,7 +121,7 @@
   width: 150px;
 }
 .de-vol-c-actions {
-  width: 260px;
+  width: 420px;
   gap: 8px;
   justify-content: flex-end;
 }
@@ -351,13 +351,67 @@
   background: var(--ark-red-500);
 }
 
-/* Текст подтверждения удаления */
+/* Текст подтверждения удаления / сброса */
 .de-vol-confirm-text {
   font-size: var(--fs-13);
   color: var(--fg-2);
   line-height: 1.5;
 }
 .de-vol-confirm-text b {
+  color: var(--fg-1);
+}
+
+/* ---------- Копируемое поле (ссылка/токен) при email_sent=false ---------- */
+.de-vol-reset-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.de-vol-reset-label {
+  font-size: var(--fs-11);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+.de-vol-reset-copyrow {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.de-vol-reset-code {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  background: var(--bg-panel-2);
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.4;
+  word-break: break-all;
+  user-select: all;
+}
+.de-vol-reset-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+.de-vol-reset-copy:hover {
+  filter: brightness(0.97);
   color: var(--fg-1);
 }
 

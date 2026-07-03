@@ -4,7 +4,8 @@
 Пароль — тот же хеш, что и у пользователей админки (core.security), но своя таблица
 volunteers и свой JWT (typ="volunteer"). Кидаем кастомные AppError-исключения, не
 HTTPException. Служебные токены (verify_email / reset_password) — подписанный JWT без
-отдельной таблицы; ГЕНЕРАЦИЯ токенов и отправка письма — на уровне роутера (оркестрация).
+отдельной таблицы. Verify-письмо оркеструет роутер; reset-письмо (публичный запрос И
+админ-триггер) — общий хелпер send_reset_email, чтобы не дублировать логику токена/письма.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..core.errors import (
     BlockedError,
     ConflictError,
@@ -23,12 +25,14 @@ from ..core.errors import (
     NotFoundError,
 )
 from ..core.security import (
+    create_purpose_token,
     decode_purpose_token,
     get_password_hash,
     verify_password,
 )
 from ..models import Volunteer
 from ..schemas.volunteer import VolunteerRegister
+from .mailer import deliver_email
 
 # Время жизни служебных токенов (роутер передаёт их в create_purpose_token).
 VERIFY_EMAIL_TOKEN_TTL = timedelta(hours=48)
@@ -119,9 +123,32 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> Volu
 async def request_password_reset(session: AsyncSession, email: str) -> Volunteer | None:
     """Возвращает волонтёра по email или None (лёгкая анти-энумерация в роутере).
 
-    Токен сброса и письмо — на уровне роутера (только если волонтёр найден).
+    Само письмо/токен — общий хелпер send_reset_email (роутер зовёт его, только если
+    волонтёр найден, чтобы не раскрывать наличие учётки).
     """
     return await get_by_email(session, email)
+
+
+def send_reset_email(volunteer: Volunteer) -> tuple[bool, str, str]:
+    """Генерит reset-токен волонтёра и шлёт письмо со ссылкой сброса пароля.
+
+    ЕДИНЫЙ код для публичного запроса (/volunteer/password/reset-request) и админ-триггера
+    (admin_reset_password) — логика токена/письма не дублируется. Возвращает
+    (email_sent, token, reset_url). deliver_email честно вернёт False, если SMTP не настроен
+    (или отправка упала) — тогда вызывающий кладёт token/url в ответ, без фейка «письмо ушло».
+    """
+    token = create_purpose_token(
+        str(volunteer.id), PURPOSE_RESET_PASSWORD, RESET_PASSWORD_TOKEN_TTL
+    )
+    reset_url = f"{settings.APP_PUBLIC_URL}/reset?token={token}"
+    email_sent = deliver_email(
+        volunteer.email,
+        subject="ЭкоПульс — восстановление пароля",
+        body="Здравствуйте!\n\n"
+        f"Для смены пароля перейдите по ссылке:\n{reset_url}\n\n"
+        f"Если вы не запрашивали сброс пароля — просто проигнорируйте это письмо.",
+    )
+    return email_sent, token, reset_url
 
 
 async def reset_password(session: AsyncSession, token: str, new_password: str) -> Volunteer:
@@ -172,3 +199,19 @@ async def delete(session: AsyncSession, vol_id: UUID) -> None:
     volunteer = await get_by_id(session, vol_id)
     await session.delete(volunteer)
     await session.flush()
+
+
+async def admin_reset_password(
+    session: AsyncSession, vol_id: UUID
+) -> tuple[str, bool, str, str]:
+    """Админ-триггер сброса пароля волонтёра ПО ID (кнопка в справочнике «Волонтёры»).
+
+    Находит волонтёра (нет → NotFoundError 404); генерит reset-токен и шлёт письмо со
+    ссылкой ТЕМ ЖЕ способом, что публичный запрос сброса (общий send_reset_email). БЕЗ
+    анти-энумерации — админ знает, кому сбрасывает. Прямой смены пароля здесь НЕТ, БД не
+    меняется (только письмо) — commit не нужен. Возвращает (email, email_sent, token,
+    reset_url): email нужен роутеру для ответа/тоста, т.к. на входе лишь id.
+    """
+    volunteer = await get_by_id(session, vol_id)
+    email_sent, token, reset_url = send_reset_email(volunteer)
+    return volunteer.email, email_sent, token, reset_url
