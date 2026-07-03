@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database import get_db
-from ...deps import get_current_user
+from ...deps import get_current_actor, get_current_user
 from ...models import User
 from ...schemas.base import Paginated
 from ...schemas.mno import (
@@ -57,9 +57,11 @@ async def list_mno(
         "только МНО этого кадра (ближайшие), как в /mno/points.",
     ),
     session: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _actor=Depends(get_current_actor),
 ):
-    """Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой."""
+    """Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.
+
+    READ доступен и админу (веб), и волонтёру (мобильное приложение, карта площадок)."""
     return await mno_service.list_mno(
         session,
         search=search,
@@ -82,7 +84,7 @@ async def list_mno_points(
         None, description="Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)"
     ),
     session: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _actor=Depends(get_current_actor),
 ):
     """Лёгкие координаты МНО для карты (обрезка до лимита на КАДР).
 
@@ -151,7 +153,7 @@ async def sync_one_mno(
 async def get_mno(
     mno_id: UUID,
     session: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _actor=Depends(get_current_actor),
 ):
-    """Карточка МНО."""
+    """Карточка МНО (READ — админ или волонтёр)."""
     return await mno_service.get_mno(session, mno_id)

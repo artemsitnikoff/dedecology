@@ -51,6 +51,51 @@ async def get_current_user(
     return user
 
 
+async def get_current_actor(
+    token=Depends(oauth2_scheme),
+    session: AsyncSession = Depends(get_db),
+):
+    """Пускает АДМИНА (access-токен → users) ИЛИ ВОЛОНТЁРА (typ="volunteer" → volunteers).
+
+    Для READ-эндпоинтов МНО, доступных и веб-админке (инспектор), и мобильному приложению
+    волонтёра (карта площадок рядом). Эндпоинту важна лишь сама авторизация — возвращаем
+    User или Volunteer. Ни того ни другого валидного нет → 401.
+    """
+    try:
+        payload = decode_token(token.credentials)
+    except ValueError:
+        raise InvalidCredentialsError()
+    sub = payload.get("sub")
+    try:
+        sub_uuid = UUID(sub) if sub is not None else None
+    except (ValueError, TypeError):
+        sub_uuid = None
+    if sub_uuid is None:
+        raise InvalidCredentialsError()
+
+    # Админ: access-токен → users.
+    if payload.get("type") == "access":
+        user = (
+            await session.execute(select(User).where(User.id == sub_uuid))
+        ).scalar_one_or_none()
+        if user is None:
+            raise InvalidCredentialsError()
+        if not user.is_active:
+            raise UserInactiveError()
+        return user
+
+    # Волонтёр: typ="volunteer" → volunteers (активный).
+    if payload.get("typ") == "volunteer":
+        vol = (
+            await session.execute(select(Volunteer).where(Volunteer.id == sub_uuid))
+        ).scalar_one_or_none()
+        if vol is None or not vol.is_active:
+            raise InvalidCredentialsError()
+        return vol
+
+    raise InvalidCredentialsError()
+
+
 async def get_current_volunteer(
     token=Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_db),

@@ -1096,7 +1096,7 @@
           "Карта и МНО"
         ],
         "summary": "List Mno",
-        "description": "Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.",
+        "description": "Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.\n\nREAD доступен и админу (веб), и волонтёру (мобильное приложение, карта площадок).",
         "operationId": "list_mno_api_v1_mno_get",
         "security": [
           {
@@ -1577,7 +1577,7 @@
           "Карточка МНО"
         ],
         "summary": "Get Mno",
-        "description": "Карточка МНО.",
+        "description": "Карточка МНО (READ — админ или волонтёр).",
         "operationId": "get_mno_api_v1_mno__mno_id__get",
         "security": [
           {

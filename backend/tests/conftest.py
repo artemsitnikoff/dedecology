@@ -20,7 +20,7 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 from app.main import app  # noqa: E402
 from app.database import get_db  # noqa: E402
-from app.deps import get_current_user  # noqa: E402
+from app.deps import get_current_actor, get_current_user  # noqa: E402
 from app.core.permissions import require_admin, require_superadmin  # noqa: E402
 from app.models import User  # noqa: E402
 
@@ -65,6 +65,9 @@ async def client(fake_session, current_user):
 
     app.dependency_overrides[get_db] = _get_db_override
     app.dependency_overrides[get_current_user] = _current_user_override
+    # READ-эндпоинты МНО пускают админа ИЛИ волонтёра (get_current_actor) — в тестах
+    # тоже возвращаем фейкового current_user (проверка «пускает» — отдельными тестами).
+    app.dependency_overrides[get_current_actor] = _current_user_override
     app.dependency_overrides[require_admin] = _require_admin_override
     app.dependency_overrides[require_superadmin] = _require_superadmin_override
 

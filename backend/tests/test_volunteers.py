@@ -983,3 +983,41 @@ async def test_admin_reset_volunteer_password_unauthenticated_401(client):
         app.dependency_overrides[require_admin] = lambda: None
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "INVALID_CREDENTIALS"
+
+
+@pytest.mark.asyncio
+async def test_get_current_actor_accepts_admin_and_volunteer():
+    """get_current_actor пускает АДМИНА (access-токен → users) И ВОЛОНТЁРА (typ=volunteer →
+    volunteers). Ключевое: волонтёрский токен на READ-эндпоинтах МНО больше НЕ даёт 401.
+    Чужой валидный токен (refresh) — ни то, ни другое → 401."""
+    from app.core.errors import AppError
+    from app.core.security import (
+        create_access_token,
+        create_refresh_token,
+        create_volunteer_access_token,
+    )
+    from app.deps import get_current_actor
+
+    # Админ (access-токен → users).
+    admin = SimpleNamespace(id=uuid4(), is_active=True)
+    res_a = MagicMock()
+    res_a.scalar_one_or_none.return_value = admin
+    sess_a = AsyncMock()
+    sess_a.execute = AsyncMock(return_value=res_a)
+    tok_a = create_access_token({"sub": str(admin.id)})
+    assert await get_current_actor(SimpleNamespace(credentials=tok_a), sess_a) is admin
+
+    # Волонтёр (typ=volunteer → volunteers).
+    vol = SimpleNamespace(id=uuid4(), is_active=True)
+    res_v = MagicMock()
+    res_v.scalar_one_or_none.return_value = vol
+    sess_v = AsyncMock()
+    sess_v.execute = AsyncMock(return_value=res_v)
+    tok_v = create_volunteer_access_token(str(vol.id))
+    assert await get_current_actor(SimpleNamespace(credentials=tok_v), sess_v) is vol
+
+    # Refresh-токен — не access и не volunteer → 401 (сессия даже не запрашивается).
+    tok_r = create_refresh_token({"sub": str(uuid4())})
+    with pytest.raises(AppError) as exc:
+        await get_current_actor(SimpleNamespace(credentials=tok_r), AsyncMock())
+    assert exc.value.status_code == 401
