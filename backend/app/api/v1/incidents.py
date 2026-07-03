@@ -75,6 +75,7 @@ async def list_incidents(
     date_to: date | None = Query(None),
     region: str | None = Query(None),
     incident_type: str | None = Query(None),
+    mno_id: str | None = Query(None),
     sort: str = Query("date"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
@@ -82,7 +83,11 @@ async def list_incidents(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Список инцидентов с фильтрами/сортировкой/пагинацией."""
+    """Список инцидентов с фильтрами/сортировкой/пагинацией.
+
+    mno_id — фильтр «инциденты этого МНО» (клик по счётчику обращений в карточке МНО):
+    ТОЧНОЕ совпадение по ссылке incidents.mno_id; невалидный UUID игнорируется.
+    """
     return await incident_service.list_incidents(
         session,
         search=search,
@@ -92,6 +97,7 @@ async def list_incidents(
         date_to=_as_datetime(date_to),
         region=region,
         incident_type=incident_type,
+        mno_id=mno_id,
         sort=sort,
         order=order,
         page=page,

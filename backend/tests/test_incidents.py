@@ -303,6 +303,65 @@ async def test_list_forwards_incident_type(client):
     assert spy.call_args.kwargs["incident_type"] == "fire"
 
 
+# --- Фильтр по МНО (mno_id, ТОЧНОЕ совпадение по ссылке) -----------------------
+
+
+def test_base_filters_mno_id_valid_uuid():
+    """Валидный mno_id → равенство Incident.mno_id == UUID (пред-статусный фильтр)."""
+    mid = uuid4()
+    filters = _base_filters(None, None, None, None, mno_id=str(mid))
+    assert len(filters) == 1
+    clause = filters[0]
+    assert clause.operator is eq
+    assert clause.right.value == mid
+
+
+def test_base_filters_mno_id_invalid_or_blank_no_filter():
+    """Пусто/пробелы/None/не-UUID → фильтр по МНО НЕ добавляется (не роняем запрос)."""
+    assert _base_filters(None, None, None, None, mno_id=None) == []
+    assert _base_filters(None, None, None, None, mno_id="") == []
+    assert _base_filters(None, None, None, None, mno_id="   ") == []
+    assert _base_filters(None, None, None, None, mno_id="not-a-uuid") == []
+
+
+def test_base_filters_mno_id_combines_with_region():
+    """mno_id честится вместе с region (оба пред-статусные → оба в where)."""
+    filters = _base_filters(
+        None, None, None, None, region="Самарская область", mno_id=str(uuid4())
+    )
+    assert len(filters) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_mno_id(client):
+    """GET /incidents?mno_id=... пробрасывает id в сервис списка («инциденты этого МНО»)."""
+    mid = str(uuid4())
+    page = Paginated[IncidentListItem](
+        items=[_list_item()], total=1, page=1, page_size=100, pages=1
+    )
+    spy = AsyncMock(return_value=page)
+    with patch("app.api.v1.incidents.incident_service.list_incidents", new=spy):
+        resp = await client.get(f"/api/v1/incidents?mno_id={mid}")
+    assert resp.status_code == 200
+    assert spy.call_args.kwargs["mno_id"] == mid
+
+
+@pytest.mark.asyncio
+async def test_detail_carries_mno_id(client):
+    """Карточка инцидента отдаёт mno_id/mno_reg (для ссылки «Объект ТКО» в drawer)."""
+    mid = uuid4()
+    detail = _detail(mno_id=mid, mno_reg="63-04-001162")
+    with patch(
+        "app.api.v1.incidents.incident_service.get_incident",
+        new=AsyncMock(return_value=detail),
+    ):
+        resp = await client.get(f"/api/v1/incidents/{detail.id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mno_id"] == str(mid)
+    assert body["mno_reg"] == "63-04-001162"
+
+
 @pytest.mark.asyncio
 async def test_funnel_forwards_region(client):
     """GET /incidents/funnel?region=... пробрасывает region (влияет на счётчики)."""

@@ -513,3 +513,95 @@ async def test_create_mno_service_sets_defaults():
     assert detail.fgis_id is None
     assert detail.incidents == 0
     assert detail.region_name == "Самарская область"
+
+
+# --- Живой счётчик обращений (incidents = COUNT инцидентов по mno_id) -----------
+
+
+@pytest.mark.asyncio
+async def test_incident_counts_empty_ids_skips_db():
+    """Пустой набор id → {} без обращения к БД (не считаем впустую)."""
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=AssertionError("БД не должна вызываться"))
+    assert await mno_service._incident_counts(session, []) == {}
+    session.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_incident_counts_builds_map_grouped_by_mno_id():
+    """_incident_counts → {mno_id: COUNT}; SQL группирует по incidents.mno_id."""
+    id1, id2 = uuid4(), uuid4()
+    res = MagicMock()
+    res.all.return_value = [(id1, 2), (id2, 5)]
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=res)
+
+    counts = await mno_service._incident_counts(session, [id1, id2])
+
+    assert counts == {id1: 2, id2: 5}
+    sql = str(session.execute.call_args.args[0]).lower()
+    assert "count(incidents.id)" in sql
+    assert "group by incidents.mno_id" in sql
+    assert "incidents.mno_id in" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_mno_incidents_is_live_count():
+    """list_mno: incidents ПЕРЕКРЫВАЕТ статичное поле модели живым COUNT по mno_id."""
+    mno = _orm_mno(incidents=99)  # статичное значение — должно быть перекрыто
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 1
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = [mno]
+    names_res = MagicMock()
+    names_res.all.return_value = [("63", "Самарская область")]
+    counts_res = MagicMock()
+    counts_res.all.return_value = [(mno.id, 3)]
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[count_res, rows_res, names_res, counts_res]
+    )
+
+    page = await mno_service.list_mno(session)
+
+    assert page.items[0].incidents == 3  # живой COUNT, НЕ 99
+
+
+@pytest.mark.asyncio
+async def test_list_mno_incidents_zero_when_no_references():
+    """МНО без обращений (нет в счётчике) → incidents=0, а не статичное поле модели."""
+    mno = _orm_mno(incidents=99)
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 1
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = [mno]
+    names_res = MagicMock()
+    names_res.all.return_value = [("63", "Самарская область")]
+    counts_res = MagicMock()
+    counts_res.all.return_value = []  # ни один инцидент не ссылается
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[count_res, rows_res, names_res, counts_res]
+    )
+
+    page = await mno_service.list_mno(session)
+
+    assert page.items[0].incidents == 0
+
+
+@pytest.mark.asyncio
+async def test_get_mno_incidents_is_live_count():
+    """get_mno (деталь): incidents = живой COUNT инцидентов по ссылке mno_id."""
+    mno = _orm_mno(incidents=99)
+    get_res = MagicMock()
+    get_res.scalar_one_or_none.return_value = mno
+    names_res = MagicMock()
+    names_res.all.return_value = [("63", "Самарская область")]
+    counts_res = MagicMock()
+    counts_res.all.return_value = [(mno.id, 5)]
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[get_res, names_res, counts_res])
+
+    detail = await mno_service.get_mno(session, mno.id)
+
+    assert detail.incidents == 5

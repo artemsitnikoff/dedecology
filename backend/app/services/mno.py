@@ -14,7 +14,7 @@ from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import NotFoundError
-from ..models import Mno, Region
+from ..models import Incident, Mno, Region
 from ..schemas.base import Paginated
 from ..schemas.mno import (
     MnoDetail,
@@ -76,7 +76,30 @@ async def _region_names(session: AsyncSession) -> dict[str, str]:
     return {code: name for code, name in result.all()}
 
 
-def _to_list_item(m: Mno, region_names: dict[str, str]) -> MnoListItem:
+async def _incident_counts(session: AsyncSession, mno_ids: list) -> dict:
+    """{mno_id: живой COUNT инцидентов} по ссылке incidents.mno_id, одним запросом.
+
+    Счётчик обращений у МНО считается НА ЧТЕНИЕ (без дрейфа/инкрементов): для набора
+    МНО из списка/детали берём COUNT(Incident.id) GROUP BY Incident.mno_id. МНО без
+    обращений в словарь не попадают → у них 0 (см. .get(id, 0)). Пустой набор → без
+    запроса к БД.
+    """
+    if not mno_ids:
+        return {}
+    stmt = (
+        select(Incident.mno_id, func.count(Incident.id))
+        .where(Incident.mno_id.in_(mno_ids))
+        .group_by(Incident.mno_id)
+    )
+    result = await session.execute(stmt)
+    return {mno_id: cnt for mno_id, cnt in result.all()}
+
+
+def _to_list_item(
+    m: Mno, region_names: dict[str, str], incidents: int | None = None
+) -> MnoListItem:
+    """Строка/карточка МНО. incidents=None → статичное поле модели (create/sync);
+    заданный incidents ПЕРЕКРЫВАЕТ его живым COUNT (списки/деталь на чтение)."""
     return MnoListItem(
         id=m.id,
         reg=m.reg,
@@ -89,7 +112,7 @@ def _to_list_item(m: Mno, region_names: dict[str, str]) -> MnoListItem:
         fgis_id=m.fgis_id,
         synced=m.synced,
         sync_date=m.sync_date,
-        incidents=m.incidents,
+        incidents=m.incidents if incidents is None else incidents,
     )
 
 
@@ -162,7 +185,8 @@ async def list_mno(
         limit=page_size,
     )
     region_names = await _region_names(session)
-    items = [_to_list_item(m, region_names) for m in rows]
+    counts = await _incident_counts(session, [m.id for m in rows])
+    items = [_to_list_item(m, region_names, counts.get(m.id, 0)) for m in rows]
     pages = math.ceil(total / page_size) if total > 0 else 0
     return Paginated[MnoListItem](
         items=items, total=total, page=page, page_size=page_size, pages=pages
@@ -183,7 +207,8 @@ async def list_for_export(
         session, search=search, region=region, synced=synced, sort=sort, order=order
     )
     region_names = await _region_names(session)
-    return [_to_list_item(m, region_names) for m in rows]
+    counts = await _incident_counts(session, [m.id for m in rows])
+    return [_to_list_item(m, region_names, counts.get(m.id, 0)) for m in rows]
 
 
 async def list_points(
@@ -294,10 +319,11 @@ async def _get(session: AsyncSession, mno_id: uuid.UUID) -> Mno:
 
 
 async def get_mno(session: AsyncSession, mno_id: uuid.UUID) -> MnoDetail:
-    """Карточка МНО."""
+    """Карточка МНО (incidents — живой COUNT обращений по ссылке mno_id)."""
     mno = await _get(session, mno_id)
     region_names = await _region_names(session)
-    item = _to_list_item(mno, region_names)
+    counts = await _incident_counts(session, [mno.id])
+    item = _to_list_item(mno, region_names, counts.get(mno.id, 0))
     return MnoDetail(**item.model_dump())
 
 

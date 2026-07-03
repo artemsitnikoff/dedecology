@@ -1049,6 +1049,57 @@
   font-size: var(--fs-13);
   font-weight: 600;
 }
+/* «Объект ТКО» в карточке инцидента — реестровый № как ссылка на карточку МНО */
+.de-inc-mno-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--de-brand);
+  cursor: pointer;
+}
+.de-inc-mno-link:hover {
+  text-decoration: underline;
+}
+/* Баннер привязки к объекту ТКО (мягкая эко-полоса над таблицей) */
+.de-inc-mno-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px 28px;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--ark-green-100);
+  color: var(--ark-green-600);
+  flex: none;
+}
+.de-inc-mno-banner-txt {
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.de-inc-mno-banner-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--ark-green-600);
+  border-radius: var(--radius-full);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ark-green-600);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.de-inc-mno-banner-reset:hover {
+  background: var(--bg-1);
+}
 /* блок смены статуса — сразу под шапкой (sticky-зоной), серая полоса */
 .de-inc-drawer-status-row {
   display: flex;

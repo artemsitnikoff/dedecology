@@ -1018,6 +1018,18 @@
   font-size: var(--fs-13);
   font-weight: 600;
 }
+/* Кликабельный вариант счётчика: переход к списку обращений этого МНО */
+.de-mno-inc-badge-link {
+  border: none;
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.de-mno-inc-badge-link:hover {
+  box-shadow: inset 0 0 0 1px var(--ark-red-500);
+}
 
 /* ---------- Модалка добавления ---------- */
 .de-mno-modal-overlay {

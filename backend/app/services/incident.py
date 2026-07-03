@@ -64,6 +64,7 @@ def _base_filters(
     date_to: datetime | None,
     region: str | None = None,
     incident_type: str | None = None,
+    mno_id: str | None = None,
 ) -> list:
     """Фильтры, общие для списка и воронки (без статуса)."""
     filters: list = []
@@ -77,6 +78,13 @@ def _base_filters(
     # Тип инцидента — одиночный, ТОЧНОЕ совпадение по коду. Пусто → не фильтруем.
     if incident_type and incident_type.strip():
         filters.append(Incident.incident_type == incident_type.strip())
+    # МНО — ТОЧНОЕ совпадение по mno_id (питает список «инциденты этого МНО»). Значение
+    # парсим как UUID: пусто/мусор → фильтр НЕ добавляется (не роняем запрос 500-кой).
+    if mno_id and mno_id.strip():
+        try:
+            filters.append(Incident.mno_id == UUID(mno_id.strip()))
+        except (ValueError, AttributeError, TypeError):
+            pass
     # Период по photo_time (НЕ received_at), включительно
     if date_from is not None:
         filters.append(
@@ -99,6 +107,7 @@ async def list_incidents(
     date_to: datetime | None = None,
     region: str | None = None,
     incident_type: str | None = None,
+    mno_id: str | None = None,
     sort: str = "date",
     order: str = "desc",
     page: int = 1,
@@ -114,6 +123,7 @@ async def list_incidents(
         date_to=date_to,
         region=region,
         incident_type=incident_type,
+        mno_id=mno_id,
         sort=sort,
         order=order,
         offset=(page - 1) * page_size,
@@ -146,8 +156,11 @@ async def _query_incidents(
     with_total: bool,
     region: str | None = None,
     incident_type: str | None = None,
+    mno_id: str | None = None,
 ):
-    filters = _base_filters(search, source, date_from, date_to, region, incident_type)
+    filters = _base_filters(
+        search, source, date_from, date_to, region, incident_type, mno_id
+    )
     if status:
         filters.append(Incident.status.in_(status))
     where_clause = and_(*filters) if filters else None

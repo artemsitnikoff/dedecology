@@ -16,6 +16,8 @@ import './mno-picker.css';
 
 /** Данные выбранного МНО, которые модалка отдаёт форме. */
 export type MnoPick = {
+  /** UUID МНО — уходит в инцидент ссылкой на объект ТКО (Incident.mno_id). */
+  id: string;
   reg: string;
   address: string;
   coords: string;
@@ -138,6 +140,7 @@ export function MnoPickerModal({ onSelect, onClose }: Props) {
     const p = byId.get(id);
     if (!p) return;
     onSelect({
+      id: p.id,
       reg: p.reg,
       address: p.address,
       coords: p.coords,

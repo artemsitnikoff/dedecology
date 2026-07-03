@@ -91,6 +91,8 @@ export interface Incident {
   bins: boolean | null;
   /** Реестровый № выбранного на карте МНО (форма); null — МНО не выбирали. */
   mno_reg: string | null;
+  /** UUID выбранного на карте МНО (ссылка на объект ТКО); null — МНО не выбирали. */
+  mno_id: string | null;
   /** ISO-строка — «поступило». */
   received_at: string;
   created_at: string;
@@ -120,6 +122,8 @@ export interface IncidentListItem {
   incident_type: string | null;
   /** Реестровый № выбранного на карте МНО (форма); null — МНО не выбирали. */
   mno_reg: string | null;
+  /** UUID выбранного на карте МНО (ссылка на объект ТКО); null — МНО не выбирали. */
+  mno_id: string | null;
   received_at: string;
 }
 

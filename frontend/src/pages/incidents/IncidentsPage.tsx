@@ -56,6 +56,8 @@ export function IncidentsPage() {
   const sources = parseSources(searchParams.getAll('source'));
   const region = searchParams.get('region') ?? '';
   const incidentType = searchParams.get('incident_type') ?? '';
+  // Диплинк из карточки МНО: /incidents?mno_id=<id> — показать обращения одного объекта ТКО.
+  const mnoId = searchParams.get('mno_id') ?? '';
   const status = parseStatus(searchParams.get('status'));
   const dateFrom = searchParams.get('date_from') ?? '';
   const dateTo = searchParams.get('date_to') ?? '';
@@ -68,13 +70,14 @@ export function IncidentsPage() {
       source: sources.length ? sources : undefined,
       region: region || undefined,
       incident_type: incidentType || undefined,
+      mno_id: mnoId || undefined,
       status: status ?? undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       sort,
       order,
     }),
-    [search, sources, region, incidentType, status, dateFrom, dateTo, sort, order]
+    [search, sources, region, incidentType, mnoId, status, dateFrom, dateTo, sort, order]
   );
 
   // Стабильная ссылка на searchParams для use в колбэках без пересоздания.
@@ -190,6 +193,14 @@ export function IncidentsPage() {
     });
   }, [patchParams]);
 
+  /** Снять привязку к объекту ТКО (баннер) — убрать mno_id из URL, страница на 1. */
+  const clearMnoFilter = useCallback(() => {
+    patchParams((p) => {
+      p.delete('mno_id');
+      p.delete('page');
+    });
+  }, [patchParams]);
+
   // ----- Данные -----
   const incidentsQuery = useIncidents(filters);
   const funnelQuery = useFunnelCounts(filters);
@@ -287,7 +298,7 @@ export function IncidentsPage() {
     (status ? 1 : 0) +
     (dateFrom || dateTo ? 1 : 0);
   const hasFilters = filterCount > 0;
-  const isFiltered = hasFilters || !!search;
+  const isFiltered = hasFilters || !!search || !!mnoId;
 
   const grandTotal = grandTotalQuery.data?.all ?? total;
   const counterText = isFiltered
@@ -413,6 +424,18 @@ export function IncidentsPage() {
         hasFilters={hasFilters}
         onReset={resetFilters}
       />
+
+      {/* Баннер привязки к объекту ТКО: показываем только обращения выбранного МНО */}
+      {mnoId && (
+        <div className="de-inc-mno-banner">
+          <Icon name="pin" size={15} color="var(--de-brand)" />
+          <span className="de-inc-mno-banner-txt">Обращения по объекту ТКО</span>
+          <button type="button" className="de-inc-mno-banner-reset" onClick={clearMnoFilter}>
+            <Icon name="x" size={13} />
+            Сбросить
+          </button>
+        </div>
+      )}
 
       {/* Панель массовых действий */}
       {selected.size > 0 && (

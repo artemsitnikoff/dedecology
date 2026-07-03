@@ -120,8 +120,9 @@ export default function ReportFormPage() {
   const [city, setCity] = useState('');
   const [street, setStreet] = useState('');
   const [coords, setCoords] = useState('');
-  // Рег-номер выбранного на карте МНО (необязательный) + флаг открытия модалки.
+  // Рег-номер + UUID выбранного на карте МНО (необязательные) + флаг открытия модалки.
   const [mnoReg, setMnoReg] = useState('');
+  const [mnoId, setMnoId] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   // Голые имена выбранного региона/города (без типа) — для фильтрации
   // следующего уровня в DaData (locations матчит "Самарская", а не "Самарская обл").
@@ -180,8 +181,12 @@ export default function ReportFormPage() {
     setStreet(m.address);
     setCoords(m.coords);
     setMnoReg(m.reg);
+    setMnoId(m.id);
   }, []);
-  const clearMno = () => setMnoReg('');
+  const clearMno = () => {
+    setMnoReg('');
+    setMnoId('');
+  };
 
   // Добавляет только что выбранные файлы к уже набранным (аддитивно), с общим
   // лимитом MAX_PHOTOS. Это позволяет прикреплять фото по одному в несколько
@@ -271,8 +276,9 @@ export default function ReportFormPage() {
       fd.append('city', city.trim());
       fd.append('street', street.trim());
       fd.append('coords', coords.trim());
-      // Рег-номер выбранного МНО (необязательный; пусто → бэк трактует как «не выбрано»).
+      // Рег-номер + UUID выбранного МНО (необязательные; пусто → бэк трактует как «не выбрано»).
       fd.append('mno_reg', mnoReg.trim());
+      fd.append('mno_id', mnoId.trim());
       fd.append('photo_time', photoTime || '');
       fd.append('bins', bins);
       // Ханипот: у человека всегда пусто. Если бот заполнил — бэк молча дропнет.

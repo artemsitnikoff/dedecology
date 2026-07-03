@@ -1,5 +1,5 @@
-import { memo, useCallback, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate } from '@/lib/format';
@@ -127,6 +127,7 @@ const MnoRow = memo(function MnoRow({ m, selected, active, onToggle, onOpen }: R
    ============================================================ */
 export function MnoPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<MnoSortKey>('name');
   const [sortDir, setSortDir] = useState<SortOrder>('asc');
@@ -160,6 +161,32 @@ export function MnoPage() {
   );
   // Любая смена фильтра/поиска/сортировки сбрасывает страницу на первую.
   const resetPage = useCallback(() => setPage(1), [setPage]);
+
+  // Диплинк из карточки инцидента: /mno?open=<id> открывает drawer этого МНО при
+  // загрузке. openParam входит в deps — переход по новой ссылке переоткрывает карточку.
+  const openParam = searchParams.get('open');
+  useEffect(() => {
+    if (openParam) setDetailId(openParam);
+  }, [openParam]);
+
+  // Закрытие drawer: снимаем detailId и убираем ?open из URL (иначе эффект переоткроет).
+  const closeDrawer = useCallback(() => {
+    setDetailId(null);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('open');
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
+
+  // Клик по счётчику обращений МНО → список инцидентов, отфильтрованный по этому объекту ТКО.
+  const openIncidentsForMno = useCallback(
+    (id: string) => navigate(`/incidents?mno_id=${id}`),
+    [navigate]
+  );
 
   // Серверная фильтрация/сортировка (как у incidents). synced: один чип → bool, оба/ни одного → all.
   const syncedFilter: boolean | undefined =
@@ -545,9 +572,10 @@ export function MnoPage() {
       {detailId && (
         <MnoDrawer
           id={detailId}
-          onClose={() => setDetailId(null)}
+          onClose={closeDrawer}
           onSyncOne={handleSyncOne}
           syncOnePending={syncMnoOne.isPending}
+          onOpenIncidents={openIncidentsForMno}
         />
       )}
 
@@ -572,8 +600,10 @@ type DrawerProps = {
   onClose: () => void;
   onSyncOne: (id: string) => void;
   syncOnePending: boolean;
+  /** Клик по счётчику обращений → список инцидентов этого МНО (/incidents?mno_id=id). */
+  onOpenIncidents: (id: string) => void;
 };
-function MnoDrawer({ id, onClose, onSyncOne, syncOnePending }: DrawerProps) {
+function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: DrawerProps) {
   const { data, isLoading, isError } = useMnoDetail(id);
 
   return (
@@ -661,10 +691,15 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending }: DrawerProps) {
                 </button>
               )}
               {data.incidents > 0 && (
-                <span className="de-mno-inc-badge">
+                <button
+                  type="button"
+                  className="de-mno-inc-badge de-mno-inc-badge-link"
+                  onClick={() => onOpenIncidents(data.id)}
+                  title="Показать обращения по этому объекту ТКО"
+                >
                   <Icon name="alert-circle" size={15} />
                   Обращений по МНО: {data.incidents}
-                </span>
+                </button>
               )}
             </div>
           </div>

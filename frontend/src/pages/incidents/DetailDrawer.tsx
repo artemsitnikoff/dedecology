@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { STATUS, SOURCE } from '@/lib/status';
 import { formatDate, formatTime, fullAddr, maxLink } from '@/lib/format';
@@ -68,6 +69,7 @@ type ContentProps = {
 
 /** Содержимое карточки (рендерится только когда деталь загружена). */
 function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
+  const navigate = useNavigate();
   const setStatus = useSetStatus();
   const { data: incidentTypes = [] } = useIncidentTypes();
   const statusMeta = STATUS[d.status];
@@ -166,6 +168,27 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
               <div className="de-inc-field-val">{v}</div>
             </div>
           ))}
+          {/* Объект ТКО — если инцидент привязан к МНО (есть mno_id), реестровый №
+              кликабелен → переход к карточке МНО (/mno?open=id). Без mno_id — просто
+              текст рег-номера или «—». */}
+          <div className="de-inc-field">
+            <div className="de-inc-field-key">Объект ТКО</div>
+            <div className="de-inc-field-val">
+              {d.mno_id ? (
+                <button
+                  type="button"
+                  className="de-inc-mno-link"
+                  onClick={() => navigate(`/mno?open=${d.mno_id}`)}
+                  title="Открыть карточку объекта ТКО"
+                >
+                  <Icon name="pin" size={13} />
+                  {d.mno_reg || 'Открыть карточку МНО'}
+                </button>
+              ) : (
+                d.mno_reg || '—'
+              )}
+            </div>
+          </div>
           {/* Комментарий — поле показываем ВСЕГДА (пустое = «—»); многострочный текст переносится. */}
           <div className="de-inc-field">
             <div className="de-inc-field-key">Комментарий</div>

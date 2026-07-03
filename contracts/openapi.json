@@ -154,7 +154,7 @@
           "Админский реестр"
         ],
         "summary": "List Incidents",
-        "description": "Список инцидентов с фильтрами/сортировкой/пагинацией.",
+        "description": "Список инцидентов с фильтрами/сортировкой/пагинацией.\n\nmno_id — фильтр «инциденты этого МНО» (клик по счётчику обращений в карточке МНО):\nТОЧНОЕ совпадение по ссылке incidents.mno_id; невалидный UUID игнорируется.",
         "operationId": "list_incidents_api_v1_incidents_get",
         "security": [
           {
@@ -280,6 +280,22 @@
                 }
               ],
               "title": "Incident Type"
+            }
+          },
+          {
+            "name": "mno_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mno Id"
             }
           },
           {
@@ -3507,6 +3523,11 @@
             "title": "Mno Reg",
             "default": ""
           },
+          "mno_id": {
+            "type": "string",
+            "title": "Mno Id",
+            "default": ""
+          },
           "incident_type": {
             "type": "string",
             "title": "Incident Type",
@@ -3760,6 +3781,18 @@
             ],
             "title": "Mno Reg"
           },
+          "mno_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mno Id"
+          },
           "comment": {
             "anyOf": [
               {
@@ -3931,6 +3964,18 @@
               }
             ],
             "title": "Mno Reg"
+          },
+          "mno_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mno Id"
           },
           "comment": {
             "anyOf": [

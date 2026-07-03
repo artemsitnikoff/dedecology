@@ -573,6 +573,36 @@ async def test_public_form_forwards_mno_reg(client):
 
 
 @pytest.mark.asyncio
+async def test_public_form_forwards_mno_id(client):
+    """POST /form прокидывает mno_id (id выбранного на карте МНО) в сервис."""
+    fake_incident = Incident(source="form", status="new")
+    fake_incident.id = uuid4()
+    mno_id = str(uuid4())
+    create = AsyncMock(return_value=fake_incident)
+    quote = AsyncMock(return_value="«ц» — А")
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_public_form",
+        new=create,
+    ), patch("app.api.v1.intake.quotes_service.nature_quote", new=quote):
+        resp = await client.post(
+            "/api/v1/intake/form",
+            data={
+                "fio": "Волонтёр",
+                "region": "Самарская область",
+                "city": "г. Самара",
+                "street": "Бульварная улица, 18",
+                "coords": "53.231410, 50.166820",
+                "mno_reg": "63-04-001162",
+                "mno_id": mno_id,
+                "website": "",
+            },
+        )
+    assert resp.status_code == 200
+    create.assert_awaited_once()
+    assert create.call_args.kwargs["mno_id"] == mno_id
+
+
+@pytest.mark.asyncio
 async def test_public_form_honeypot_drops(client):
     """Заполненный honeypot website → 200 ok, но сервис НЕ вызывается."""
     create = AsyncMock()
@@ -919,6 +949,68 @@ async def test_public_service_overlong_mno_reg_truncated(fake_session):
         photo_files=[],
     )
     assert len(incident.mno_reg) == 64
+
+
+@pytest.mark.asyncio
+async def test_public_service_saves_mno_id(fake_session):
+    """Валидный mno_id (UUID выбранного МНО) сохраняется на инциденте как UUID-объект."""
+    fake_session.add = MagicMock()
+    mno_id = uuid4()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="Бульварная улица, 18",
+        coords="53.231410, 50.166820",
+        photo_time="",
+        bins="",
+        mno_reg="63-04-001162",
+        mno_id=f"  {mno_id}  ",
+        photo_files=[],
+    )
+    assert incident.mno_id == mno_id
+
+
+@pytest.mark.asyncio
+async def test_public_service_blank_mno_id_is_none(fake_session):
+    """Пустой mno_id → NULL (МНО не выбрано, адрес введён вручную)."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="",
+        photo_time="",
+        bins="",
+        mno_id="   ",
+        photo_files=[],
+    )
+    assert incident.mno_id is None
+
+
+@pytest.mark.asyncio
+async def test_public_service_garbage_mno_id_is_none(fake_session):
+    """Мусорный (не-UUID) mno_id → NULL, а не падение INSERT-а."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="",
+        photo_time="",
+        bins="",
+        mno_id="not-a-valid-uuid",
+        photo_files=[],
+    )
+    assert incident.mno_id is None
 
 
 # --------------------------------------------------------------------------- #

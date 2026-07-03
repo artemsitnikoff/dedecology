@@ -9,6 +9,7 @@
 import logging
 import re
 import shutil
+import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -581,6 +582,7 @@ async def create_incident_from_public_form(
     bins,
     photo_files: list,
     mno_reg: str = "",
+    mno_id: str = "",
     incident_type: str = "",
     comment: str = "",
     actor_user_id=None,
@@ -590,8 +592,10 @@ async def create_incident_from_public_form(
     region/city/street берутся из явных полей, если непусты, иначе выводятся
     эвристикой из full_address. incident_type — код из редактируемого справочника
     (таблица incident_types): пишется, только если код есть в БД (мусор → NULL). comment —
-    прочая информация (стрипнутая; пусто → NULL). Фото валидируются (тип/размер/
-    количество) и сохраняются в {STORAGE_DIR}/incidents/{id}/. flush() здесь,
+    прочая информация (стрипнутая; пусто → NULL). mno_reg/mno_id — реестровый № и id
+    выбранного на карте МНО (оба необязательны: адрес можно ввести вручную); mno_id
+    парсится как UUID — мусор/пусто → NULL (не роняем INSERT). Фото валидируются (тип/
+    размер/количество) и сохраняются в {STORAGE_DIR}/incidents/{id}/. flush() здесь,
     commit() — в роутере. Невалидные фото → ValidationError + очистка каталога.
     """
     fio = _clean_str(fio)
@@ -615,6 +619,15 @@ async def create_incident_from_public_form(
     mno_reg_value = (_clean_str(mno_reg) or None)
     if mno_reg_value is not None:
         mno_reg_value = mno_reg_value[:64]
+    # ССЫЛКА на выбранное МНО (Mno.id) — парсим как UUID: невалидный/пустой ввод → NULL
+    # (публичный ввод не должен ронять INSERT). По ней считается счётчик обращений у МНО.
+    mno_id_clean = _clean_str(mno_id)
+    mno_id_value: uuid.UUID | None = None
+    if mno_id_clean:
+        try:
+            mno_id_value = uuid.UUID(mno_id_clean)
+        except (ValueError, AttributeError, TypeError):
+            mno_id_value = None
 
     if not (region or city or street):
         region, city, street = _parse_address(full_address)
@@ -653,6 +666,7 @@ async def create_incident_from_public_form(
         lat=lat,
         lon=lon,
         mno_reg=mno_reg_value,
+        mno_id=mno_id_value,
         comment=comment_value,
         incident_type=incident_type_value,
         photo_time=parsed_photo_time,
