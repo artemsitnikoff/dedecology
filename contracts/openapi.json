@@ -1849,7 +1849,7 @@
           "Справочники"
         ],
         "summary": "List Incident Types",
-        "description": "Полный справочник типов инцидента [{id, code, label, sort_order}] для страницы.",
+        "description": "Полный справочник типов инцидента [{id, code, label, sort_order}].\n\nREAD доступен и админу, и волонтёру (мобильное приложение) — get_current_actor.\nПравка (POST/PATCH/DELETE ниже) — только admin. Для формы без токена есть публичный\nGET /intake/incident-types.",
         "operationId": "list_incident_types_api_v1_incident_types_get",
         "responses": {
           "200": {

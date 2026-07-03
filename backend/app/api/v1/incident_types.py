@@ -13,8 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.permissions import require_admin
 from ...database import get_db
-from ...deps import get_current_user
-from ...models import User
+from ...deps import get_current_actor
 from ...schemas.incident_type import (
     IncidentTypeCreate,
     IncidentTypeItem,
@@ -30,9 +29,13 @@ _TAG = "Справочники"
 @router.get("", response_model=list[IncidentTypeItem], tags=[_TAG])
 async def list_incident_types(
     session: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _actor=Depends(get_current_actor),
 ):
-    """Полный справочник типов инцидента [{id, code, label, sort_order}] для страницы."""
+    """Полный справочник типов инцидента [{id, code, label, sort_order}].
+
+    READ доступен и админу, и волонтёру (мобильное приложение) — get_current_actor.
+    Правка (POST/PATCH/DELETE ниже) — только admin. Для формы без токена есть публичный
+    GET /intake/incident-types."""
     return await incident_type_service.list_types(session)
 
 
