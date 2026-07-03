@@ -605,3 +605,15 @@ async def test_get_mno_incidents_is_live_count():
     detail = await mno_service.get_mno(session, mno.id)
 
     assert detail.incidents == 5
+
+
+def test_filters_bbox_adds_latlon_clauses():
+    """bbox в списке /mno → фильтр по числовым lat/lon (отдаём МНО кадра, как /mno/points);
+    без bbox / мусор → фильтров нет (прежнее поведение)."""
+    assert mno_service._filters(None, None, None, None) == []
+    assert mno_service._filters(None, None, None, "мусор") == []
+    box = mno_service._filters(None, None, None, "53.0,50.0,54.0,51.0")
+    sql = " ".join(str(c) for c in box)
+    assert "mno.lat IS NOT NULL" in sql
+    assert "mno.lat BETWEEN" in sql
+    assert "mno.lon BETWEEN" in sql

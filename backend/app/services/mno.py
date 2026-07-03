@@ -59,7 +59,12 @@ def _search_clause(search: str):
     )
 
 
-def _filters(search: str | None, region: str | None, synced: bool | None) -> list:
+def _filters(
+    search: str | None,
+    region: str | None,
+    synced: bool | None,
+    bbox: str | None = None,
+) -> list:
     filters: list = []
     if search and search.strip():
         filters.append(_search_clause(search))
@@ -67,6 +72,15 @@ def _filters(search: str | None, region: str | None, synced: bool | None) -> lis
         filters.append(Mno.region_code == region.strip())
     if synced is not None:
         filters.append(Mno.synced.is_(synced))
+    # bbox («minLat,minLon,maxLat,maxLon») — видимая область карты/гео: отдаём только МНО
+    # текущего кадра (числовые lat/lon по индексу ix_mno_lat_lon), как в list_points.
+    # Невалидный/пустой bbox игнорируется (список ведёт себя как раньше).
+    box = parse_bbox(bbox)
+    if box is not None:
+        min_lat, min_lon, max_lat, max_lon = box
+        filters.append(Mno.lat.is_not(None))
+        filters.append(Mno.lat.between(min_lat, max_lat))
+        filters.append(Mno.lon.between(min_lon, max_lon))
     return filters
 
 
@@ -122,9 +136,10 @@ async def _count(
     search: str | None,
     region: str | None,
     synced: bool | None,
+    bbox: str | None = None,
 ) -> int:
     """COUNT(*) по тем же фильтрам, что и список (для пагинации/карты)."""
-    filters = _filters(search, region, synced)
+    filters = _filters(search, region, synced, bbox)
     stmt = select(func.count(Mno.id))
     if filters:
         stmt = stmt.where(*filters)
@@ -141,12 +156,13 @@ async def _query(
     order: str,
     offset: int | None = None,
     limit: int | None = None,
+    bbox: str | None = None,
 ) -> list[Mno]:
     """Ядро фильтра/сортировки: сырые строки Mno.
 
     offset/limit опциональны — None означает «весь набор» (используется экспортом).
     """
-    filters = _filters(search, region, synced)
+    filters = _filters(search, region, synced, bbox)
     stmt = select(Mno)
     if filters:
         stmt = stmt.where(*filters)
@@ -171,9 +187,17 @@ async def list_mno(
     order: str = "asc",
     page: int = 1,
     page_size: int = 100,
+    bbox: str | None = None,
 ) -> Paginated[MnoListItem]:
-    """Пагинированный реестр МНО с фильтрами region/synced/search + сортировкой."""
-    total = await _count(session, search=search, region=region, synced=synced)
+    """Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.
+
+    bbox («minLat,minLon,maxLat,maxLon») — видимая область карты/гео: список отдаёт только
+    МНО текущего кадра (как /mno/points), чтобы приложение получало ближайшие площадки, а не
+    весь реестр. Без bbox — прежнее поведение (весь отфильтрованный реестр постранично).
+    """
+    total = await _count(
+        session, search=search, region=region, synced=synced, bbox=bbox
+    )
     rows = await _query(
         session,
         search=search,
@@ -183,6 +207,7 @@ async def list_mno(
         order=order,
         offset=(page - 1) * page_size,
         limit=page_size,
+        bbox=bbox,
     )
     region_names = await _region_names(session)
     counts = await _incident_counts(session, [m.id for m in rows])

@@ -51,10 +51,15 @@ async def list_mno(
     order: str = Query("asc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=200),
+    bbox: str | None = Query(
+        None,
+        description="Видимая область карты/гео «minLat,minLon,maxLat,maxLon» — вернуть "
+        "только МНО этого кадра (ближайшие), как в /mno/points.",
+    ),
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Пагинированный реестр МНО с фильтрами region/synced/search + сортировкой."""
+    """Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой."""
     return await mno_service.list_mno(
         session,
         search=search,
@@ -64,6 +69,7 @@ async def list_mno(
         order=order,
         page=page,
         page_size=page_size,
+        bbox=bbox,
     )
 
 

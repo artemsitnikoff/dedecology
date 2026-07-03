@@ -1096,7 +1096,7 @@
           "Карта и МНО"
         ],
         "summary": "List Mno",
-        "description": "Пагинированный реестр МНО с фильтрами region/synced/search + сортировкой.",
+        "description": "Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.",
         "operationId": "list_mno_api_v1_mno_get",
         "security": [
           {
@@ -1195,6 +1195,24 @@
               "default": 100,
               "title": "Page Size"
             }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Видимая область карты/гео «minLat,minLon,maxLat,maxLon» — вернуть только МНО этого кадра (ближайшие), как в /mno/points.",
+              "title": "Bbox"
+            },
+            "description": "Видимая область карты/гео «minLat,minLon,maxLat,maxLon» — вернуть только МНО этого кадра (ближайшие), как в /mno/points."
           }
         ],
         "responses": {
