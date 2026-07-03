@@ -2118,6 +2118,52 @@
         }
       }
     },
+    "/api/v1/intake/mno-points": {
+      "get": {
+        "tags": [
+          "Отправка фотоотчёта"
+        ],
+        "summary": "Mno Points",
+        "description": "ПУБЛИЧНО: точки МНО в видимой области карты для выбора площадки в форме.\n\nПубличный (intake-роутер без auth), как incident-types — нужен неавторизованной\nформе волонтёра. bbox ОБЯЗАТЕЛЕН: без валидного bbox отдаём пустой список, чтобы\nне тянуть весь реестр МНО в неавторизованный эндпоинт (см. list_form_points).",
+        "operationId": "mno_points_api_v1_intake_mno_points_get",
+        "parameters": [
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Видимая область карты «minLat,minLon,maxLat,maxLon» (обязателен)",
+              "default": "",
+              "title": "Bbox"
+            },
+            "description": "Видимая область карты «minLat,minLon,maxLat,maxLon» (обязателен)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MnoFormPointsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/intake/form": {
       "post": {
         "tags": [
@@ -3414,6 +3460,11 @@
             "title": "Coords",
             "default": ""
           },
+          "mno_reg": {
+            "type": "string",
+            "title": "Mno Reg",
+            "default": ""
+          },
           "incident_type": {
             "type": "string",
             "title": "Incident Type",
@@ -3656,6 +3707,17 @@
             "type": "string",
             "title": "Coords"
           },
+          "mno_reg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mno Reg"
+          },
           "comment": {
             "anyOf": [
               {
@@ -3816,6 +3878,17 @@
           "coords": {
             "type": "string",
             "title": "Coords"
+          },
+          "mno_reg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mno Reg"
           },
           "comment": {
             "anyOf": [
@@ -4332,6 +4405,68 @@
         ],
         "title": "MnoDetail",
         "description": "Карточка МНО — те же поля, что и в списке (контракт)."
+      },
+      "MnoFormPoint": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "coords": {
+            "type": "string",
+            "title": "Coords"
+          },
+          "reg": {
+            "type": "string",
+            "title": "Reg"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "coords",
+          "reg",
+          "address",
+          "name"
+        ],
+        "title": "MnoFormPoint",
+        "description": "Точка МНО для ПУБЛИЧНОЙ формы выбора площадки на карте.\n\nПомимо координат несёт реестровый № (reg) и адрес — их клик по точке\nподставляет в форму (улица+координаты+рег-номер). name — для подписи/поиска."
+      },
+      "MnoFormPointsResponse": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MnoFormPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "capped": {
+            "type": "boolean",
+            "title": "Capped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "points",
+          "total",
+          "capped"
+        ],
+        "title": "MnoFormPointsResponse",
+        "description": "Точки МНО в видимой области карты для публичной формы (bbox-кадр).\n\ntotal — число МНО в кадре; points — первые не более лимита; capped=True —\ntotal превысил лимит и points обрезаны (пусть пользователь приблизит карту)."
       },
       "MnoListItem": {
         "properties": {

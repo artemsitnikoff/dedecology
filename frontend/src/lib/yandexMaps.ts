@@ -50,12 +50,31 @@ export interface YMap {
   /** Текущая видимая область карты в порядке Яндекса [[юг,запад],[север,восток]]. */
   getBounds: () => YBounds | null;
   setBounds: (bounds: YBounds, opts?: { checkZoomRange?: boolean }) => void;
+  /** Программно центрирует карту на точке [широта, долгота] с опциональным зумом. */
+  setCenter: (center: [number, number], zoom?: number) => void;
   destroy: () => void;
+}
+
+/**
+ * Событие ObjectManager (клик по объекту). Нам нужен только objectId кликнутой
+ * фичи — из него страница находит исходную точку. get('objectId') возвращает id
+ * фичи (тот, что мы задали в YFeature.id).
+ */
+export interface YObjectEvent {
+  get: (key: string) => unknown;
+}
+
+/** Менеджер событий коллекции объектов ObjectManager (om.objects.events). */
+export interface YObjectsEventManager {
+  add: (type: string, handler: (event: YObjectEvent) => void) => void;
+  remove: (type: string, handler: (event: YObjectEvent) => void) => void;
 }
 
 export interface YObjectManager {
   add: (obj: YFeatureCollection | YFeature) => void;
   removeAll: () => void;
+  /** Коллекция одиночных (не кластеризованных) объектов — на неё вешаем click. */
+  objects: { events: YObjectsEventManager };
 }
 
 interface YMapState {

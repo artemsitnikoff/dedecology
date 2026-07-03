@@ -1,0 +1,169 @@
+/* Модалка выбора МНО на карте (публичная форма). Scoped к .de-mnop-*.
+   Цвета/отступы/радиусы — только через токены (--de-*, --ark-*, семантика). */
+
+.de-mnop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(15, 22, 32, 0.55); /* затемнение фона (ark-gray-900 c альфой) */
+  box-sizing: border-box;
+}
+
+.de-mnop-modal {
+  width: 100%;
+  max-width: 720px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ark-white);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+}
+
+/* --- Шапка --- */
+.de-mnop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-2);
+}
+.de-mnop-title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.de-mnop-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: var(--fs-14);
+  line-height: 1;
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.de-mnop-close:hover {
+  background: var(--bg-3-hover);
+  color: var(--fg-1);
+}
+
+/* --- Тулбар с поиском --- */
+.de-mnop-toolbar {
+  padding: var(--space-4) var(--space-5) var(--space-2);
+}
+.de-mnop-search-wrap {
+  position: relative;
+}
+.de-mnop-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--border-1);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  color: var(--fg-1);
+  background: var(--bg-2);
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.de-mnop-search::placeholder {
+  color: var(--fg-3);
+}
+.de-mnop-search:focus {
+  outline: none;
+  border-color: var(--de-brand);
+  background: var(--ark-white);
+}
+
+/* --- Выпадающий список подсказок адреса --- */
+.de-mnop-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: var(--space-1);
+  background: var(--ark-white);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-dropdown);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.de-mnop-suggest {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  color: var(--fg-1);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.de-mnop-suggest:last-child {
+  border-bottom: none;
+}
+.de-mnop-suggest:hover {
+  background: var(--brand-bg);
+}
+.de-mnop-drop-empty {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--fs-13);
+  color: var(--fg-3);
+}
+
+/* --- Подсказки состояния (геолокация) --- */
+.de-mnop-note {
+  margin: 0 var(--space-5) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+}
+.de-mnop-note-warn {
+  color: var(--warning-fg);
+  background: var(--warning-bg);
+  border-color: var(--warning-fg);
+}
+
+/* --- Карта --- */
+.de-mnop-mapwrap {
+  flex: 1;
+  min-height: 380px;
+  padding: 0 var(--space-5);
+  display: flex;
+}
+.de-mnop-map {
+  min-height: 380px;
+}
+
+/* --- Низ --- */
+.de-mnop-foot {
+  padding: var(--space-3) var(--space-5) var(--space-5);
+  font-size: var(--fs-13);
+  color: var(--fg-3);
+}

@@ -89,6 +89,8 @@ export interface Incident {
   incident_type: string | null;
   /** Форма «баки раздельного сбора»; null для Макса. Скрыто в таблице (ТЗ §11), есть в модели. */
   bins: boolean | null;
+  /** Реестровый № выбранного на карте МНО (форма); null — МНО не выбирали. */
+  mno_reg: string | null;
   /** ISO-строка — «поступило». */
   received_at: string;
   created_at: string;
@@ -116,6 +118,8 @@ export interface IncidentListItem {
   comment: string | null;
   /** Код типа инцидента (см. IncidentType); null — тип не задан. Подпись резолвим по справочнику. */
   incident_type: string | null;
+  /** Реестровый № выбранного на карте МНО (форма); null — МНО не выбирали. */
+  mno_reg: string | null;
   received_at: string;
 }
 
@@ -287,6 +291,33 @@ export interface MnoPoint {
  */
 export interface MnoPointsResponse {
   points: MnoPoint[];
+  total: number;
+  capped: boolean;
+}
+
+/**
+ * Точка МНО для ПУБЛИЧНОЙ формы (GET /intake/mno-points) — без auth. Помимо
+ * координат/названия несёт reg+address: их модалка выбора подставляет в форму
+ * (улица = address, рег-номер = reg) при клике по точке.
+ */
+export interface MnoFormPoint {
+  id: string;
+  /** «широта, долгота» текстом. */
+  coords: string;
+  /** Реестровый № МНО (уходит в форму, показывается чипом). */
+  reg: string;
+  /** Адрес МНО (подставляется в поле «Улица, дом»). */
+  address: string;
+  name: string;
+}
+
+/**
+ * Ответ GET /intake/mno-points — точки МНО текущего кадра карты (публичный).
+ * total — всего МНО в кадре по bbox; points — первые не более лимита;
+ * capped=true — точки обрезаны по лимиту (показано меньше, чем total).
+ */
+export interface MnoPointsPublicResponse {
+  points: MnoFormPoint[];
   total: number;
   capped: boolean;
 }

@@ -301,6 +301,88 @@ async def test_list_points_bbox_ignored_when_invalid():
     assert "BETWEEN" not in points_sql
 
 
+# --- list_form_points (публичная карта формы /intake/mno-points) ---------------
+
+
+@pytest.mark.asyncio
+async def test_list_form_points_requires_bbox():
+    """Без bbox → пусто и БД НЕ трогаем (не тянем весь реестр в публичный эндпоинт)."""
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=AssertionError("БД не должна вызываться"))
+
+    resp = await mno_service.list_form_points(session, bbox="")
+
+    assert resp.points == []
+    assert resp.total == 0
+    assert resp.capped is False
+    session.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_form_points_bbox_garbage_empty():
+    """Битый bbox → трактуется как «не задан» → пусто, без обращения к БД."""
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=AssertionError("БД не должна вызываться"))
+
+    resp = await mno_service.list_form_points(session, bbox="garbage")
+
+    assert resp.points == []
+    assert resp.total == 0
+    session.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_form_points_applies_bbox_and_returns_fields():
+    """Валидный bbox → lat/lon-фильтр; точки несут reg/address/name/coords."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 1
+    row = MagicMock(
+        id=uuid4(),
+        coords="53.231410, 50.166820",
+        reg="63-04-001162",
+        address="Бульварная улица, 18",
+    )
+    row.name = "Площадка A"  # name= в конструкторе MagicMock служебный — задаём явно
+    points_res = MagicMock()
+    points_res.all.return_value = [row]
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    resp = await mno_service.list_form_points(session, bbox="53.0,50.0,54.0,51.0")
+
+    assert resp.total == 1
+    assert resp.capped is False
+    assert len(resp.points) == 1
+    point = resp.points[0]
+    assert point.reg == "63-04-001162"
+    assert point.address == "Бульварная улица, 18"
+    assert point.name == "Площадка A"
+    assert point.coords == "53.231410, 50.166820"
+    # Оба запроса (COUNT и выборка) фильтруют по числовым lat/lon.
+    count_sql = str(session.execute.call_args_list[0].args[0])
+    points_sql = str(session.execute.call_args_list[1].args[0])
+    for sql in (count_sql, points_sql):
+        assert "mno.lat IS NOT NULL" in sql
+        assert "mno.lat BETWEEN" in sql
+        assert "mno.lon BETWEEN" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_form_points_caps_at_limit():
+    """total > FORM_MAX_POINTS → capped=True (пользователю стоит приблизить карту)."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = mno_service.FORM_MAX_POINTS + 3
+    points_res = MagicMock()
+    points_res.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    resp = await mno_service.list_form_points(session, bbox="53.0,50.0,54.0,51.0")
+
+    assert resp.total == mno_service.FORM_MAX_POINTS + 3
+    assert resp.capped is True
+
+
 # --- _filters ------------------------------------------------------------------
 
 

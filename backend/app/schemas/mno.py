@@ -65,3 +65,27 @@ class MnoPointsResponse(BaseModel):
     points: list[MnoPoint]
     total: int
     capped: bool
+
+
+class MnoFormPoint(ORMBase):
+    """Точка МНО для ПУБЛИЧНОЙ формы выбора площадки на карте.
+
+    Помимо координат несёт реестровый № (reg) и адрес — их клик по точке
+    подставляет в форму (улица+координаты+рег-номер). name — для подписи/поиска.
+    """
+    id: UUID
+    coords: str
+    reg: str
+    address: str
+    name: str
+
+
+class MnoFormPointsResponse(BaseModel):
+    """Точки МНО в видимой области карты для публичной формы (bbox-кадр).
+
+    total — число МНО в кадре; points — первые не более лимита; capped=True —
+    total превысил лимит и points обрезаны (пусть пользователь приблизит карту).
+    """
+    points: list[MnoFormPoint]
+    total: int
+    capped: bool

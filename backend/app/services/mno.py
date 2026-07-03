@@ -18,6 +18,8 @@ from ..models import Mno, Region
 from ..schemas.base import Paginated
 from ..schemas.mno import (
     MnoDetail,
+    MnoFormPoint,
+    MnoFormPointsResponse,
     MnoListItem,
     MnoPoint,
     MnoPointsResponse,
@@ -28,6 +30,10 @@ from .geo import parse_bbox, parse_latlon
 
 # Максимум точек, отдаваемых карте за КАДР (bbox) или глобально (карта не грузит весь реестр).
 MAX_POINTS = 2000
+
+# Потолок точек МНО для ПУБЛИЧНОЙ формы (карта выбора площадки): меньше админ-карты —
+# неавторизованный эндпоинт, кадр формы обычно узкий (позиция пользователя/улица).
+FORM_MAX_POINTS = 500
 
 # sort-ключ из API → колонка модели. region сортируется по коду субъекта.
 _SORT_COLUMNS = {
@@ -221,6 +227,54 @@ async def list_points(
         MnoPoint(id=row.id, coords=row.coords, name=row.name) for row in result.all()
     ]
     return MnoPointsResponse(points=points, total=total, capped=total > MAX_POINTS)
+
+
+async def list_form_points(
+    session: AsyncSession, *, bbox: str | None
+) -> MnoFormPointsResponse:
+    """Точки МНО в видимой области карты для ПУБЛИЧНОЙ формы выбора площадки.
+
+    Отдаёт reg/address (для подстановки в форму) + coords/name. bbox ОБЯЗАТЕЛЕН:
+    без валидного bbox отдаём пусто — не тянем весь реестр в неавторизованный
+    эндпоинт (в отличие от админского list_points, который без bbox грузит всё
+    по фильтрам). Фильтр по числовым lat/lon (индекс ix_mno_lat_lon), как в
+    list_points; total — COUNT по кадру; points — первые FORM_MAX_POINTS;
+    capped=True — total превысил лимит (пользователю стоит приблизить карту).
+    """
+    box = parse_bbox(bbox)
+    if box is None:
+        # bbox не задан/битый → пусто (без обращения к БД: не тянем весь реестр).
+        return MnoFormPointsResponse(points=[], total=0, capped=False)
+
+    min_lat, min_lon, max_lat, max_lon = box
+    filters = [
+        Mno.lat.is_not(None),
+        Mno.lat.between(min_lat, max_lat),
+        Mno.lon.between(min_lon, max_lon),
+    ]
+    total = (
+        await session.execute(select(func.count(Mno.id)).where(*filters))
+    ).scalar_one()
+    stmt = (
+        select(Mno.id, Mno.coords, Mno.reg, Mno.address, Mno.name)
+        .where(*filters)
+        .order_by(asc(Mno.id))
+        .limit(FORM_MAX_POINTS)
+    )
+    result = await session.execute(stmt)
+    points = [
+        MnoFormPoint(
+            id=row.id,
+            coords=row.coords,
+            reg=row.reg,
+            address=row.address,
+            name=row.name,
+        )
+        for row in result.all()
+    ]
+    return MnoFormPointsResponse(
+        points=points, total=total, capped=total > FORM_MAX_POINTS
+    )
 
 
 async def _get(session: AsyncSession, mno_id: uuid.UUID) -> Mno:

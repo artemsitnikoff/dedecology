@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { isYandexKeyConfigured, loadYmaps } from '@/lib/yandexMaps';
-import type { YFeature, YMap, YObjectManager } from '@/lib/yandexMaps';
+import type { YFeature, YMap, YObjectEvent, YObjectManager } from '@/lib/yandexMaps';
 import './YandexMap.css';
 
 /** Точка на карте: id (уникальный), координаты «lat, lon» текстом, необязательная подпись. */
@@ -8,6 +8,12 @@ export type MapPoint = {
   id: string;
   coords: string;
   label?: string;
+};
+
+/** Программный фокус карты: центр [широта, долгота] + опциональный зум. */
+export type MapFocus = {
+  center: [number, number];
+  zoom?: number;
 };
 
 type Props = {
@@ -20,6 +26,17 @@ type Props = {
    * страница догружает точки текущего кадра.
    */
   onBoundsChange?: (bbox: [number, number, number, number]) => void;
+  /**
+   * Клик по ОДИНОЧНОЙ точке (не кластеру): отдаёт id кликнутой фичи (MapPoint.id).
+   * Наличие пропа делает точки выбираемыми (используется модалкой выбора МНО).
+   */
+  onPointClick?: (id: string) => void;
+  /**
+   * Программный фокус: при смене объекта карта центрируется на focus.center
+   * (setCenter). Когда фокус задан, авто-подгон под точки НЕ выполняется — вид
+   * контролирует страница (геолокация/поиск адреса). null — карта живёт сама.
+   */
+  focus?: MapFocus | null;
 };
 
 /**
@@ -43,7 +60,7 @@ function parseCoords(raw: string): [number, number] | null {
  * не загрузился — честно рендерит плашку «Карта недоступна…», без фейковых пинов.
  * Карта инициализируется один раз; при смене `points` ObjectManager пересобирается.
  */
-export function YandexMap({ points, className, onBoundsChange }: Props) {
+export function YandexMap({ points, className, onBoundsChange, onPointClick, focus }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<YMap | null>(null);
   const omRef = useRef<YObjectManager | null>(null);
@@ -55,6 +72,19 @@ export function YandexMap({ points, className, onBoundsChange }: Props) {
   const onBoundsChangeRef = useRef(onBoundsChange);
   useEffect(() => {
     onBoundsChangeRef.current = onBoundsChange;
+  });
+
+  // Последний onPointClick — тоже в ref: слушатель клика по объектам вешаем один раз,
+  // а колбэк страницы (с актуальным списком точек) меняется на каждом рендере.
+  const onPointClickRef = useRef(onPointClick);
+  useEffect(() => {
+    onPointClickRef.current = onPointClick;
+  });
+
+  // Текущий фокус в ref — чтобы эффект пересборки точек знал, подавлять ли авто-подгон.
+  const focusRef = useRef(focus);
+  useEffect(() => {
+    focusRef.current = focus;
   });
 
   // Таймер дебаунса boundschange (чистится в cleanup и перед каждым новым событием).
@@ -87,6 +117,15 @@ export function YandexMap({ points, className, onBoundsChange }: Props) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => emitBounds(map), 400);
     };
+    // Клик по одиночной точке ObjectManager → id фичи → колбэк страницы.
+    // Клик по кластеру сюда НЕ попадает (у него своя коллекция om.clusters).
+    const handleObjectClick = (event: YObjectEvent) => {
+      const cb = onPointClickRef.current;
+      if (!cb) return;
+      const objectId = event.get('objectId');
+      if (objectId != null) cb(String(objectId));
+    };
+    let objectManager: YObjectManager | null = null;
 
     loadYmaps()
       .then((ymaps) => {
@@ -105,8 +144,11 @@ export function YandexMap({ points, className, onBoundsChange }: Props) {
         mapRef.current = map;
         omRef.current = om;
         mapInstance = map;
+        objectManager = om;
         // Подписка на смену видимой области (догрузка точек по кадру).
         map.events.add('boundschange', handleBoundsChange);
+        // Подписка на клик по одиночной точке (выбор МНО в модалке формы).
+        om.objects.events.add('click', handleObjectClick);
         setReady(true);
         // Стартовый bbox — сразу (без дебаунса), чтобы страница узнала первый кадр.
         emitBounds(map);
@@ -123,6 +165,7 @@ export function YandexMap({ points, className, onBoundsChange }: Props) {
         debounceRef.current = null;
       }
       if (mapInstance) mapInstance.events.remove('boundschange', handleBoundsChange);
+      if (objectManager) objectManager.objects.events.remove('click', handleObjectClick);
       if (mapRef.current) {
         mapRef.current.destroy();
         mapRef.current = null;
@@ -154,7 +197,8 @@ export function YandexMap({ points, className, onBoundsChange }: Props) {
 
     // Подгоняем вид под точки ТОЛЬКО ОДИН РАЗ — при первом непустом наборе. Дальше не
     // трогаем вид: иначе setBounds → boundschange → refetch → подгон зациклится.
-    if (features.length > 0 && !fittedOnce.current) {
+    // Если задан focus, вид контролирует страница (геолокация/поиск) — авто-подгон не делаем.
+    if (features.length > 0 && !fittedOnce.current && !focusRef.current) {
       const bounds = map.geoObjects.getBounds();
       if (bounds) {
         map.setBounds(bounds, { checkZoomRange: true });
@@ -162,6 +206,15 @@ export function YandexMap({ points, className, onBoundsChange }: Props) {
       }
     }
   }, [points, ready]);
+
+  // Программный фокус: при смене focus центрируем карту на заданной точке. Новый объект
+  // focus (создаётся страницей на каждый locate) — триггер эффекта; ready гарантирует
+  // готовность карты (фокус мог прийти до её загрузки).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !focus) return;
+    map.setCenter(focus.center, focus.zoom ?? 15);
+  }, [focus, ready]);
 
   if (!configured || failed) {
     const text = !configured

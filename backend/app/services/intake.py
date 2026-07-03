@@ -580,6 +580,7 @@ async def create_incident_from_public_form(
     photo_time,
     bins,
     photo_files: list,
+    mno_reg: str = "",
     incident_type: str = "",
     comment: str = "",
     actor_user_id=None,
@@ -608,6 +609,12 @@ async def create_incident_from_public_form(
     )
     # Прочая информация из формы (необязательное поле): стрипнутая строка или NULL.
     comment_value = _clean_str(comment) or None
+    # Рег-номер выбранного на карте формы МНО (необязателен: адрес можно ввести
+    # вручную). Стрипнутая строка → NULL, если пусто; отсекаем до ширины колонки
+    # String(64) — публичный ввод не должен ронять INSERT DataError-ом.
+    mno_reg_value = (_clean_str(mno_reg) or None)
+    if mno_reg_value is not None:
+        mno_reg_value = mno_reg_value[:64]
 
     if not (region or city or street):
         region, city, street = _parse_address(full_address)
@@ -645,6 +652,7 @@ async def create_incident_from_public_form(
         coords=coords or "",
         lat=lat,
         lon=lon,
+        mno_reg=mno_reg_value,
         comment=comment_value,
         incident_type=incident_type_value,
         photo_time=parsed_photo_time,

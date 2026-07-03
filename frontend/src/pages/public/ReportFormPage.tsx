@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { submitIntakeForm } from '@/api/intake';
 import type { AddressSuggestion, SuggestOptions } from '@/api/intake';
 import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
 import { useAddressSuggest } from './useAddressSuggest';
+import { MnoPickerModal } from './MnoPickerModal';
+import type { MnoPick } from './MnoPickerModal';
 import { compressImage } from '@/lib/image';
 import './report-form.css';
 
@@ -118,6 +120,9 @@ export default function ReportFormPage() {
   const [city, setCity] = useState('');
   const [street, setStreet] = useState('');
   const [coords, setCoords] = useState('');
+  // Рег-номер выбранного на карте МНО (необязательный) + флаг открытия модалки.
+  const [mnoReg, setMnoReg] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Голые имена выбранного региона/города (без типа) — для фильтрации
   // следующего уровня в DaData (locations матчит "Самарская", а не "Самарская обл").
   const [regionPlain, setRegionPlain] = useState('');
@@ -164,6 +169,17 @@ export default function ReportFormPage() {
     const fromGeo = s.geo_lat && s.geo_lon ? `${s.geo_lat}, ${s.geo_lon}` : '';
     setCoords(fromGeo || s.coords || '');
   };
+
+  // Выбор МНО на карте: адрес МНО → «Улица, дом», координаты и рег-номер — в форму.
+  // Колбэки стабильны (useCallback) — модалка рендерится только пока открыта.
+  const openPicker = useCallback(() => setPickerOpen(true), []);
+  const closePicker = useCallback(() => setPickerOpen(false), []);
+  const handleMnoSelect = useCallback((m: MnoPick) => {
+    setStreet(m.address);
+    setCoords(m.coords);
+    setMnoReg(m.reg);
+  }, []);
+  const clearMno = () => setMnoReg('');
 
   // Добавляет только что выбранные файлы к уже набранным (аддитивно), с общим
   // лимитом MAX_PHOTOS. Это позволяет прикреплять фото по одному в несколько
@@ -253,6 +269,8 @@ export default function ReportFormPage() {
       fd.append('city', city.trim());
       fd.append('street', street.trim());
       fd.append('coords', coords.trim());
+      // Рег-номер выбранного МНО (необязательный; пусто → бэк трактует как «не выбрано»).
+      fd.append('mno_reg', mnoReg.trim());
       fd.append('photo_time', photoTime || '');
       fd.append('bins', bins);
       // Ханипот: у человека всегда пусто. Если бот заполнил — бэк молча дропнет.
@@ -335,6 +353,28 @@ export default function ReportFormPage() {
                 opts={{ kind: 'city', region: regionPlain }}
                 placeholder="Начните вводить город…"
               />
+
+              {/* Выбор МНО на карте (перед адресом): подставляет улицу + координаты + рег-номер */}
+              <div className="de-rf-field">
+                <button type="button" className="de-rf-mno-btn" onClick={openPicker}>
+                  <span aria-hidden>📍</span> Выбрать МНО на карте
+                </button>
+                {mnoReg && (
+                  <div className="de-rf-mno-chip">
+                    <span className="de-rf-mno-chip-txt">
+                      Выбрано МНО: <b className="de-rf-mono">{mnoReg}</b>
+                    </span>
+                    <button
+                      type="button"
+                      className="de-rf-mno-chip-x"
+                      aria-label="Сбросить выбор МНО"
+                      onClick={clearMno}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Улица, дом с автодополнением */}
               <AddressField
@@ -480,6 +520,11 @@ export default function ReportFormPage() {
           </form>
         )}
       </div>
+
+      {/* Модалка выбора МНО на карте (оверлей поверх формы) */}
+      {pickerOpen && (
+        <MnoPickerModal onSelect={handleMnoSelect} onClose={closePicker} />
+      )}
     </div>
   );
 }

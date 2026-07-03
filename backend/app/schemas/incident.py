@@ -19,6 +19,7 @@ class IncidentListItem(ORMBase):
     city: str
     street: str
     coords: str
+    mno_reg: str | None = None
     comment: str | None = None
     incident_type: str | None = None
     photo_time: Optional[datetime]
@@ -39,6 +40,7 @@ class IncidentDetail(ORMBase):
     city: str
     street: str
     coords: str
+    mno_reg: str | None = None
     comment: str | None = None
     incident_type: str | None = None
     photo_time: Optional[datetime]

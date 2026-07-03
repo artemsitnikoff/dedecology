@@ -6,6 +6,7 @@
  * проставит boundary.
  */
 import { api } from '@/api/client';
+import type { MnoPointsPublicResponse } from '@/api/aliases';
 
 /** Одна подсказка адреса из DaData (GET /intake/suggest/address). */
 export interface AddressSuggestion {
@@ -71,5 +72,22 @@ export async function suggestAddress(
 /** POST /intake/form (multipart/form-data). Возвращает {ok, incident_id}. */
 export async function submitIntakeForm(form: FormData): Promise<IntakeFormResult> {
   const res = await api.post<IntakeFormResult>('/intake/form', form);
+  return res.data;
+}
+
+/**
+ * GET /intake/mno-points — ПУБЛИЧНО: точки МНО видимого кадра карты (для модалки
+ * выбора МНО на форме). bbox обязателен («minLat,minLon,maxLat,maxLon») — сервер
+ * не тянет весь реестр без кадра. Ключ/фильтры остаются на сервере.
+ */
+export async function fetchMnoFormPoints(
+  bbox: string,
+  signal?: AbortSignal,
+): Promise<MnoPointsPublicResponse> {
+  const params = new URLSearchParams({ bbox });
+  const res = await api.get<MnoPointsPublicResponse>(
+    `/intake/mno-points?${params.toString()}`,
+    { signal },
+  );
   return res.data;
 }

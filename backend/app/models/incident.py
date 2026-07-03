@@ -36,6 +36,9 @@ class Incident(Base, TimestampMixin):
     # карты по индексу ix_incidents_lat_lon. NULL — coords пусты/невалидны.
     lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Реестровый № выбранного на карте публичной формы МНО (места накопления отходов).
+    # NULL — МНО не выбрано (адрес введён вручную / Макс-бот / старые инциденты).
+    mno_reg: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # ПРОЧАЯ не-адресная информация из свободного текста обращения: «Радар №…»,
     # ФИО заявителя (если есть в тексте), описание проблемы («Баки раздельного
     # сбора отсутствуют»), заметки. Раньше AI это выкидывал; NULL — нет/не извлечено.

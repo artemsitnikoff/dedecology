@@ -434,6 +434,64 @@ async def test_suggest_address_default_kind_no_bounds(client):
 
 
 # --------------------------------------------------------------------------- #
+# Публичная карта формы: GET /mno-points                                       #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_mno_points_public_returns_points(client):
+    """GET /intake/mno-points публичный (без auth) → points/total/capped; bbox проброшен."""
+    from app.schemas.mno import MnoFormPoint, MnoFormPointsResponse
+
+    resp_obj = MnoFormPointsResponse(
+        points=[
+            MnoFormPoint(
+                id=uuid4(),
+                coords="53.231410, 50.166820",
+                reg="63-04-001162",
+                address="Бульварная улица, 18",
+                name="Площадка A",
+            )
+        ],
+        total=1,
+        capped=False,
+    )
+    spy = AsyncMock(return_value=resp_obj)
+    with patch("app.api.v1.intake.mno_service.list_form_points", new=spy):
+        resp = await client.get(
+            "/api/v1/intake/mno-points", params={"bbox": "53.0,50.0,54.0,51.0"}
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["capped"] is False
+    assert len(body["points"]) == 1
+    point = body["points"][0]
+    assert point["reg"] == "63-04-001162"
+    assert point["address"] == "Бульварная улица, 18"
+    assert point["name"] == "Площадка A"
+    assert point["coords"] == "53.231410, 50.166820"
+    # bbox проброшен в сервис.
+    assert spy.call_args.kwargs["bbox"] == "53.0,50.0,54.0,51.0"
+
+
+@pytest.mark.asyncio
+async def test_mno_points_public_no_bbox_empty(client):
+    """Без bbox эндпоинт 200 с пустым списком — сервис решает не тянуть весь реестр."""
+    from app.schemas.mno import MnoFormPointsResponse
+
+    spy = AsyncMock(
+        return_value=MnoFormPointsResponse(points=[], total=0, capped=False)
+    )
+    with patch("app.api.v1.intake.mno_service.list_form_points", new=spy):
+        resp = await client.get("/api/v1/intake/mno-points")
+    assert resp.status_code == 200
+    assert resp.json() == {"points": [], "total": 0, "capped": False}
+    # bbox по умолчанию "" проброшен в сервис.
+    assert spy.call_args.kwargs["bbox"] == ""
+
+
+# --------------------------------------------------------------------------- #
 # Публичная форма волонтёра: POST /form                                        #
 # --------------------------------------------------------------------------- #
 
@@ -484,6 +542,34 @@ async def test_public_form_creates_incident(client):
     assert kwargs["incident_type"] == "fire"
     assert kwargs["comment"] == "Баки переполнены"
     assert len(kwargs["photo_files"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_public_form_forwards_mno_reg(client):
+    """POST /form прокидывает mno_reg (рег-номер выбранного на карте МНО) в сервис."""
+    fake_incident = Incident(source="form", status="new")
+    fake_incident.id = uuid4()
+    create = AsyncMock(return_value=fake_incident)
+    quote = AsyncMock(return_value="«ц» — А")
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_public_form",
+        new=create,
+    ), patch("app.api.v1.intake.quotes_service.nature_quote", new=quote):
+        resp = await client.post(
+            "/api/v1/intake/form",
+            data={
+                "fio": "Волонтёр",
+                "region": "Самарская область",
+                "city": "г. Самара",
+                "street": "Бульварная улица, 18",
+                "coords": "53.231410, 50.166820",
+                "mno_reg": "63-04-001162",
+                "website": "",
+            },
+        )
+    assert resp.status_code == 200
+    create.assert_awaited_once()
+    assert create.call_args.kwargs["mno_reg"] == "63-04-001162"
 
 
 @pytest.mark.asyncio
@@ -773,6 +859,66 @@ async def test_public_service_incident_type_defaults_none(fake_session):
     )
     assert incident.incident_type is None
     assert incident.comment is None
+
+
+@pytest.mark.asyncio
+async def test_public_service_saves_mno_reg(fake_session):
+    """mno_reg (рег-номер выбранного МНО) стрипается и сохраняется на инциденте."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="Бульварная улица, 18",
+        coords="53.231410, 50.166820",
+        photo_time="",
+        bins="",
+        mno_reg="  63-04-001162  ",
+        photo_files=[],
+    )
+    assert incident.mno_reg == "63-04-001162"
+
+
+@pytest.mark.asyncio
+async def test_public_service_blank_mno_reg_is_none(fake_session):
+    """Пустой mno_reg → NULL (МНО не выбрано, адрес введён вручную)."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="",
+        photo_time="",
+        bins="",
+        mno_reg="   ",
+        photo_files=[],
+    )
+    assert incident.mno_reg is None
+
+
+@pytest.mark.asyncio
+async def test_public_service_overlong_mno_reg_truncated(fake_session):
+    """Сверхдлинный mno_reg отсекается до ширины колонки String(64) (нет DataError)."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="",
+        photo_time="",
+        bins="",
+        mno_reg="7" * 200,
+        photo_files=[],
+    )
+    assert len(incident.mno_reg) == 64
 
 
 # --------------------------------------------------------------------------- #

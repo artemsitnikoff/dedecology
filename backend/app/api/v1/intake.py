@@ -13,7 +13,7 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,10 +25,12 @@ from ...schemas.incident import (
     MarkNotifiedResult,
     PendingNotifyResponse,
 )
+from ...schemas.mno import MnoFormPointsResponse
 from ...services import dadata as dadata_service
 from ...services import incident as incident_service
 from ...services import incident_type as incident_type_service
 from ...services import intake as intake_service
+from ...services import mno as mno_service
 from ...services import quotes as quotes_service
 
 logger = logging.getLogger(__name__)
@@ -168,6 +170,27 @@ async def incident_types(session: AsyncSession = Depends(get_db)):
     return [{"code": t.code, "label": t.label} for t in types]
 
 
+@router.get(
+    "/mno-points",
+    response_model=MnoFormPointsResponse,
+    tags=["Отправка фотоотчёта"],
+)
+async def mno_points(
+    bbox: str = Query(
+        "",
+        description="Видимая область карты «minLat,minLon,maxLat,maxLon» (обязателен)",
+    ),
+    session: AsyncSession = Depends(get_db),
+):
+    """ПУБЛИЧНО: точки МНО в видимой области карты для выбора площадки в форме.
+
+    Публичный (intake-роутер без auth), как incident-types — нужен неавторизованной
+    форме волонтёра. bbox ОБЯЗАТЕЛЕН: без валидного bbox отдаём пустой список, чтобы
+    не тянуть весь реестр МНО в неавторизованный эндпоинт (см. list_form_points).
+    """
+    return await mno_service.list_form_points(session, bbox=bbox)
+
+
 @router.post("/form", tags=["Отправка фотоотчёта"])
 async def public_form(
     session: AsyncSession = Depends(get_db),
@@ -177,6 +200,7 @@ async def public_form(
     city: str = Form(""),
     street: str = Form(""),
     coords: str = Form(""),
+    mno_reg: str = Form(""),
     incident_type: str = Form(""),
     comment: str = Form(""),
     photo_time: str = Form(""),
@@ -200,6 +224,7 @@ async def public_form(
         city=city,
         street=street,
         coords=coords,
+        mno_reg=mno_reg,
         incident_type=incident_type,
         comment=comment,
         photo_time=photo_time,
