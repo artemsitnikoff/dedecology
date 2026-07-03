@@ -354,9 +354,17 @@ async def get_mno(session: AsyncSession, mno_id: uuid.UUID) -> MnoDetail:
     return MnoDetail(**item.model_dump())
 
 
-async def create_mno(session: AsyncSession, data, actor_user_id: uuid.UUID) -> MnoDetail:
+async def create_mno(
+    session: AsyncSession,
+    data,
+    actor_user_id: uuid.UUID | None,
+    source: str = "fgis",
+) -> MnoDetail:
     """Создаёт МНО вручную: synced=False, fgis_id=None, incidents=0.
 
+    source — происхождение: 'fgis' (админ вручную) | 'volunteer' (добавил волонтёр из
+    приложения) → в админке бейдж «Добавлен волонтёром». actor_user_id=None — создатель
+    не пользователь админки (волонтёр); аудит пишет системного актора.
     Появится в ФГИС только после синхронизации (заглушки). Аудит — на создание.
     """
     coords = data.coords.strip()
@@ -371,10 +379,10 @@ async def create_mno(session: AsyncSession, data, actor_user_id: uuid.UUID) -> M
         region_code=(data.region_code or "").strip(),
         city=(data.city or "").strip(),
         address=(data.address or "").strip(),
-        # Ручное админ-создание — происхождение по умолчанию 'fgis' (не волонтёрское).
-        # Ставим явно: server_default применяется на стороне БД, а _to_list_item ниже
-        # читает атрибут синхронно ДО refresh (иначе source=None → ошибка схемы).
-        source="fgis",
+        # Происхождение: 'fgis' (админ вручную) | 'volunteer' (создал волонтёр). Ставим явно:
+        # server_default применяется на стороне БД, а _to_list_item ниже читает атрибут
+        # синхронно ДО refresh (иначе source=None → ошибка схемы).
+        source=source,
         fgis_id=None,
         synced=False,
         sync_date=None,

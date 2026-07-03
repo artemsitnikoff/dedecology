@@ -724,3 +724,23 @@ def test_filters_bbox_adds_latlon_clauses():
     assert "mno.lat IS NOT NULL" in sql
     assert "mno.lat BETWEEN" in sql
     assert "mno.lon BETWEEN" in sql
+
+
+@pytest.mark.asyncio
+async def test_create_mno_by_volunteer_marks_source(client):
+    """POST /mno ВОЛОНТЁРОМ доступен → create_mno зовётся с source='volunteer' и
+    actor_user_id=None (создатель не пользователь админки). Админ-создание — source='fgis'."""
+    from app.deps import get_current_actor
+    from app.main import app
+    from app.models import Volunteer
+
+    app.dependency_overrides[get_current_actor] = lambda: Volunteer(id=uuid4())
+    created = _detail(source="volunteer", synced=False, fgis_id=None, sync_date=None, incidents=0)
+    spy = AsyncMock(return_value=created)
+    with patch("app.api.v1.mno.mno_service.create_mno", new=spy):
+        resp = await client.post("/api/v1/mno", json={"name": "Новая", "coords": "55, 83"})
+    assert resp.status_code == 201
+    assert resp.json()["source"] == "volunteer"
+    # actor_user_id (3-й позиционный) = None, source='volunteer' (kwarg).
+    assert spy.call_args.args[2] is None
+    assert spy.call_args.kwargs.get("source") == "volunteer"

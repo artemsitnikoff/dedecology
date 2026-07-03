@@ -1243,7 +1243,7 @@
           "Добавление нового МНО"
         ],
         "summary": "Create Mno",
-        "description": "Добавление МНО вручную (synced=false, fgis_id=null, incidents=0).",
+        "description": "Добавление МНО (synced=false, fgis_id=null, incidents=0). Доступно админу И\nволонтёру (мобильное приложение); созданное волонтёром помечается source='volunteer'\n(в админке бейдж «Добавлен волонтёром»).",
         "operationId": "create_mno_api_v1_mno_post",
         "security": [
           {

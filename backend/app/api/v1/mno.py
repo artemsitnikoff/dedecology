@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database import get_db
 from ...deps import get_current_actor, get_current_user
-from ...models import User
+from ...models import User, Volunteer
 from ...schemas.base import Paginated
 from ...schemas.mno import (
     MnoCreate,
@@ -118,10 +118,18 @@ async def export_mno(
 async def create_mno(
     payload: MnoCreate,
     session: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    actor=Depends(get_current_actor),
 ):
-    """Добавление МНО вручную (synced=false, fgis_id=null, incidents=0)."""
-    mno = await mno_service.create_mno(session, payload, current_user.id)
+    """Добавление МНО (synced=false, fgis_id=null, incidents=0). Доступно админу И
+    волонтёру (мобильное приложение); созданное волонтёром помечается source='volunteer'
+    (в админке бейдж «Добавлен волонтёром»)."""
+    is_volunteer = isinstance(actor, Volunteer)
+    mno = await mno_service.create_mno(
+        session,
+        payload,
+        None if is_volunteer else actor.id,
+        source="volunteer" if is_volunteer else "fgis",
+    )
     await session.commit()
     return mno
 
