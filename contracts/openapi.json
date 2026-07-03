@@ -2907,7 +2907,7 @@
           "Волонтёры (мобильное приложение)"
         ],
         "summary": "Register Volunteer",
-        "description": "Регистрация волонтёра. Дубль email → 409. Шлём письмо со ссылкой подтверждения.",
+        "description": "Регистрация волонтёра. Пароли не совпали → 400, дубль email → 409.\n\nШлём 4-значный код подтверждения письмом; если письмо не ушло (нет SMTP) — код в ответе.",
         "operationId": "register_volunteer_api_v1_volunteer_register_post",
         "requestBody": {
           "content": {
@@ -2943,13 +2943,55 @@
         }
       }
     },
+    "/api/v1/volunteer/register/resend": {
+      "post": {
+        "tags": [
+          "Волонтёры (мобильное приложение)"
+        ],
+        "summary": "Resend Volunteer Code",
+        "description": "Повторная отправка кода подтверждения. Рано → 429 RESEND_TOO_SOON (resend_after).",
+        "operationId": "resend_volunteer_code_api_v1_volunteer_register_resend_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolunteerResendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolunteerResendResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/volunteer/verify-email": {
       "post": {
         "tags": [
           "Волонтёры (мобильное приложение)"
         ],
         "summary": "Verify Volunteer Email",
-        "description": "Подтверждение почты по токену из письма. Невалид/протух → 400 INVALID_TOKEN.",
+        "description": "Подтверждение почты по 4-значному коду. Истёк → 400 CODE_EXPIRED, неверный →\n400 INVALID_CODE (attempts_left), лимит попыток → 429 TOO_MANY_ATTEMPTS.",
         "operationId": "verify_volunteer_email_api_v1_volunteer_verify_email_post",
         "requestBody": {
           "content": {
@@ -5711,12 +5753,19 @@
             "maxLength": 128,
             "minLength": 6,
             "title": "Password"
+          },
+          "repeat_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 6,
+            "title": "Repeat Password"
           }
         },
         "type": "object",
         "required": [
           "email",
-          "password"
+          "password",
+          "repeat_password"
         ],
         "title": "VolunteerRegister"
       },
@@ -5735,18 +5784,15 @@
             "type": "boolean",
             "title": "Email Sent"
           },
-          "email_verify_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email Verify Token"
+          "code_length": {
+            "type": "integer",
+            "title": "Code Length"
           },
-          "verify_url": {
+          "resend_after": {
+            "type": "integer",
+            "title": "Resend After"
+          },
+          "email_verify_code": {
             "anyOf": [
               {
                 "type": "string"
@@ -5755,16 +5801,76 @@
                 "type": "null"
               }
             ],
-            "title": "Verify Url"
+            "title": "Email Verify Code"
           }
         },
         "type": "object",
         "required": [
           "volunteer_id",
           "email",
-          "email_sent"
+          "email_sent",
+          "code_length",
+          "resend_after"
         ],
         "title": "VolunteerRegisterResponse"
+      },
+      "VolunteerResendRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "VolunteerResendRequest"
+      },
+      "VolunteerResendResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "email_sent": {
+            "type": "boolean",
+            "title": "Email Sent"
+          },
+          "already_verified": {
+            "type": "boolean",
+            "title": "Already Verified",
+            "default": false
+          },
+          "code_length": {
+            "type": "integer",
+            "title": "Code Length"
+          },
+          "resend_after": {
+            "type": "integer",
+            "title": "Resend After"
+          },
+          "email_verify_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Verify Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email_sent",
+          "code_length",
+          "resend_after"
+        ],
+        "title": "VolunteerResendResponse"
       },
       "VolunteerResetPassword": {
         "properties": {
@@ -5856,15 +5962,22 @@
       },
       "VolunteerVerifyEmail": {
         "properties": {
-          "token": {
+          "email": {
             "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 8,
             "minLength": 1,
-            "title": "Token"
+            "title": "Code"
           }
         },
         "type": "object",
         "required": [
-          "token"
+          "email",
+          "code"
         ],
         "title": "VolunteerVerifyEmail"
       },

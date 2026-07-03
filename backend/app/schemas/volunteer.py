@@ -18,10 +18,19 @@ from .base import ORMBase
 class VolunteerRegister(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
+    # Повтор пароля — сверяется в сервисе (несовпадение → 400 PASSWORDS_MISMATCH).
+    repeat_password: str = Field(min_length=6, max_length=128)
 
 
 class VolunteerVerifyEmail(BaseModel):
-    token: str = Field(min_length=1)
+    # Подтверждение по 4-значному коду из письма (было — по JWT-токену из ссылки).
+    email: EmailStr
+    code: str = Field(min_length=1, max_length=8)
+
+
+class VolunteerResendRequest(BaseModel):
+    # Повторная отправка кода подтверждения почты (кулдаун — в сервисе).
+    email: EmailStr
 
 
 class VolunteerLogin(BaseModel):
@@ -66,10 +75,23 @@ class VolunteerRegisterResponse(BaseModel):
     volunteer_id: UUID
     email: str
     email_sent: bool
-    # Токен/ссылка возвращаются ТОЛЬКО когда письмо не ушло (email_sent=false) —
-    # чтобы фронт/тесты смогли завершить подтверждение почты без реального письма.
-    email_verify_token: str | None = None
-    verify_url: str | None = None
+    # Длина кода и задержка повторной отправки — константы, отдаём фронту явно.
+    code_length: int
+    resend_after: int
+    # Код возвращается ТОЛЬКО когда письмо не ушло (email_sent=false, SMTP не настроен) —
+    # честно, чтобы фронт/тесты смогли завершить подтверждение почты без реального письма.
+    email_verify_code: str | None = None
+
+
+class VolunteerResendResponse(BaseModel):
+    ok: bool = True
+    email_sent: bool
+    # Уже подтверждён → слать нечего (email_sent=false, already_verified=true).
+    already_verified: bool = False
+    code_length: int
+    resend_after: int
+    # Код — только при email_sent=false (как в VolunteerRegisterResponse).
+    email_verify_code: str | None = None
 
 
 class VolunteerVerifyResponse(BaseModel):

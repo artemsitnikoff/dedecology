@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.errors import (
+    AppError,
     BlockedError,
     ConflictError,
     EmailNotVerifiedError,
@@ -38,7 +39,16 @@ from app.schemas.volunteer import VolunteerRegister
 from app.services import volunteer as vol_service
 
 
-def _volunteer(email_verified=True, is_active=True, phone=None, last_seen_at=None):
+def _volunteer(
+    email_verified=True,
+    is_active=True,
+    phone=None,
+    last_seen_at=None,
+    email_code=None,
+    email_code_expires_at=None,
+    email_code_sent_at=None,
+    email_code_attempts=0,
+):
     v = Volunteer(
         email="vol@example.com",
         password_hash="x",
@@ -49,6 +59,12 @@ def _volunteer(email_verified=True, is_active=True, phone=None, last_seen_at=Non
     v.id = uuid4()
     v.created_at = datetime.now(timezone.utc)
     v.last_seen_at = last_seen_at
+    # OTP-поля подтверждения почты (server_default не применяется к transient-объекту —
+    # выставляем явно, чтобы сравнения счётчика попыток не спотыкались о None).
+    v.email_code = email_code
+    v.email_code_expires_at = email_code_expires_at
+    v.email_code_sent_at = email_code_sent_at
+    v.email_code_attempts = email_code_attempts
     return v
 
 
@@ -69,23 +85,46 @@ def _no_existing_session() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_register_returns_token_when_email_not_sent(client):
-    """SMTP не настроен → email_sent=false и verify-токен/ссылка в ответе (честно, без фейка)."""
+async def test_register_returns_code_when_email_not_sent(client):
+    """SMTP не настроен → email_sent=false и 4-значный код в ответе (честно, без фейка)."""
     vol = _volunteer(email_verified=False)
+    # register замокан, но send_email_code — настоящий: он проставит vol.email_code.
     with patch("app.api.v1.volunteer.register", new=AsyncMock(return_value=vol)):
         resp = await client.post(
             "/api/v1/volunteer/register",
-            json={"email": "vol@example.com", "password": "secret123"},
+            json={
+                "email": "vol@example.com",
+                "password": "secret123",
+                "repeat_password": "secret123",
+            },
         )
     assert resp.status_code == 201
     body = resp.json()
     assert body["volunteer_id"] == str(vol.id)
     assert body["email"] == "vol@example.com"
     assert body["email_sent"] is False
-    assert body["email_verify_token"]  # токен присутствует
-    assert body["verify_url"].endswith(body["email_verify_token"])
-    # Токен реально валиден: декодится к id волонтёра с purpose verify_email
-    assert decode_purpose_token(body["email_verify_token"], "verify_email") == str(vol.id)
+    assert body["code_length"] == 4
+    assert body["resend_after"] == 60
+    # Код присутствует, ровно 4 цифры (SMTP не настроен → отдаём его честно).
+    assert body["email_verify_code"] is not None
+    assert len(body["email_verify_code"]) == 4
+    assert body["email_verify_code"].isdigit()
+    assert body["email_verify_code"] == vol.email_code
+
+
+@pytest.mark.asyncio
+async def test_register_password_mismatch_400(client):
+    """Пароль ≠ повтор → 400 PASSWORDS_MISMATCH (реальный сервис, до обращения к БД)."""
+    resp = await client.post(
+        "/api/v1/volunteer/register",
+        json={
+            "email": "vol@example.com",
+            "password": "secret123",
+            "repeat_password": "secret999",
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "PASSWORDS_MISMATCH"
 
 
 @pytest.mark.asyncio
@@ -96,7 +135,11 @@ async def test_register_duplicate_email_409(client):
     ):
         resp = await client.post(
             "/api/v1/volunteer/register",
-            json={"email": "dup@example.com", "password": "secret123"},
+            json={
+                "email": "dup@example.com",
+                "password": "secret123",
+                "repeat_password": "secret123",
+            },
         )
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "CONFLICT"
@@ -106,7 +149,7 @@ async def test_register_duplicate_email_409(client):
 async def test_register_short_password_422(client):
     resp = await client.post(
         "/api/v1/volunteer/register",
-        json={"email": "x@example.com", "password": "abc"},
+        json={"email": "x@example.com", "password": "abc", "repeat_password": "abc"},
     )
     assert resp.status_code == 422
 
@@ -115,7 +158,10 @@ async def test_register_short_password_422(client):
 async def test_verify_email_valid(client):
     vol = _volunteer(email_verified=True)
     with patch("app.api.v1.volunteer.verify_email", new=AsyncMock(return_value=vol)):
-        resp = await client.post("/api/v1/volunteer/verify-email", json={"token": "good"})
+        resp = await client.post(
+            "/api/v1/volunteer/verify-email",
+            json={"email": "vol@example.com", "code": "0472"},
+        )
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
@@ -123,14 +169,86 @@ async def test_verify_email_valid(client):
 
 
 @pytest.mark.asyncio
-async def test_verify_email_invalid_token_400(client):
+async def test_verify_email_invalid_code_400_passthrough(client):
+    """Эндпоинт пробрасывает INVALID_CODE из сервиса с details.attempts_left."""
     with patch(
         "app.api.v1.volunteer.verify_email",
-        new=AsyncMock(side_effect=InvalidTokenError()),
+        new=AsyncMock(
+            side_effect=AppError(
+                "INVALID_CODE", "Неверный код", 400, details={"attempts_left": 3}
+            )
+        ),
     ):
-        resp = await client.post("/api/v1/volunteer/verify-email", json={"token": "broken"})
+        resp = await client.post(
+            "/api/v1/volunteer/verify-email",
+            json={"email": "vol@example.com", "code": "0000"},
+        )
     assert resp.status_code == 400
-    assert resp.json()["error"]["code"] == "INVALID_TOKEN"
+    body = resp.json()
+    assert body["error"]["code"] == "INVALID_CODE"
+    assert body["error"]["details"]["attempts_left"] == 3
+
+
+@pytest.mark.asyncio
+async def test_resend_returns_new_code_when_email_not_sent(client):
+    """Повторная отправка: письмо не ушло → новый код в ответе (email_sent=false)."""
+    vol = _volunteer(email_verified=False, email_code="1234")
+    with patch(
+        "app.api.v1.volunteer.resend_email_code",
+        new=AsyncMock(return_value=(False, False, vol)),
+    ):
+        resp = await client.post(
+            "/api/v1/volunteer/register/resend", json={"email": "vol@example.com"}
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["email_sent"] is False
+    assert body["already_verified"] is False
+    assert body["code_length"] == 4
+    assert body["resend_after"] == 60
+    assert body["email_verify_code"] == "1234"
+
+
+@pytest.mark.asyncio
+async def test_resend_too_soon_429(client):
+    """Кулдаун не прошёл → 429 RESEND_TOO_SOON с details.resend_after."""
+    with patch(
+        "app.api.v1.volunteer.resend_email_code",
+        new=AsyncMock(
+            side_effect=AppError(
+                "RESEND_TOO_SOON",
+                "Повторная отправка будет доступна позже",
+                429,
+                details={"resend_after": 42},
+            )
+        ),
+    ):
+        resp = await client.post(
+            "/api/v1/volunteer/register/resend", json={"email": "vol@example.com"}
+        )
+    assert resp.status_code == 429
+    body = resp.json()
+    assert body["error"]["code"] == "RESEND_TOO_SOON"
+    assert body["error"]["details"]["resend_after"] == 42
+
+
+@pytest.mark.asyncio
+async def test_resend_already_verified_no_code(client):
+    """Почта уже подтверждена → already_verified=true, код НЕ отдаём."""
+    vol = _volunteer(email_verified=True)
+    with patch(
+        "app.api.v1.volunteer.resend_email_code",
+        new=AsyncMock(return_value=(False, True, vol)),
+    ):
+        resp = await client.post(
+            "/api/v1/volunteer/register/resend", json={"email": "vol@example.com"}
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["already_verified"] is True
+    assert body["email_verify_code"] is None
 
 
 @pytest.mark.asyncio
@@ -475,7 +593,9 @@ def test_mailer_returns_false_without_smtp():
 @pytest.mark.asyncio
 async def test_service_register_hashes_password_and_sets_flags():
     session = _no_existing_session()
-    data = VolunteerRegister(email="vol@example.com", password="secret123")
+    data = VolunteerRegister(
+        email="vol@example.com", password="secret123", repeat_password="secret123"
+    )
     vol = await vol_service.register(session, data)
     assert vol.email_verified is False
     assert vol.is_active is True
@@ -485,12 +605,29 @@ async def test_service_register_hashes_password_and_sets_flags():
 
 
 @pytest.mark.asyncio
+async def test_service_register_password_mismatch():
+    """Пароль ≠ повтор → PASSWORDS_MISMATCH (400), БД не трогается."""
+    session = _no_existing_session()
+    data = VolunteerRegister(
+        email="vol@example.com", password="secret123", repeat_password="secret999"
+    )
+    with pytest.raises(AppError) as exc:
+        await vol_service.register(session, data)
+    assert exc.value.code == "PASSWORDS_MISMATCH"
+    assert exc.value.status_code == 400
+    # До проверки дубля дело не дошло — email в БД не запрашивали.
+    session.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_service_register_duplicate_conflict():
     session = MagicMock()
     result = MagicMock()
     result.scalar_one_or_none.return_value = _volunteer()  # email уже есть
     session.execute = AsyncMock(return_value=result)
-    data = VolunteerRegister(email="vol@example.com", password="secret123")
+    data = VolunteerRegister(
+        email="vol@example.com", password="secret123", repeat_password="secret123"
+    )
     with pytest.raises(ConflictError):
         await vol_service.register(session, data)
 
@@ -527,19 +664,188 @@ async def test_service_authenticate_flow():
             await vol_service.authenticate(session, "ghost@example.com", "secret123")
 
 
+def _future(minutes=15):
+    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+
 @pytest.mark.asyncio
-async def test_service_verify_email_token_flow():
+async def test_service_verify_email_code_success():
+    """Верный код → email_verified=true, код обнуляется (одноразовый)."""
     session = MagicMock()
     session.flush = AsyncMock()
-    vol = _volunteer(email_verified=False)
-    good = create_purpose_token(str(vol.id), "verify_email", timedelta(hours=1))
-    with patch("app.services.volunteer.get_by_id", new=AsyncMock(return_value=vol)):
-        result = await vol_service.verify_email(session, good)
+    vol = _volunteer(
+        email_verified=False, email_code="0472", email_code_expires_at=_future()
+    )
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+        result = await vol_service.verify_email(session, vol.email, "0472")
+    assert result.email_verified is True
+    assert vol.email_code is None
+    assert vol.email_code_expires_at is None
+    assert vol.email_code_attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_service_verify_email_wrong_code_increments_and_locks():
+    """Неверный код → attempts+=1 (commit) + INVALID_CODE с attempts_left; после MAX → 429."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+    vol = _volunteer(
+        email_verified=False,
+        email_code="0472",
+        email_code_expires_at=_future(),
+        email_code_attempts=0,
+    )
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+        # 4 неверные попытки: счётчик растёт, остаток попыток убывает.
+        for expected_left in (4, 3, 2, 1):
+            with pytest.raises(AppError) as exc:
+                await vol_service.verify_email(session, vol.email, "9999")
+            assert exc.value.code == "INVALID_CODE"
+            assert exc.value.status_code == 400
+            assert exc.value.details["attempts_left"] == expected_left
+        # 5-я неверная попытка добивает лимит (attempts=5), остаток 0.
+        with pytest.raises(AppError) as exc:
+            await vol_service.verify_email(session, vol.email, "9999")
+        assert exc.value.code == "INVALID_CODE"
+        assert exc.value.details["attempts_left"] == 0
+        # Теперь код заблокирован: даже верный код → TOO_MANY_ATTEMPTS (429).
+        with pytest.raises(AppError) as exc:
+            await vol_service.verify_email(session, vol.email, "0472")
+        assert exc.value.code == "TOO_MANY_ATTEMPTS"
+        assert exc.value.status_code == 429
+    # Инкремент коммитился (антибрутфорс переживает raise).
+    assert session.commit.await_count >= 5
+    assert vol.email_code_attempts == 5
+
+
+@pytest.mark.asyncio
+async def test_service_verify_email_expired_code():
+    """Истёкший код → CODE_EXPIRED (400)."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    vol = _volunteer(
+        email_verified=False,
+        email_code="0472",
+        email_code_expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+    )
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+        with pytest.raises(AppError) as exc:
+            await vol_service.verify_email(session, vol.email, "0472")
+    assert exc.value.code == "CODE_EXPIRED"
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_service_verify_email_already_verified_idempotent():
+    """Почта уже подтверждена → ok идемпотентно, без ошибки (даже с любым кодом)."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    vol = _volunteer(email_verified=True)
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+        result = await vol_service.verify_email(session, vol.email, "0000")
+    assert result is vol
     assert result.email_verified is True
 
-    # битый токен → InvalidTokenError (get_by_id даже не вызывается)
-    with pytest.raises(InvalidTokenError):
-        await vol_service.verify_email(session, "garbage")
+
+@pytest.mark.asyncio
+async def test_service_verify_email_unknown_email_code_expired():
+    """Неизвестный email → CODE_EXPIRED (анти-энумерация: не отличить от истёкшего кода)."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=None)):
+        with pytest.raises(AppError) as exc:
+            await vol_service.verify_email(session, "ghost@example.com", "0472")
+    assert exc.value.code == "CODE_EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_service_resend_too_soon():
+    """Код выслан <кулдауна назад → RESEND_TOO_SOON (429) с положительным resend_after."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    vol = _volunteer(
+        email_verified=False,
+        email_code="0472",
+        email_code_sent_at=datetime.now(timezone.utc) - timedelta(seconds=10),
+    )
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+        with pytest.raises(AppError) as exc:
+            await vol_service.resend_email_code(session, vol.email)
+    assert exc.value.code == "RESEND_TOO_SOON"
+    assert exc.value.status_code == 429
+    assert 0 < exc.value.details["resend_after"] <= 60
+
+
+@pytest.mark.asyncio
+async def test_service_resend_issues_new_code_after_cooldown():
+    """Кулдаун прошёл (sent_at в прошлом) → новый код выдан, sent_at обновлён, attempts=0."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    old_sent = datetime.now(timezone.utc) - timedelta(minutes=5)
+    vol = _volunteer(
+        email_verified=False,
+        email_code="0472",
+        email_code_sent_at=old_sent,
+        email_code_attempts=3,
+    )
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+        email_sent, already_verified, returned = await vol_service.resend_email_code(
+            session, vol.email
+        )
+    assert email_sent is False  # SMTP не настроен → честный False
+    assert already_verified is False
+    assert returned is vol
+    # Выдан новый код (4 цифры), счётчик попыток сброшен, момент отправки обновлён.
+    assert vol.email_code is not None and len(vol.email_code) == 4
+    assert vol.email_code_attempts == 0
+    assert vol.email_code_sent_at > old_sent
+
+
+@pytest.mark.asyncio
+async def test_service_resend_already_verified():
+    """Уже подтверждён → (False, True, vol), нового кода не выдаём."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    vol = _volunteer(email_verified=True, email_code=None)
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+        email_sent, already_verified, returned = await vol_service.resend_email_code(
+            session, vol.email
+        )
+    assert email_sent is False
+    assert already_verified is True
+    assert returned is vol
+    assert vol.email_code is None  # код не выдавался
+
+
+@pytest.mark.asyncio
+async def test_service_resend_unknown_email_anti_enumeration():
+    """Неизвестный email → (False, False, None): «успех» без кода (анти-энумерация)."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=None)):
+        email_sent, already_verified, returned = await vol_service.resend_email_code(
+            session, "ghost@example.com"
+        )
+    assert email_sent is False
+    assert already_verified is False
+    assert returned is None
+
+
+@pytest.mark.asyncio
+async def test_service_verify_after_resend_succeeds():
+    """Интеграция: resend выдаёт код → verify этим кодом подтверждает почту."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+    vol = _volunteer(email_verified=False, email_code_sent_at=None)
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+        _, _, _ = await vol_service.resend_email_code(session, vol.email)
+        fresh_code = vol.email_code
+        assert fresh_code is not None
+        result = await vol_service.verify_email(session, vol.email, fresh_code)
+    assert result.email_verified is True
+    assert vol.email_code is None
 
 
 @pytest.mark.asyncio

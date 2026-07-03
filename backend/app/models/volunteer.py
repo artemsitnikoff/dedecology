@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, TIMESTAMP, text
+from sqlalchemy import String, Boolean, Integer, TIMESTAMP, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,4 +45,19 @@ class Volunteer(Base, TimestampMixin):
     # волонтёра по его JWT (в get_current_volunteer, с троттлингом ≤1 раз/мин).
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
+    )
+    # --- Подтверждение почты 4-значным кодом (OTP по письму) ---
+    # Текущий код подтверждения (напр. "0472"); None после успешного подтверждения.
+    email_code: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    # Срок действия кода (UTC); истёк → CODE_EXPIRED, нужен новый код (resend).
+    email_code_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    # Когда код последний раз выслан — для кулдауна повторной отправки (resend).
+    email_code_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    # Счётчик неверных попыток ввода кода (антибрутфорс; ≥MAX → код заблокирован).
+    email_code_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
     )

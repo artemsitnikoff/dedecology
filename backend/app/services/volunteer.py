@@ -3,11 +3,13 @@
 Все функции async, session — первым параметром; flush() здесь, commit() — в роутере.
 Пароль — тот же хеш, что и у пользователей админки (core.security), но своя таблица
 volunteers и свой JWT (typ="volunteer"). Кидаем кастомные AppError-исключения, не
-HTTPException. Служебные токены (verify_email / reset_password) — подписанный JWT без
-отдельной таблицы. Verify-письмо оркеструет роутер; reset-письмо (публичный запрос И
-админ-триггер) — общий хелпер send_reset_email, чтобы не дублировать логику токена/письма.
+HTTPException. Подтверждение почты — короткий 4-значный код (OTP), хранится в самой
+записи volunteer (email_code + срок/попытки/кулдаун), одноразовый. Сброс пароля —
+по-прежнему подписанный JWT-токен (reset_password) без отдельной таблицы; reset-письмо
+(публичный запрос И админ-триггер) — общий хелпер send_reset_email.
 """
 
+import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -17,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..core.errors import (
+    AppError,
     BlockedError,
     ConflictError,
     EmailNotVerifiedError,
@@ -34,13 +37,52 @@ from ..models import Volunteer
 from ..schemas.volunteer import VolunteerRegister
 from .mailer import deliver_email
 
-# Время жизни служебных токенов (роутер передаёт их в create_purpose_token).
-VERIFY_EMAIL_TOKEN_TTL = timedelta(hours=48)
+# --- Подтверждение почты 4-значным кодом (OTP по письму) ---
+EMAIL_CODE_LENGTH = 4  # длина кода (знаков)
+EMAIL_CODE_TTL_MINUTES = 15  # срок действия выданного кода
+EMAIL_CODE_RESEND_COOLDOWN_SECONDS = 60  # пауза между повторными отправками
+EMAIL_CODE_MAX_ATTEMPTS = 5  # неверных попыток → код блокируется, нужен новый
+
+# Время жизни reset-токена (роутер/хелпер передают его в create_purpose_token).
 RESET_PASSWORD_TOKEN_TTL = timedelta(hours=2)
 
-# Назначения служебных токенов.
-PURPOSE_VERIFY_EMAIL = "verify_email"
+# Назначение служебного токена сброса пароля.
 PURPOSE_RESET_PASSWORD = "reset_password"
+
+
+def _issue_email_code(volunteer: Volunteer) -> str:
+    """Выдаёт волонтёру новый 4-значный код подтверждения почты (мутирует запись).
+
+    Код генерируется криптостойко (secrets), с ведущими нулями (напр. "0472").
+    Сбрасывает срок действия (utcnow + TTL), момент отправки (для кулдауна) и счётчик
+    неверных попыток. Возвращает сам код — вызывающий кладёт его в письмо/ответ.
+    """
+    code = f"{secrets.randbelow(10 ** EMAIL_CODE_LENGTH):0{EMAIL_CODE_LENGTH}d}"
+    now = datetime.now(timezone.utc)
+    volunteer.email_code = code
+    volunteer.email_code_expires_at = now + timedelta(minutes=EMAIL_CODE_TTL_MINUTES)
+    volunteer.email_code_sent_at = now
+    volunteer.email_code_attempts = 0
+    return code
+
+
+def send_email_code(volunteer: Volunteer) -> bool:
+    """Выдаёт новый код подтверждения (см. _issue_email_code) и шлёт его письмом.
+
+    ЕДИНЫЙ путь для регистрации и повторной отправки (resend) — логика кода/письма не
+    дублируется. Возвращает email_sent: deliver_email честно вернёт False, если SMTP не
+    настроен (или отправка упала) — тогда вызывающий кладёт код в ОТВЕТ (без фейка «письмо
+    ушло»), а сам код уже проставлен в volunteer.email_code.
+    """
+    code = _issue_email_code(volunteer)
+    return deliver_email(
+        volunteer.email,
+        subject="Код подтверждения ЭкоПульс",
+        body="Здравствуйте!\n\n"
+        f"Ваш код подтверждения адреса почты в ЭкоПульс: {code}\n\n"
+        f"Код действует {EMAIL_CODE_TTL_MINUTES} минут. "
+        f"Если вы не регистрировались в ЭкоПульс — просто проигнорируйте это письмо.",
+    )
 
 
 async def get_by_email(session: AsyncSession, email: str) -> Volunteer | None:
@@ -59,10 +101,13 @@ async def get_by_id(session: AsyncSession, vol_id: UUID) -> Volunteer:
 
 
 async def register(session: AsyncSession, data: VolunteerRegister) -> Volunteer:
-    """Создаёт волонтёра (email_verified=false, is_active=true). Дубль email → 409.
+    """Создаёт волонтёра (email_verified=false, is_active=true).
 
-    После flush() id проставлен БД (gen_random_uuid) — роутер по нему генерит verify-токен.
+    Пароль ≠ повтор → 400 PASSWORDS_MISMATCH; дубль email → 409. После flush() id
+    проставлен БД (gen_random_uuid); код подтверждения выдаёт/шлёт роутер (send_email_code).
     """
+    if data.password != data.repeat_password:
+        raise AppError("PASSWORDS_MISMATCH", "Пароли не совпадают", 400)
     if await get_by_email(session, data.email) is not None:
         raise ConflictError("Волонтёр с таким email уже зарегистрирован")
 
@@ -84,19 +129,91 @@ async def register(session: AsyncSession, data: VolunteerRegister) -> Volunteer:
     return volunteer
 
 
-async def verify_email(session: AsyncSession, token: str) -> Volunteer:
-    """Подтверждает почту по verify-токену. Битый/протух/чужой purpose → InvalidTokenError."""
-    vol_id = decode_purpose_token(token, PURPOSE_VERIFY_EMAIL)
-    if vol_id is None:
-        raise InvalidTokenError()
-    try:
-        volunteer = await get_by_id(session, UUID(vol_id))
-    except (ValueError, NotFoundError):
-        raise InvalidTokenError()
+async def verify_email(session: AsyncSession, email: str, code: str) -> Volunteer:
+    """Подтверждает почту волонтёра по 4-значному коду из письма.
 
+    - уже подтверждён → идемпотентно возвращаем волонтёра (без ошибки);
+    - нет кода / срок вышел / нет такого email → 400 CODE_EXPIRED (просим новый код);
+    - превышен лимит неверных попыток → 429 TOO_MANY_ATTEMPTS (код заблокирован);
+    - код не совпал → инкремент попыток (commit, антибрутфорс) → 400 INVALID_CODE
+      с details.attempts_left;
+    - совпал → email_verified=true, код обнуляется (одноразовый).
+    """
+    volunteer = await get_by_email(session, email)
+    # Идемпотентность: почта уже подтверждена — код больше не нужен.
+    if volunteer is not None and volunteer.email_verified:
+        return volunteer
+
+    now = datetime.now(timezone.utc)
+    # Нет волонтёра/кода или срок вышел → единый ответ «запросите новый код»
+    # (заодно анти-энумерация: неизвестный email не отличить от истёкшего кода).
+    if (
+        volunteer is None
+        or not volunteer.email_code
+        or volunteer.email_code_expires_at is None
+        or volunteer.email_code_expires_at < now
+    ):
+        raise AppError("CODE_EXPIRED", "Код истёк, запросите новый", 400)
+
+    # Код заблокирован превышением попыток — только новый код разблокирует.
+    if volunteer.email_code_attempts >= EMAIL_CODE_MAX_ATTEMPTS:
+        raise AppError(
+            "TOO_MANY_ATTEMPTS", "Слишком много попыток, запросите новый код", 429
+        )
+
+    # Неверный код: инкремент счётчика ДОЛЖЕН пережить raise (роутер до commit не дойдёт),
+    # поэтому здесь исключение из правила «commit в роутере» — коммитим сами.
+    if code != volunteer.email_code:
+        volunteer.email_code_attempts += 1
+        await session.commit()
+        attempts_left = max(0, EMAIL_CODE_MAX_ATTEMPTS - volunteer.email_code_attempts)
+        raise AppError(
+            "INVALID_CODE", "Неверный код", 400, details={"attempts_left": attempts_left}
+        )
+
+    # Успех — почта подтверждена, код одноразовый (обнуляем всё сопутствующее).
     volunteer.email_verified = True
+    volunteer.email_code = None
+    volunteer.email_code_expires_at = None
+    volunteer.email_code_sent_at = None
+    volunteer.email_code_attempts = 0
     await session.flush()
     return volunteer
+
+
+async def resend_email_code(
+    session: AsyncSession, email: str
+) -> tuple[bool, bool, Volunteer | None]:
+    """Повторно высылает код подтверждения почты. Возвращает (email_sent, already_verified, volunteer).
+
+    - неизвестный email → (False, False, None): анти-энумерация, «успех» без кода;
+    - уже подтверждён → (False, True, volunteer): слать нечего;
+    - кулдаун ещё не прошёл → 429 RESEND_TOO_SOON с details.resend_after (сек до отправки);
+    - иначе → выдаём+шлём новый код (send_email_code), (email_sent, False, volunteer).
+    """
+    volunteer = await get_by_email(session, email)
+    if volunteer is None:
+        return False, False, None
+    if volunteer.email_verified:
+        return False, True, volunteer
+
+    # Кулдаун повторной отправки — защита от спама письмами.
+    if volunteer.email_code_sent_at is not None:
+        elapsed = (
+            datetime.now(timezone.utc) - volunteer.email_code_sent_at
+        ).total_seconds()
+        if elapsed < EMAIL_CODE_RESEND_COOLDOWN_SECONDS:
+            resend_after = EMAIL_CODE_RESEND_COOLDOWN_SECONDS - int(elapsed)
+            raise AppError(
+                "RESEND_TOO_SOON",
+                "Повторная отправка будет доступна позже",
+                429,
+                details={"resend_after": resend_after},
+            )
+
+    email_sent = send_email_code(volunteer)
+    await session.flush()
+    return email_sent, False, volunteer
 
 
 async def authenticate(session: AsyncSession, email: str, password: str) -> Volunteer:

@@ -5,18 +5,18 @@
 валидация схемой → сервис/токены/mailer → схема ответа.
 
 Письма — через плагинный mailer. Если письмо НЕ ушло (SMTP не настроен → deliver_email
-вернул False), токен/ссылку кладём в ОТВЕТ (email_sent=false), чтобы поток можно было
-завершить (тест/интеграция). Если ушло (True) — токен в ответ НЕ кладём.
+вернул False), секрет кладём в ОТВЕТ (email_sent=false): код подтверждения для регистрации/
+resend, токен-ссылку для сброса пароля — чтобы поток можно было завершить (тест/интеграция).
+Если ушло (True) — секрет в ответ НЕ кладём. Подтверждение почты — 4-значный код (OTP).
 """
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...config import settings
 from ...database import get_db
 from ...deps import get_current_volunteer
 from ...models import Volunteer
-from ...core.security import create_purpose_token, create_volunteer_access_token
+from ...core.security import create_volunteer_access_token
 from ...schemas.volunteer import (
     OkResponse,
     VolunteerLogin,
@@ -25,21 +25,24 @@ from ...schemas.volunteer import (
     VolunteerProfile,
     VolunteerRegister,
     VolunteerRegisterResponse,
+    VolunteerResendRequest,
+    VolunteerResendResponse,
     VolunteerResetPassword,
     VolunteerResetRequest,
     VolunteerResetRequestResponse,
     VolunteerVerifyEmail,
     VolunteerVerifyResponse,
 )
-from ...services.mailer import deliver_email
 from ...services.volunteer import (
-    PURPOSE_VERIFY_EMAIL,
-    VERIFY_EMAIL_TOKEN_TTL,
+    EMAIL_CODE_LENGTH,
+    EMAIL_CODE_RESEND_COOLDOWN_SECONDS,
     authenticate,
     complete_onboarding,
     register,
     request_password_reset,
+    resend_email_code,
     reset_password,
+    send_email_code,
     send_reset_email,
     verify_email,
 )
@@ -54,28 +57,46 @@ async def register_volunteer(
     data: VolunteerRegister,
     session: AsyncSession = Depends(get_db),
 ):
-    """Регистрация волонтёра. Дубль email → 409. Шлём письмо со ссылкой подтверждения."""
-    volunteer = await register(session, data)
-    await session.commit()
+    """Регистрация волонтёра. Пароли не совпали → 400, дубль email → 409.
 
-    token = create_purpose_token(
-        str(volunteer.id), PURPOSE_VERIFY_EMAIL, VERIFY_EMAIL_TOKEN_TTL
-    )
-    verify_url = f"{settings.APP_PUBLIC_URL}/verify?token={token}"
-    sent = deliver_email(
-        volunteer.email,
-        subject="ЭкоПульс — подтверждение адреса почты",
-        body="Здравствуйте!\n\n"
-        f"Подтвердите адрес электронной почты, перейдя по ссылке:\n{verify_url}\n\n"
-        f"Если вы не регистрировались в ЭкоПульс — просто проигнорируйте это письмо.",
-    )
+    Шлём 4-значный код подтверждения письмом; если письмо не ушло (нет SMTP) — код в ответе.
+    """
+    volunteer = await register(session, data)
+    # Код выдаётся и (по возможности) отправляется письмом; commit сохраняет его в БД.
+    sent = send_email_code(volunteer)
+    await session.commit()
 
     return VolunteerRegisterResponse(
         volunteer_id=volunteer.id,
         email=volunteer.email,
         email_sent=sent,
-        email_verify_token=None if sent else token,
-        verify_url=None if sent else verify_url,
+        code_length=EMAIL_CODE_LENGTH,
+        resend_after=EMAIL_CODE_RESEND_COOLDOWN_SECONDS,
+        email_verify_code=None if sent else volunteer.email_code,
+    )
+
+
+@router.post("/register/resend", response_model=VolunteerResendResponse, tags=[_TAG])
+async def resend_volunteer_code(
+    data: VolunteerResendRequest,
+    session: AsyncSession = Depends(get_db),
+):
+    """Повторная отправка кода подтверждения. Рано → 429 RESEND_TOO_SOON (resend_after)."""
+    email_sent, already_verified, volunteer = await resend_email_code(session, data.email)
+    await session.commit()
+
+    # Код кладём в ответ только если реально выдан новый и письмо не ушло.
+    code = None
+    if not email_sent and not already_verified and volunteer is not None:
+        code = volunteer.email_code
+
+    return VolunteerResendResponse(
+        ok=True,
+        email_sent=email_sent,
+        already_verified=already_verified,
+        code_length=EMAIL_CODE_LENGTH,
+        resend_after=EMAIL_CODE_RESEND_COOLDOWN_SECONDS,
+        email_verify_code=code,
     )
 
 
@@ -84,8 +105,9 @@ async def verify_volunteer_email(
     data: VolunteerVerifyEmail,
     session: AsyncSession = Depends(get_db),
 ):
-    """Подтверждение почты по токену из письма. Невалид/протух → 400 INVALID_TOKEN."""
-    await verify_email(session, data.token)
+    """Подтверждение почты по 4-значному коду. Истёк → 400 CODE_EXPIRED, неверный →
+    400 INVALID_CODE (attempts_left), лимит попыток → 429 TOO_MANY_ATTEMPTS."""
+    await verify_email(session, data.email, data.code)
     await session.commit()
     return VolunteerVerifyResponse(ok=True, email_verified=True)
 
