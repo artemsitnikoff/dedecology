@@ -40,7 +40,7 @@ interface Head {
 }
 const HEADS: Head[] = [
   { key: 'reg', label: 'Реестровый №', cellClass: 'de-mno-c-reg' },
-  { key: 'name', label: 'Наименование', cellClass: 'de-mno-c-name' },
+  { key: 'name', label: 'Наимен.', cellClass: 'de-mno-c-name' },
   { key: 'region', label: 'Регион', cellClass: 'de-mno-c-region' },
   { key: 'city', label: 'Город', cellClass: 'de-mno-c-city' },
   { key: 'address', label: 'Адрес', cellClass: 'de-mno-c-address' },
