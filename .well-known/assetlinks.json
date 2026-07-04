@@ -1,1 +1,22 @@
-
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ru.ekopulse",
+      "sha256_cert_fingerprints": [
+        "82:5B:2E:6A:8B:C7:E3:3E:C8:BA:AF:54:EF:39:9B:62:04:94:5D:9D:7C:59:F3:4E:D2:82:18:3F:8E:EF:C5:B9"
+      ]
+    }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ru.ekopulse.dev",
+      "sha256_cert_fingerprints": [
+        "D9:C5:24:84:8B:B9:4B:74:38:F9:B3:6D:C5:1D:44:61:4D:BD:DB:7D:87:69:D2:BC:DB:7A:44:1B:88:87:F9:16"
+      ]
+    }
+  }
+]
