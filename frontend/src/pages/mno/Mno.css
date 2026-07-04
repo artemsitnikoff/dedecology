@@ -363,10 +363,10 @@
 
 /* ---------- Таблица (без заморозки столбца, без воронки) ---------- */
 /* min-width = точная сумма border-box ширин колонок (46 reg152 name190 region168
-   city150 address320 coords150 incidents80 sync136 = 1392) — шапка и строки
+   city150 address320 coords105 incidents80 sync136 = 1347) — шапка и строки
    имеют одинаковую натуральную ширину, поэтому не разъезжаются при узком окне. */
 .de-mno-table {
-  min-width: 1392px;
+  min-width: 1347px;
 }
 .de-mno-thead {
   display: flex;
@@ -509,7 +509,7 @@
   text-overflow: ellipsis;
 }
 .de-mno-c-coords {
-  width: 150px;
+  width: 105px;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 11.5px;
