@@ -362,8 +362,11 @@
 }
 
 /* ---------- Таблица (без заморозки столбца, без воронки) ---------- */
+/* min-width = точная сумма border-box ширин колонок (46 reg152 name240 region168
+   city150 address230 coords150 incidents110 sync146 = 1392) — шапка и строки
+   имеют одинаковую натуральную ширину, поэтому не разъезжаются при узком окне. */
 .de-mno-table {
-  min-width: 1282px;
+  min-width: 1392px;
 }
 .de-mno-thead {
   display: flex;
@@ -386,6 +389,7 @@
   align-items: center;
   gap: 6px;
   height: 100%;
+  flex: none; /* как ячейки строк (.de-mno-cell): не сжимаемся — иначе шапка разъезжается со строками */
   color: var(--fg-2);
   white-space: nowrap;
   user-select: none;
