@@ -363,10 +363,10 @@
 
 /* ---------- Таблица (без заморозки столбца, без воронки) ---------- */
 /* min-width = точная сумма border-box ширин колонок (46 reg152 name190 region168
-   city150 address320 coords150 incidents110 sync146 = 1432) — шапка и строки
+   city150 address320 coords150 incidents80 sync136 = 1392) — шапка и строки
    имеют одинаковую натуральную ширину, поэтому не разъезжаются при узком окне. */
 .de-mno-table {
-  min-width: 1432px;
+  min-width: 1392px;
 }
 .de-mno-thead {
   display: flex;
@@ -517,7 +517,7 @@
 }
 /* Колонка «Обращения» в реестре: число обращений по МНО; >0 — кликабельно (→ /incidents?mno_id). */
 .de-mno-c-incidents {
-  width: 110px;
+  width: 80px;
   justify-content: center;
 }
 .de-mno-inc-zero {
@@ -527,7 +527,7 @@
   color: var(--fg-3);
 }
 .de-mno-c-sync {
-  width: 146px;
+  width: 136px;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;

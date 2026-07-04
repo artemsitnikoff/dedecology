@@ -45,8 +45,8 @@ const HEADS: Head[] = [
   { key: 'city', label: 'Город', cellClass: 'de-mno-c-city' },
   { key: 'address', label: 'Адрес', cellClass: 'de-mno-c-address' },
   { key: 'coords', label: 'Координаты', cellClass: 'de-mno-c-coords', nosort: true },
-  { key: 'incidents', label: 'Обращения', cellClass: 'de-mno-c-incidents', nosort: true },
-  { key: 'sync', label: 'Синхронизация', cellClass: 'de-mno-c-sync', nosort: true },
+  { key: 'incidents', label: 'Обращ.', cellClass: 'de-mno-c-incidents', nosort: true },
+  { key: 'sync', label: 'Синхрон.', cellClass: 'de-mno-c-sync', nosort: true },
 ];
 
 function CheckMark() {
