@@ -362,11 +362,12 @@
 }
 
 /* ---------- Таблица (без заморозки столбца, без воронки) ---------- */
-/* min-width = точная сумма border-box ширин колонок (46 reg152 name190 region168
-   city150 address320 coords105 incidents80 sync136 = 1347) — шапка и строки
-   имеют одинаковую натуральную ширину, поэтому не разъезжаются при узком окне. */
+/* min-width = точная сумма border-box ширин колонок (46 reg152 name133 region168
+   city150 address320(min, flex) coords105 incidents80 sync136 = 1290) — шапка и
+   строки имеют одинаковую натуральную ширину, поэтому не разъезжаются при узком окне.
+   «Адрес» — flex:1, забирает свободный остаток при более широком контейнере. */
 .de-mno-table {
-  min-width: 1347px;
+  min-width: 1290px;
 }
 .de-mno-thead {
   display: flex;
@@ -477,8 +478,7 @@
   color: var(--fg-2);
 }
 .de-mno-c-name {
-  flex: 1;
-  min-width: 190px;
+  width: 133px; /* фикс. ширина — «поджата» на 30% от 190px; тянется теперь «Адрес» */
   font-size: var(--fs-13);
   color: var(--fg-1);
   font-weight: 500;
@@ -501,7 +501,8 @@
   text-overflow: ellipsis;
 }
 .de-mno-c-address {
-  width: 320px;
+  flex: 1; /* тянущаяся колонка — забирает весь свободный остаток строки */
+  min-width: 320px;
   font-size: var(--fs-13);
   color: var(--fg-2);
   white-space: nowrap;
