@@ -224,6 +224,52 @@ async def list_mno(
     )
 
 
+async def list_by_volunteer(
+    session: AsyncSession,
+    volunteer_id: uuid.UUID,
+    *,
+    page: int = 1,
+    page_size: int = 50,
+) -> Paginated[MnoDetail]:
+    """«Мои МНО»: площадки, добавленные этим волонтёром из приложения.
+
+    Фильтр — Mno.volunteer_id == volunteer_id (мягкая привязка авторства). Свежие
+    первыми (created_at DESC, вторичный ключ id для стабильности). МНО с
+    volunteer_id=NULL (ФГИС/ручные/старые) сюда НЕ попадают. Для каждой строки собираем
+    полную карточку MnoDetail (живой COUNT обращений + comment/photo_urls), как в get_mno.
+    Пагинация (COUNT + offset/limit) зеркалит list_mno.
+    """
+    total = (
+        await session.execute(
+            select(func.count(Mno.id)).where(Mno.volunteer_id == volunteer_id)
+        )
+    ).scalar_one()
+
+    stmt = (
+        select(Mno)
+        .where(Mno.volunteer_id == volunteer_id)
+        .order_by(desc(Mno.created_at), desc(Mno.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = list((await session.execute(stmt)).scalars().all())
+
+    region_names = await _region_names(session)
+    counts = await _incident_counts(session, [m.id for m in rows])
+    items = [
+        MnoDetail(
+            **_to_list_item(m, region_names, counts.get(m.id, 0)).model_dump(),
+            comment=m.comment,
+            photo_urls=(m.photo_urls or []),
+        )
+        for m in rows
+    ]
+    pages = math.ceil(total / page_size) if total > 0 else 0
+    return Paginated[MnoDetail](
+        items=items, total=total, page=page, page_size=page_size, pages=pages
+    )
+
+
 async def list_for_export(
     session: AsyncSession,
     *,
@@ -417,7 +463,10 @@ async def create_mno(
 
 
 async def create_mno_from_volunteer(
-    session: AsyncSession, data: MnoVolunteerCreate, photo_files: list | None = None
+    session: AsyncSession,
+    data: MnoVolunteerCreate,
+    photo_files: list | None = None,
+    volunteer_id: uuid.UUID | None = None,
 ) -> MnoDetail:
     """Создаёт МНО, добавленное волонтёром на ПУБЛИЧНОЙ форме (source='volunteer').
 
@@ -460,6 +509,9 @@ async def create_mno_from_volunteer(
         lat=lat,
         lon=lon,
         comment=comment_value,
+        # Автор МНО из мобильного приложения (опциональный volunteer-токен на публичном
+        # POST /intake/mno). NULL — аноним/веб-форма (см. get_optional_volunteer).
+        volunteer_id=volunteer_id,
         fgis_id=None,
         synced=False,
         sync_date=None,

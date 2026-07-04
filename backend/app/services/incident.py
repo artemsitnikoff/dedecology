@@ -141,6 +141,46 @@ async def list_incidents(
     )
 
 
+async def list_by_volunteer(
+    session: AsyncSession,
+    volunteer_id: UUID,
+    *,
+    page: int = 1,
+    page_size: int = 50,
+) -> Paginated[IncidentListItem]:
+    """«Мои отчёты»: инциденты, созданные этим волонтёром из приложения (со статусом).
+
+    Фильтр — Incident.volunteer_id == volunteer_id (мягкая привязка авторства). Свежие
+    первыми (created_at DESC, вторичный ключ id для стабильности). Инциденты с
+    volunteer_id=NULL (аноним/веб/Макс/старые) сюда НЕ попадают. Пагинация (COUNT +
+    offset/limit) зеркалит list_incidents.
+    """
+    where_clause = Incident.volunteer_id == volunteer_id
+
+    total = (
+        await session.execute(
+            select(func.count(Incident.id)).where(where_clause)
+        )
+    ).scalar_one()
+
+    stmt = (
+        select(Incident)
+        .where(where_clause)
+        .order_by(desc(Incident.created_at), desc(Incident.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = (await session.execute(stmt)).scalars().all()
+    pages = math.ceil(total / page_size) if total > 0 else 0
+    return Paginated[IncidentListItem](
+        items=[IncidentListItem.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages,
+    )
+
+
 async def _query_incidents(
     session: AsyncSession,
     *,

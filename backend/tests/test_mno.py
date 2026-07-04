@@ -575,6 +575,28 @@ async def test_create_mno_from_volunteer_sets_source_and_defaults():
 
 
 @pytest.mark.asyncio
+async def test_create_mno_from_volunteer_stores_volunteer_id():
+    """volunteer_id (автор из приложения) проставляется на МНО; по умолчанию None."""
+    vol_id = uuid4()
+    session, added = _volunteer_session()
+    await mno_service.create_mno_from_volunteer(
+        session,
+        MnoVolunteerCreate(address="ул. Ленина, 1", coords="53.2, 50.6"),
+        volunteer_id=vol_id,
+    )
+    created = next(o for o in added if isinstance(o, Mno))
+    assert created.volunteer_id == vol_id
+
+    # Без volunteer_id (аноним) → NULL.
+    session2, added2 = _volunteer_session()
+    await mno_service.create_mno_from_volunteer(
+        session2, MnoVolunteerCreate(address="ул. Ленина, 1", coords="53.2, 50.6")
+    )
+    created2 = next(o for o in added2 if isinstance(o, Mno))
+    assert created2.volunteer_id is None
+
+
+@pytest.mark.asyncio
 async def test_create_mno_from_volunteer_requires_address_and_coords():
     """Пустые address/coords → ValidationError (400), БД НЕ трогаем."""
     session, added = _volunteer_session()
@@ -769,3 +791,62 @@ async def test_create_mno_by_volunteer_marks_source(client):
     # actor_user_id (3-й позиционный) = None, source='volunteer' (kwarg).
     assert spy.call_args.args[2] is None
     assert spy.call_args.kwargs.get("source") == "volunteer"
+
+
+# --- list_by_volunteer — «Мои МНО» (фильтр по volunteer_id, свежие первыми) -----
+
+
+@pytest.mark.asyncio
+async def test_mno_list_by_volunteer_filters_and_builds_detail():
+    """list_by_volunteer (МНО): WHERE mno.volunteer_id + ORDER BY created_at DESC;
+    строки собираются в MnoDetail с живым COUNT обращений и region_name."""
+    vol_id = uuid4()
+    mno = _orm_mno(source="volunteer")
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 1
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = [mno]
+    names_res = MagicMock()
+    names_res.all.return_value = [("63", "Самарская область")]
+    counts_res = MagicMock()
+    counts_res.all.return_value = [(mno.id, 4)]
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[count_res, rows_res, names_res, counts_res]
+    )
+
+    page = await mno_service.list_by_volunteer(session, vol_id, page=1, page_size=50)
+
+    assert page.total == 1
+    assert len(page.items) == 1
+    detail = page.items[0]
+    assert isinstance(detail, MnoDetail)
+    assert detail.id == mno.id
+    assert detail.incidents == 4  # живой COUNT, не статичное поле модели
+    assert detail.region_name == "Самарская область"
+    count_sql = str(session.execute.call_args_list[0].args[0])
+    rows_sql = str(session.execute.call_args_list[1].args[0])
+    assert "mno.volunteer_id" in count_sql
+    assert "mno.volunteer_id" in rows_sql
+    assert "ORDER BY mno.created_at DESC" in rows_sql
+
+
+@pytest.mark.asyncio
+async def test_mno_list_by_volunteer_empty_skips_counts():
+    """Пустой результат → items=[], COUNT обращений не запрашивается (нет id)."""
+    vol_id = uuid4()
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 0
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = []
+    names_res = MagicMock()
+    names_res.all.return_value = []
+    session = AsyncMock()
+    # Только 3 вызова: count, rows, region_names (_incident_counts коротко замыкает пустой набор).
+    session.execute = AsyncMock(side_effect=[count_res, rows_res, names_res])
+
+    page = await mno_service.list_by_volunteer(session, vol_id, page=1, page_size=50)
+
+    assert page.total == 0
+    assert page.items == []
+    assert session.execute.await_count == 3

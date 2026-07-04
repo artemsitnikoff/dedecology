@@ -887,6 +887,111 @@ async def test_public_form_resizes_and_serves(client, fake_session, monkeypatch,
 
 
 # --------------------------------------------------------------------------- #
+# Авторство волонтёра: опциональный volunteer-токен → volunteer_id на приёме    #
+# --------------------------------------------------------------------------- #
+
+
+def _fake_volunteer():
+    """Фейковый активный волонтёр с известным id (для override get_optional_volunteer)."""
+    from app.models import Volunteer
+
+    v = Volunteer(email="author@example.com", password_hash="x", is_active=True)
+    v.id = uuid4()
+    return v
+
+
+@pytest.mark.asyncio
+async def test_public_form_attributes_volunteer(client):
+    """POST /form с валидным volunteer-токеном (override get_optional_volunteer) →
+    сервис получает volunteer_id автора (отчёт попадёт в «Мои отчёты» приложения)."""
+    from app.deps import get_optional_volunteer
+    from app.main import app
+
+    fake_vol = _fake_volunteer()
+    app.dependency_overrides[get_optional_volunteer] = lambda: fake_vol
+
+    fake_incident = Incident(source="form", status="new")
+    fake_incident.id = uuid4()
+    create = AsyncMock(return_value=fake_incident)
+    quote = AsyncMock(return_value="«ц» — А")
+    try:
+        with patch(
+            "app.api.v1.intake.intake_service.create_incident_from_public_form",
+            new=create,
+        ), patch("app.api.v1.intake.quotes_service.nature_quote", new=quote):
+            resp = await client.post(
+                "/api/v1/intake/form", data={"fio": "Волонтёр", "website": ""}
+            )
+    finally:
+        app.dependency_overrides.pop(get_optional_volunteer, None)
+
+    assert resp.status_code == 200
+    create.assert_awaited_once()
+    assert create.call_args.kwargs["volunteer_id"] == fake_vol.id
+
+
+@pytest.mark.asyncio
+async def test_public_form_anonymous_volunteer_id_none(client):
+    """POST /form БЕЗ токена (аноним/веб-форма) → сервис получает volunteer_id=None."""
+    fake_incident = Incident(source="form", status="new")
+    fake_incident.id = uuid4()
+    create = AsyncMock(return_value=fake_incident)
+    quote = AsyncMock(return_value="«ц» — А")
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_public_form",
+        new=create,
+    ), patch("app.api.v1.intake.quotes_service.nature_quote", new=quote):
+        resp = await client.post(
+            "/api/v1/intake/form", data={"fio": "Аноним", "website": ""}
+        )
+    assert resp.status_code == 200
+    create.assert_awaited_once()
+    assert create.call_args.kwargs["volunteer_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_public_mno_attributes_volunteer(client):
+    """POST /intake/mno с валидным volunteer-токеном → сервис получает volunteer_id автора."""
+    from app.deps import get_optional_volunteer
+    from app.main import app
+
+    fake_vol = _fake_volunteer()
+    app.dependency_overrides[get_optional_volunteer] = lambda: fake_vol
+
+    spy = AsyncMock(return_value=_volunteer_detail())
+    try:
+        with patch(
+            "app.api.v1.intake.mno_service.create_mno_from_volunteer", new=spy
+        ):
+            resp = await client.post(
+                "/api/v1/intake/mno",
+                data={"address": "ул. Ленина, 1", "coords": "53.2, 50.6"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_optional_volunteer, None)
+
+    assert resp.status_code == 200
+    spy.assert_awaited_once()
+    assert spy.call_args.kwargs["volunteer_id"] == fake_vol.id
+
+
+@pytest.mark.asyncio
+async def test_public_mno_anonymous_volunteer_id_none(client):
+    """POST /intake/mno БЕЗ токена (аноним) → сервис получает volunteer_id=None."""
+    spy = AsyncMock(return_value=_volunteer_detail())
+    with patch(
+        "app.api.v1.intake.mno_service.create_mno_from_volunteer", new=spy
+    ):
+        resp = await client.post(
+            "/api/v1/intake/mno",
+            data={"address": "ул. Ленина, 1", "coords": "53.2, 50.6"},
+        )
+    assert resp.status_code == 200
+    spy.assert_awaited_once()
+    assert spy.call_args.kwargs["volunteer_id"] is None
+
+
+# --------------------------------------------------------------------------- #
 # create_incident_from_public_form — ветвление адреса/баков (без диска/БД)     #
 # --------------------------------------------------------------------------- #
 
@@ -1068,6 +1173,42 @@ async def test_public_service_incident_type_defaults_none(fake_session):
     )
     assert incident.incident_type is None
     assert incident.comment is None
+
+
+@pytest.mark.asyncio
+async def test_public_service_saves_volunteer_id(fake_session):
+    """volunteer_id (автор из приложения) проставляется на инциденте; по умолчанию None."""
+    fake_session.add = MagicMock()
+    vol_id = uuid4()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="",
+        photo_time="",
+        bins="",
+        photo_files=[],
+        volunteer_id=vol_id,
+    )
+    assert incident.volunteer_id == vol_id
+
+    # Без volunteer_id (аноним/веб-форма) → NULL.
+    anon = await create_incident_from_public_form(
+        fake_session,
+        fio="Аноним",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="",
+        photo_time="",
+        bins="",
+        photo_files=[],
+    )
+    assert anon.volunteer_id is None
 
 
 @pytest.mark.asyncio

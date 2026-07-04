@@ -615,3 +615,52 @@ async def test_bulk_delete_skips_nonexistent(client):
     assert resp.status_code == 200
     # deleted отражает только реальные строки, несуществующий id не посчитан.
     assert resp.json() == {"deleted": 2}
+
+
+# =========================================================================
+# list_by_volunteer — «Мои отчёты» (фильтр по volunteer_id, свежие первыми)
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_list_by_volunteer_filters_and_orders():
+    """list_by_volunteer: WHERE incidents.volunteer_id = :id + ORDER BY created_at DESC;
+    COUNT и выборка идут по этому же фильтру."""
+    vol_id = uuid4()
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 0
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, rows_res])
+
+    page = await incident_service.list_by_volunteer(session, vol_id, page=1, page_size=50)
+
+    assert page.total == 0
+    assert page.items == []
+    assert page.page == 1 and page.page_size == 50 and page.pages == 0
+    count_sql = str(session.execute.call_args_list[0].args[0])
+    rows_sql = str(session.execute.call_args_list[1].args[0])
+    assert "incidents.volunteer_id" in count_sql
+    assert "incidents.volunteer_id" in rows_sql
+    assert "ORDER BY incidents.created_at DESC" in rows_sql
+
+
+@pytest.mark.asyncio
+async def test_list_by_volunteer_builds_items_and_pages():
+    """Непустой результат → items через IncidentListItem.model_validate, pages округляется вверх."""
+    vol_id = uuid4()
+    row = _list_item()  # IncidentListItem — совместим с model_validate (from_attributes)
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 3
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = [row]
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, rows_res])
+
+    page = await incident_service.list_by_volunteer(session, vol_id, page=1, page_size=2)
+
+    assert page.total == 3
+    assert page.pages == 2  # ceil(3/2)
+    assert len(page.items) == 1
+    assert page.items[0].id == row.id

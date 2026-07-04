@@ -45,6 +45,13 @@ class Incident(Base, TimestampMixin):
     mno_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )
+    # Кто создал этот отчёт из мобильного приложения (Volunteer.id). Проставляется
+    # опциональным volunteer-токеном на публичном POST /intake/form. БЕЗ жёсткого FK
+    # (мягкая привязка, как mno_id) — по ней GET /volunteer/reports фильтрует «мои
+    # отчёты». NULL — аноним/веб-форма/Макс-бот/старые инциденты (историю не привязываем).
+    volunteer_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     # ПРОЧАЯ не-адресная информация из свободного текста обращения: «Радар №…»,
     # ФИО заявителя (если есть в тексте), описание проблемы («Баки раздельного
     # сбора отсутствуют»), заметки. Раньше AI это выкидывал; NULL — нет/не извлечено.

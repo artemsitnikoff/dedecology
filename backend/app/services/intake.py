@@ -621,6 +621,7 @@ async def create_incident_from_public_form(
     incident_type: str = "",
     comment: str = "",
     actor_user_id=None,
+    volunteer_id: uuid.UUID | None = None,
 ) -> Incident:
     """Создаёт Incident (source='form') из публичной формы волонтёра + фото.
 
@@ -702,6 +703,9 @@ async def create_incident_from_public_form(
         lon=lon,
         mno_reg=mno_reg_value,
         mno_id=mno_id_value,
+        # Автор отчёта из мобильного приложения (опциональный volunteer-токен на
+        # публичном POST /intake/form). NULL — аноним/веб-форма (см. get_optional_volunteer).
+        volunteer_id=volunteer_id,
         comment=comment_value,
         incident_type=incident_type_value,
         photo_time=parsed_photo_time,

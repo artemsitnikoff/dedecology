@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0018():
-    """Цепочка ревизий консистентна: ровно один head, и это 0018 (0018→0017→…)."""
+def test_migration_chain_single_head_is_0019():
+    """Цепочка ревизий консистентна: ровно один head, и это 0019 (0019→0018→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0018"}
+    assert heads == {"0019"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -144,3 +144,56 @@ def test_0018_downgrade_drops_comment_and_photo_urls(monkeypatch):
 
     dropped = {c.args for c in fake_op.drop_column.call_args_list}
     assert dropped == {("mno", "photo_urls"), ("mno", "comment")}
+
+
+def test_0019_revision_identifiers():
+    m = _load("0019_volunteer_authored.py")
+    assert m.revision == "0019"
+    assert m.down_revision == "0018"
+
+
+def test_0019_upgrade_adds_volunteer_id_to_both_tables(monkeypatch):
+    """upgrade(): add_column incidents.volunteer_id + mno.volunteer_id (оба nullable UUID)
+    и оба индекса ix_incidents_volunteer_id / ix_mno_volunteer_id."""
+    m = _load("0019_volunteer_authored.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    # Две колонки volunteer_id — по одной в incidents и mno.
+    assert fake_op.add_column.call_count == 2
+    added = {c.args[0]: c.args[1] for c in fake_op.add_column.call_args_list}
+    assert set(added) == {"incidents", "mno"}
+    for table, column in added.items():
+        assert column.name == "volunteer_id"
+        assert column.nullable is True
+    # Оба индекса под фильтр «мои» по volunteer_id (columns — list, потому мапой, не set).
+    indexes = {
+        c.args[0]: (c.args[1], c.args[2])
+        for c in fake_op.create_index.call_args_list
+    }
+    assert indexes == {
+        "ix_incidents_volunteer_id": ("incidents", ["volunteer_id"]),
+        "ix_mno_volunteer_id": ("mno", ["volunteer_id"]),
+    }
+
+
+def test_0019_downgrade_drops_indexes_and_columns(monkeypatch):
+    """downgrade(): сносит оба индекса и обе колонки volunteer_id (в обратном порядке)."""
+    m = _load("0019_volunteer_authored.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    dropped_idx = {c.args for c in fake_op.drop_index.call_args_list}
+    assert dropped_idx == {
+        ("ix_mno_volunteer_id",),
+        ("ix_incidents_volunteer_id",),
+    }
+    # table_name передан именованным аргументом.
+    for call in fake_op.drop_index.call_args_list:
+        assert call.kwargs["table_name"] in ("mno", "incidents")
+    dropped_col = {c.args for c in fake_op.drop_column.call_args_list}
+    assert dropped_col == {("mno", "volunteer_id"), ("incidents", "volunteer_id")}

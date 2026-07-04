@@ -12,6 +12,9 @@ from .core.errors import AppError, InvalidCredentialsError, UserInactiveError
 from .models import User, Volunteer
 
 oauth2_scheme = HTTPBearer()
+# Опциональная схема: без заголовка Authorization → token=None (НЕ 403), для
+# публичных эндпоинтов, где авторизация волонтёра необязательна (см. get_optional_volunteer).
+oauth2_scheme_optional = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -94,6 +97,51 @@ async def get_current_actor(
         return vol
 
     raise InvalidCredentialsError()
+
+
+async def get_optional_volunteer(
+    token=Depends(oauth2_scheme_optional),
+    session: AsyncSession = Depends(get_db),
+) -> "Volunteer | None":
+    """ОПЦИОНАЛЬНАЯ авторизация волонтёра для публичных POST /intake/form и /intake/mno.
+
+    Эндпоинты остаются публичными (аноним — штатный путь). Если пришёл валидный
+    логин-токен волонтёра (typ=="volunteer", волонтёр существует и активен) — возвращаем
+    его, чтобы застолбить авторство (volunteer_id). Во ВСЕХ прочих случаях (нет
+    заголовка → token is None, битый токен, не волонтёрский токен, несуществующий/
+    заблокированный волонтёр) → None. НИКОГДА не бросает исключение.
+
+    НЕ пишет last_seen_at и НЕ коммитит (только чтение): преждевременный commit внутри
+    публичного POST зафиксировал бы недописанную транзакцию приёма. Зеркалит декод
+    get_current_volunteer, но без исключений и без записи.
+    """
+    if token is None:
+        return None
+    try:
+        payload = decode_token(token.credentials)
+    except ValueError:
+        return None
+
+    if payload.get("typ") != "volunteer":
+        return None
+
+    vol_id = payload.get("sub")
+    if vol_id is None:
+        return None
+    try:
+        vol_uuid = UUID(vol_id)
+    except (ValueError, TypeError):
+        return None
+
+    result = await session.execute(
+        select(Volunteer).where(Volunteer.id == vol_uuid)
+    )
+    volunteer = result.scalar_one_or_none()
+
+    if volunteer is None or not volunteer.is_active:
+        return None
+
+    return volunteer
 
 
 async def get_current_volunteer(

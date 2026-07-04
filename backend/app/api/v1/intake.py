@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config import settings
 from ...core.errors import AppError, ForbiddenError, NotFoundError, ValidationError
 from ...database import get_db
+from ...deps import get_optional_volunteer
+from ...models import Volunteer
 from ...schemas.incident import (
     MarkNotified,
     MarkNotifiedResult,
@@ -194,6 +196,7 @@ async def mno_points(
 @router.post("/mno", tags=["Отправка фотоотчёта"])
 async def create_volunteer_mno(
     session: AsyncSession = Depends(get_db),
+    volunteer: Volunteer | None = Depends(get_optional_volunteer),
     address: str = Form(""),
     coords: str = Form(""),
     name: str = Form(""),
@@ -211,6 +214,9 @@ async def create_volunteer_mno(
     приложение кладёт id в mno_id отчёта. Тело — multipart (а не JSON), т.к. несёт файлы
     фото. Пустые address/coords → 400 VALIDATION_ERROR; невалидное фото (тип/размер/>3) →
     400 (обе проверки в сервисе, до записи).
+
+    Авторство: если пришёл валидный volunteer-токен (get_optional_volunteer) — пишем
+    volunteer_id (МНО попадёт в «Мои МНО» приложения); нет/битый токен → аноним (NULL).
     """
     if website.strip():
         logger.info("intake public mno honeypot triggered — dropping submission")
@@ -223,7 +229,12 @@ async def create_volunteer_mno(
         city=city,
         comment=comment,
     )
-    mno = await mno_service.create_mno_from_volunteer(session, data, photo_files=photos)
+    mno = await mno_service.create_mno_from_volunteer(
+        session,
+        data,
+        photo_files=photos,
+        volunteer_id=(volunteer.id if volunteer else None),
+    )
     await session.commit()
     return mno
 
@@ -231,6 +242,7 @@ async def create_volunteer_mno(
 @router.post("/form", tags=["Отправка фотоотчёта"])
 async def public_form(
     session: AsyncSession = Depends(get_db),
+    volunteer: Volunteer | None = Depends(get_optional_volunteer),
     fio: str = Form(""),
     full_address: str = Form(""),
     region: str = Form(""),
@@ -249,6 +261,10 @@ async def public_form(
     """ПУБЛИЧНО: приём обращения из формы волонтёра (multipart/form-data).
 
     website — honeypot: если заполнен, это бот → отдаём ok, но ничего не создаём.
+
+    Авторство: если пришёл валидный volunteer-токен (get_optional_volunteer) — пишем
+    volunteer_id (отчёт попадёт в «Мои отчёты» приложения); нет/битый токен → аноним
+    (NULL), веб-форма остаётся анонимной.
     """
     if website.strip():
         logger.info("intake public form honeypot triggered — dropping submission")
@@ -269,6 +285,7 @@ async def public_form(
         photo_time=photo_time,
         bins=bins,
         photo_files=photos,
+        volunteer_id=(volunteer.id if volunteer else None),
     )
     await session.commit()
     # Цитату генерируем ПОСЛЕ commit — медленный/упавший CLI не блокирует запись.

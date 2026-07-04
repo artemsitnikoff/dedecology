@@ -65,3 +65,10 @@ class Mno(Base, TimestampMixin):
     # Список URL фото добавленного волонтёром МНО (/api/v1/intake/mno-photo/{id}/{i}.jpg).
     # Только для волонтёрских МНО; у ФГИС/ручных МНО пусто (миграция 0018).
     photo_urls: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # Кто добавил это МНО из мобильного приложения (Volunteer.id). Проставляется
+    # опциональным volunteer-токеном на публичном POST /intake/mno. БЕЗ жёсткого FK
+    # (мягкая привязка, как incidents.volunteer_id) — по ней GET /volunteer/mno
+    # фильтрует «мои МНО». NULL — ФГИС/ручные/старые МНО (историю не привязываем).
+    volunteer_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )

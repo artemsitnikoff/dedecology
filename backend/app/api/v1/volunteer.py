@@ -17,6 +17,11 @@ from ...database import get_db
 from ...deps import get_current_volunteer
 from ...models import Volunteer
 from ...core.security import create_volunteer_access_token
+from ...schemas.base import Paginated
+from ...schemas.incident import IncidentListItem
+from ...schemas.mno import MnoDetail
+from ...services import incident as incident_service
+from ...services import mno as mno_service
 from ...schemas.volunteer import (
     OkResponse,
     VolunteerLogin,
@@ -182,3 +187,42 @@ async def onboarding(
 async def me(current_volunteer: Volunteer = Depends(get_current_volunteer)):
     """Профиль текущего волонтёра."""
     return VolunteerProfile.model_validate(current_volunteer)
+
+
+@router.get("/reports", response_model=Paginated[IncidentListItem], tags=[_TAG])
+async def my_reports(
+    page: int = 1,
+    page_size: int = 50,
+    session: AsyncSession = Depends(get_db),
+    current_volunteer: Volunteer = Depends(get_current_volunteer),
+):
+    """Мои отчёты: инциденты, созданные этим волонтёром из приложения, со статусом.
+
+    Свежие первыми (created_at DESC). Только «мои» (Incident.volunteer_id == id
+    волонтёра) — аноним/веб/Макс/старые сюда не попадают. Пагинация: page ≥ 1,
+    page_size в [1..200].
+    """
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
+    return await incident_service.list_by_volunteer(
+        session, current_volunteer.id, page=page, page_size=page_size
+    )
+
+
+@router.get("/mno", response_model=Paginated[MnoDetail], tags=[_TAG])
+async def my_mno(
+    page: int = 1,
+    page_size: int = 50,
+    session: AsyncSession = Depends(get_db),
+    current_volunteer: Volunteer = Depends(get_current_volunteer),
+):
+    """Мои МНО: площадки, добавленные этим волонтёром из приложения.
+
+    Свежие первыми (created_at DESC). Только «мои» (Mno.volunteer_id == id волонтёра) —
+    ФГИС/ручные/старые сюда не попадают. Пагинация: page ≥ 1, page_size в [1..200].
+    """
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
+    return await mno_service.list_by_volunteer(
+        session, current_volunteer.id, page=page, page_size=page_size
+    )

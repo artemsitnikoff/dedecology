@@ -491,6 +491,99 @@ async def test_get_current_volunteer_updates_stale_last_seen():
 
 
 # =========================================================================
+# Таб «Отчёты»: GET /volunteer/reports и /volunteer/mno (get_current_volunteer)
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_my_reports_requires_auth(client):
+    """GET /volunteer/reports без токена → требует авторизацию (HTTPBearer 401/403)."""
+    resp = await client.get("/api/v1/volunteer/reports")
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_my_mno_requires_auth(client):
+    """GET /volunteer/mno без токена → требует авторизацию."""
+    resp = await client.get("/api/v1/volunteer/mno")
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_my_reports_returns_paginated_for_volunteer(client):
+    """GET /volunteer/reports (авторизован) → 200 Paginated; сервис зовётся с id волонтёра."""
+    from app.schemas.base import Paginated
+    from app.schemas.incident import IncidentListItem
+
+    vol = _volunteer()
+    app.dependency_overrides[get_current_volunteer] = lambda: vol
+    page = Paginated[IncidentListItem](items=[], total=0, page=1, page_size=50, pages=0)
+    spy = AsyncMock(return_value=page)
+    try:
+        with patch(
+            "app.api.v1.volunteer.incident_service.list_by_volunteer", new=spy
+        ):
+            resp = await client.get("/api/v1/volunteer/reports")
+    finally:
+        app.dependency_overrides.pop(get_current_volunteer, None)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 0
+    assert body["items"] == []
+    # Фильтрация именно по id ЭТОГО волонтёра (2-й позиционный аргумент — current_volunteer.id).
+    spy.assert_awaited_once()
+    assert spy.call_args.args[1] == vol.id
+
+
+@pytest.mark.asyncio
+async def test_my_mno_returns_paginated_for_volunteer(client):
+    """GET /volunteer/mno (авторизован) → 200 Paginated[MnoDetail]; сервис зовётся с id волонтёра."""
+    from app.schemas.base import Paginated
+    from app.schemas.mno import MnoDetail
+
+    vol = _volunteer()
+    app.dependency_overrides[get_current_volunteer] = lambda: vol
+    page = Paginated[MnoDetail](items=[], total=0, page=1, page_size=50, pages=0)
+    spy = AsyncMock(return_value=page)
+    try:
+        with patch("app.api.v1.volunteer.mno_service.list_by_volunteer", new=spy):
+            resp = await client.get("/api/v1/volunteer/mno")
+    finally:
+        app.dependency_overrides.pop(get_current_volunteer, None)
+
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+    spy.assert_awaited_once()
+    assert spy.call_args.args[1] == vol.id
+
+
+@pytest.mark.asyncio
+async def test_my_reports_clamps_pagination(client):
+    """page < 1 → 1, page_size > 200 → 200 (защита от перебора)."""
+    from app.schemas.base import Paginated
+    from app.schemas.incident import IncidentListItem
+
+    vol = _volunteer()
+    app.dependency_overrides[get_current_volunteer] = lambda: vol
+    page = Paginated[IncidentListItem](items=[], total=0, page=1, page_size=200, pages=0)
+    spy = AsyncMock(return_value=page)
+    try:
+        with patch(
+            "app.api.v1.volunteer.incident_service.list_by_volunteer", new=spy
+        ):
+            resp = await client.get(
+                "/api/v1/volunteer/reports?page=0&page_size=9999"
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_volunteer, None)
+
+    assert resp.status_code == 200
+    assert spy.call_args.kwargs["page"] == 1
+    assert spy.call_args.kwargs["page_size"] == 200
+
+
+# =========================================================================
 # Админ-справочник /volunteers (require_admin)
 # =========================================================================
 
