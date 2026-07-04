@@ -931,6 +931,44 @@
 .de-mno-drawer-body {
   padding: 20px 24px;
 }
+/* Strip фото волонтёрского МНО (thumb-превью в начале тела карточки) — зеркалит incident-strip */
+.de-mno-drawer-photos {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: 20px;
+}
+.de-mno-drawer-photo {
+  flex: 1;
+  height: 148px;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border-1);
+  cursor: zoom-in;
+  background: var(--ark-gray-200);
+  position: relative;
+}
+/* одиночное фото НЕ растягиваем на всю ширину карточки (220×156) */
+.de-mno-drawer-photos.single .de-mno-drawer-photo {
+  flex: 0 0 220px;
+  max-width: 220px;
+  height: 156px;
+}
+.de-mno-drawer-photo-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+.de-mno-drawer-photo-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  background: rgba(15, 22, 32, 0.62);
+  color: var(--ark-white);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+}
 .de-mno-minimap {
   position: relative;
   height: 132px;
@@ -1181,6 +1219,89 @@
 .de-mno-modal-submit:disabled {
   opacity: 0.65;
   cursor: default;
+}
+
+/* ---------- Лайтбокс фото МНО (полноэкранный просмотр, свои классы .de-mno-lb*) ---------- */
+.de-mno-lb {
+  position: fixed;
+  inset: 0;
+  z-index: 100; /* выше drawer(70) и модалки(90) */
+  background: rgba(15, 22, 32, 0.84);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: deFade 0.14s ease;
+}
+.de-mno-lb-close {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--ark-white);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.de-mno-lb-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--ark-white);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.de-mno-lb-nav.left {
+  left: 24px;
+}
+.de-mno-lb-nav.right {
+  right: 24px;
+}
+.de-mno-lb-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 86vw;
+}
+.de-mno-lb-img {
+  width: 86vw;
+  max-width: 1080px;
+  height: 72vh;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: var(--radius-lg);
+}
+.de-mno-lb-caption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--ark-white);
+}
+.de-mno-lb-addr {
+  font-size: var(--fs-13);
+  opacity: 0.85;
+  text-align: center;
+}
+.de-mno-lb-counter {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-12);
+  background: rgba(255, 255, 255, 0.15);
+  padding: 2px 9px;
+  border-radius: 999px;
 }
 
 /* пульс-сердце (загрузка карточки) */

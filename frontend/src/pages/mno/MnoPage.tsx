@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate } from '@/lib/format';
+import { thumbUrl } from '@/lib/photo';
 import { useMno, useMnoDetail, useMnoPoints } from '@/api/hooks/mno';
 import type { MnoFilters, MnoSortKey, SortOrder } from '@/api/hooks/mno';
 import { useRegionsDirectory } from '@/api/hooks/regions';
@@ -640,8 +641,13 @@ type DrawerProps = {
 };
 function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: DrawerProps) {
   const { data, isLoading, isError } = useMnoDetail(id);
+  // Фото есть только у волонтёрских МНО; у ФГИС/ручных photo_urls пустой → strip/лайтбокс не рендерятся.
+  const photos = data?.photo_urls ?? [];
+  // Индекс открытого в лайтбоксе фото (null — лайтбокс закрыт).
+  const [lbIdx, setLbIdx] = useState<number | null>(null);
 
   return (
+    <>
     <div className="de-mno-drawer">
       {isLoading ? (
         <div className="de-mno-drawer-loading">
@@ -690,6 +696,21 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
           </div>
 
           <div className="de-mno-drawer-body">
+            {/* Фото волонтёрского МНО — strip превью (thumb, быстро); клик открывает лайтбокс с FULL. */}
+            {photos.length > 0 && (
+              <div className={`de-mno-drawer-photos ${photos.length === 1 ? 'single' : ''}`}>
+                {photos.map((src, i) => (
+                  <div key={i} className="de-mno-drawer-photo" onClick={() => setLbIdx(i)}>
+                    <div
+                      className="de-mno-drawer-photo-img"
+                      style={{ backgroundImage: `url("${thumbUrl(src)}")` }}
+                    />
+                    <span className="de-mno-drawer-photo-label">Фото {i + 1}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="de-mno-minimap">
               <div className="de-mno-minimap-pin">
                 <Pin size={30} />
@@ -719,6 +740,10 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
                         : 'Добавлено вручную',
                   ],
                   ['Обращений по МНО', String(data.incidents)],
+                  // Комментарий — только у волонтёрских МНО и только если непуст (ФГИС/ручные не засоряем «—»).
+                  ...(data.comment && data.comment.trim()
+                    ? [['Комментарий', data.comment.trim()]]
+                    : []),
                 ] as Array<[string, string]>
               ).map(([k, v]) => (
                 <div key={k} className="de-mno-field">
@@ -754,6 +779,90 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
             </div>
           </div>
         </div>
+      )}
+    </div>
+
+    {/* Лайтбокс фото МНО — поверх drawer (position:fixed, вне анимированного контейнера).
+        Клик по фону/крестику закрывает; при >1 фото — стрелки листают по кругу. */}
+    {lbIdx !== null && photos.length > 0 && (
+      <MnoLightbox
+        srcs={photos}
+        idx={lbIdx}
+        title={data?.name ?? ''}
+        onClose={() => setLbIdx(null)}
+        onPrev={() => setLbIdx((v) => (v === null ? v : (v - 1 + photos.length) % photos.length))}
+        onNext={() => setLbIdx((v) => (v === null ? v : (v + 1) % photos.length))}
+      />
+    )}
+    </>
+  );
+}
+
+/* ---------- Лайтбокс фото МНО (self-contained, не тащим Incident-Lightbox) ---------- */
+type MnoLightboxProps = {
+  /** Полные URL фото (FULL, не thumb). */
+  srcs: string[];
+  /** Текущий индекс. */
+  idx: number;
+  /** Подпись под фото — наименование МНО. */
+  title: string;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+};
+/**
+ * Полноэкранный просмотр фото волонтёрского МНО. Стрелки ◀ ▶ и моно-счётчик «i / N» —
+ * только при >1 фото. Клик по фону / ✕ закрывает.
+ */
+function MnoLightbox({ srcs, idx, title, onClose, onPrev, onNext }: MnoLightboxProps) {
+  if (srcs.length === 0) return null;
+  const i = Math.max(0, Math.min(idx, srcs.length - 1));
+  const many = srcs.length > 1;
+
+  return (
+    <div className="de-mno-lb" onClick={onClose}>
+      <button type="button" className="de-mno-lb-close" aria-label="Закрыть" onClick={onClose}>
+        <Icon name="x" size={22} />
+      </button>
+
+      {many && (
+        <button
+          type="button"
+          className="de-mno-lb-nav left"
+          aria-label="Предыдущее фото"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPrev();
+          }}
+        >
+          <Icon name="chevron-left" size={26} />
+        </button>
+      )}
+
+      <div className="de-mno-lb-stage" onClick={(e) => e.stopPropagation()}>
+        <div className="de-mno-lb-img" style={{ backgroundImage: `url("${srcs[i]}")` }} />
+        <div className="de-mno-lb-caption">
+          {title && <span className="de-mno-lb-addr">{title}</span>}
+          {many && (
+            <span className="de-mno-lb-counter">
+              {i + 1} / {srcs.length}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {many && (
+        <button
+          type="button"
+          className="de-mno-lb-nav right"
+          aria-label="Следующее фото"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNext();
+          }}
+        >
+          <Icon name="chevron-right" size={26} />
+        </button>
       )}
     </div>
   );

@@ -622,6 +622,31 @@ async def test_create_mno_from_volunteer_truncates_overlong_fields():
     assert len(created.coords) == 64
 
 
+@pytest.mark.asyncio
+async def test_create_mno_from_volunteer_comment_truncated_and_none():
+    """comment: >500 обрезается до 500 и отдаётся в карточке; пустой/пробельный → NULL."""
+    # Длинный комментарий → обрезка до 500.
+    session, added = _volunteer_session()
+    detail = await mno_service.create_mno_from_volunteer(
+        session,
+        MnoVolunteerCreate(address="ул. Ленина, 1", coords="53.2, 50.6", comment="к" * 600),
+    )
+    created = next(o for o in added if isinstance(o, Mno))
+    assert len(created.comment) == 500
+    assert detail.comment == created.comment
+    assert detail.photo_urls == []  # без фото — пустой список
+
+    # Пробельный комментарий → NULL (не пустая строка).
+    session2, added2 = _volunteer_session()
+    detail2 = await mno_service.create_mno_from_volunteer(
+        session2,
+        MnoVolunteerCreate(address="ул. Ленина, 1", coords="53.2, 50.6", comment="   "),
+    )
+    created2 = next(o for o in added2 if isinstance(o, Mno))
+    assert created2.comment is None
+    assert detail2.comment is None
+
+
 # --- Живой счётчик обращений (incidents = COUNT инцидентов по mno_id) -----------
 
 

@@ -12,7 +12,9 @@ import pytest
 from PIL import Image
 
 from app.config import settings
-from app.models import Incident
+from app.models import Incident, Mno
+from app.schemas.mno import MnoVolunteerCreate
+from app.services import mno as mno_service
 from app.services.intake import (
     create_incident_from_form,
     create_incident_from_max,
@@ -521,7 +523,7 @@ def _volunteer_detail(**kw):
 
 @pytest.mark.asyncio
 async def test_public_mno_creates_volunteer(client):
-    """POST /intake/mno публичный (БЕЗ токена) → 200; сервис вызван, ответ source='volunteer'."""
+    """POST /intake/mno публичный, multipart (БЕЗ токена) → 200; сервис вызван, source='volunteer'."""
     created = _volunteer_detail()
     spy = AsyncMock(return_value=created)
     with patch(
@@ -529,7 +531,7 @@ async def test_public_mno_creates_volunteer(client):
     ):
         resp = await client.post(
             "/api/v1/intake/mno",
-            json={
+            data={
                 "name": "Площадка волонтёра",
                 "region_code": "63",
                 "city": "г. Самара",
@@ -543,11 +545,37 @@ async def test_public_mno_creates_volunteer(client):
     assert body["synced"] is False
     assert body["fgis_id"] is None
     assert body["id"] == str(created.id)
-    # Тело передано в сервис как MnoVolunteerCreate.
+    # Тело передано в сервис как MnoVolunteerCreate (2-й позиционный аргумент).
     spy.assert_awaited_once()
     payload = spy.call_args.args[1]
     assert payload.address == "ул. Ленина, 1"
     assert payload.coords == "53.2, 50.6"
+
+
+@pytest.mark.asyncio
+async def test_public_mno_passes_comment_and_photos(client):
+    """multipart с comment + файлом фото → сервис получает comment и photo_files."""
+    created = _volunteer_detail(comment="бак переполнен")
+    spy = AsyncMock(return_value=created)
+    with patch(
+        "app.api.v1.intake.mno_service.create_mno_from_volunteer", new=spy
+    ):
+        resp = await client.post(
+            "/api/v1/intake/mno",
+            data={
+                "address": "ул. Ленина, 1",
+                "coords": "53.2, 50.6",
+                "comment": "бак переполнен",
+            },
+            files=[("photos", ("0.jpg", BytesIO(_FAKE_IMG), "image/jpeg"))],
+        )
+    assert resp.status_code == 200
+    assert resp.json()["comment"] == "бак переполнен"
+    spy.assert_awaited_once()
+    # comment пробрасывается в модель, фото — отдельным kwarg photo_files.
+    assert spy.call_args.args[1].comment == "бак переполнен"
+    photo_files = spy.call_args.kwargs["photo_files"]
+    assert len(photo_files) == 1
 
 
 @pytest.mark.asyncio
@@ -559,7 +587,7 @@ async def test_public_mno_honeypot_drops(client):
     ):
         resp = await client.post(
             "/api/v1/intake/mno",
-            json={
+            data={
                 "address": "ул. Ленина, 1",
                 "coords": "53.2, 50.6",
                 "website": "http://spam.example",
@@ -574,10 +602,72 @@ async def test_public_mno_honeypot_drops(client):
 async def test_public_mno_requires_address_and_coords(client):
     """Пустые address/coords → 400 VALIDATION_ERROR (реальный сервис, до записи в БД)."""
     resp = await client.post(
-        "/api/v1/intake/mno", json={"address": "", "coords": ""}
+        "/api/v1/intake/mno", data={"address": "", "coords": ""}
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def _mno_volunteer_session():
+    """Fake session для сервис-теста МНО: add копит, flush присваивает Mno.id, execute → регионы."""
+    added: list = []
+    session = AsyncMock()
+    session.add = MagicMock(side_effect=added.append)
+
+    async def _flush():
+        for o in added:
+            if isinstance(o, Mno) and getattr(o, "id", None) is None:
+                o.id = uuid4()
+
+    session.flush = AsyncMock(side_effect=_flush)
+    names_res = MagicMock()
+    names_res.all.return_value = [("63", "Самарская область")]
+    session.execute = AsyncMock(return_value=names_res)
+    return session, added
+
+
+@pytest.mark.asyncio
+async def test_volunteer_mno_stores_photos_and_comment(monkeypatch, tmp_path):
+    """Сервис: фото волонтёрского МНО сохраняются в {STORAGE_DIR}/mno/{id}/ (FULL+THUMB),
+    photo_urls указывают на /mno-photo/, comment проброшен в карточку."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    session, added = _mno_volunteer_session()
+    data = MnoVolunteerCreate(
+        address="ул. Ленина, 1", coords="53.2, 50.6", comment="переполнен бак"
+    )
+    detail = await mno_service.create_mno_from_volunteer(
+        session,
+        data,
+        photo_files=[_FakeUpload(_jpeg_bytes(), filename="orig.png", content_type="image/png")],
+    )
+
+    created = next(o for o in added if isinstance(o, Mno))
+    mno_dir = tmp_path / "mno" / str(created.id)
+    assert (mno_dir / "0.jpg").is_file()
+    assert (mno_dir / "0_thumb.jpg").is_file()
+    assert detail.photo_urls == [f"/api/v1/intake/mno-photo/{created.id}/0.jpg"]
+    assert detail.comment == "переполнен бак"
+
+
+@pytest.mark.asyncio
+async def test_mno_photo_route_serves_and_antitraversal(client, monkeypatch, tmp_path):
+    """GET /intake/mno-photo/{id}/{file}: отдаёт JPEG; битый filename / не-UUID → 404."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    mid = str(uuid4())
+    mno_dir = tmp_path / "mno" / mid
+    mno_dir.mkdir(parents=True)
+    (mno_dir / "0.jpg").write_bytes(_jpeg_bytes())
+
+    ok = await client.get(f"/api/v1/intake/mno-photo/{mid}/0.jpg")
+    assert ok.status_code == 200
+    assert ok.headers["content-type"] == "image/jpeg"
+    assert ok.headers["x-content-type-options"] == "nosniff"
+    # битый filename (не по паттерну) → 404
+    bad = await client.get(f"/api/v1/intake/mno-photo/{mid}/evil.txt")
+    assert bad.status_code == 404
+    # не-UUID mno_id → 404
+    notuuid = await client.get("/api/v1/intake/mno-photo/not-a-uuid/0.jpg")
+    assert notuuid.status_code == 404
 
 
 # --------------------------------------------------------------------------- #

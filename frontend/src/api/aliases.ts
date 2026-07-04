@@ -282,8 +282,13 @@ export interface MnoListItem {
   incidents: number;
 }
 
-/** Деталь МНО (GET /mno/{id}) — те же поля, что и в списке. */
-export type MnoDetail = MnoListItem;
+/** Деталь МНО (GET /mno/{id}) — поля списка + (для волонтёрских МНО) комментарий и фото. */
+export interface MnoDetail extends MnoListItem {
+  /** Комментарий волонтёра; null/пусто — у ФГИС/ручных МНО. */
+  comment: string | null;
+  /** URL фото волонтёрского МНО (`/api/v1/intake/mno-photo/<uuid>/<n>.jpg`); пусто — фото нет. */
+  photo_urls: string[];
+}
 
 /** Лёгкая точка МНО для карты (GET /mno/points) — только id + координаты + название. */
 export interface MnoPoint {

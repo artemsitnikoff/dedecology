@@ -30,8 +30,14 @@ class MnoListItem(ORMBase):
 
 
 class MnoDetail(MnoListItem):
-    """Карточка МНО — те же поля, что и в списке (контракт)."""
-    pass
+    """Карточка МНО: поля списка + комментарий и фото (только у волонтёрских МНО).
+
+    comment/photo_urls есть лишь у МНО, добавленных волонтёром на публичной форме
+    (POST /intake/mno). У синхронизированных из ФГИС / ручных МНО — comment=None,
+    photo_urls=[] (список реестра остаётся лёгким — MnoListItem их не несёт).
+    """
+    comment: Optional[str] = None
+    photo_urls: list[str] = []
 
 
 class MnoCreate(BaseModel):
@@ -53,14 +59,16 @@ class MnoVolunteerCreate(BaseModel):
     Обязательны address + coords — но проверка НЕ через min_length (это дало бы 422),
     а в сервисе: пустые → ValidationError → 400 VALIDATION_ERROR (по контракту приёма).
     website — honeypot (у людей всегда пусто). name/region_code/city — необязательны.
-    source='volunteer', synced=false, fgis_id=null, reg='', incidents=0 проставляются
-    сервисом — НЕ из тела.
+    comment — необязательный комментарий волонтёра (сервис обрезает до 500). Фото приходят
+    отдельными файлами в multipart-эндпоинте (НЕ в этой модели). source='volunteer',
+    synced=false, fgis_id=null, reg='', incidents=0 проставляются сервисом — НЕ из тела.
     """
     address: str = ""
     coords: str = ""
     name: str = ""
     region_code: str = ""
     city: str = ""
+    comment: str = ""
     website: str = ""  # honeypot — у людей всегда пусто
 
 

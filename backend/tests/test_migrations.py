@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0017():
-    """Цепочка ревизий консистентна: ровно один head, и это 0017 (0017→0016→…)."""
+def test_migration_chain_single_head_is_0018():
+    """Цепочка ревизий консистентна: ровно один head, и это 0018 (0018→0017→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0017"}
+    assert heads == {"0018"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -109,3 +109,38 @@ def test_0017_downgrade_drops_source(monkeypatch):
     m.downgrade()
 
     fake_op.drop_column.assert_called_once_with("mno", "source")
+
+
+def test_0018_revision_identifiers():
+    m = _load("0018_mno_comment_photos.py")
+    assert m.revision == "0018"
+    assert m.down_revision == "0017"
+
+
+def test_0018_upgrade_adds_comment_and_photo_urls(monkeypatch):
+    """upgrade(): add_column mno.comment (Text, NULLABLE) + mno.photo_urls (JSONB, NOT NULL)."""
+    m = _load("0018_mno_comment_photos.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    assert fake_op.add_column.call_count == 2
+    cols = {c.args[1].name: c.args[1] for c in fake_op.add_column.call_args_list}
+    assert set(cols) == {"comment", "photo_urls"}
+    assert cols["comment"].nullable is True
+    assert cols["photo_urls"].nullable is False
+    # server_default '[]'::jsonb — существующие МНО бэкфиллятся пустым списком фото.
+    assert "[]" in str(cols["photo_urls"].server_default.arg)
+
+
+def test_0018_downgrade_drops_comment_and_photo_urls(monkeypatch):
+    """downgrade(): drop_column mno.photo_urls + mno.comment."""
+    m = _load("0018_mno_comment_photos.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    dropped = {c.args for c in fake_op.drop_column.call_args_list}
+    assert dropped == {("mno", "photo_urls"), ("mno", "comment")}

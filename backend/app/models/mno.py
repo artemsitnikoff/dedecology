@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import String, Boolean, Float, Integer, Text, text
-from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID, JSONB, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin
@@ -59,3 +59,9 @@ class Mno(Base, TimestampMixin):
     # Число обращений по МНО — СИДОВОЕ/хранимое значение (точная привязка по координатам —
     # прод-TODO; здесь НЕ вычисляется на лету, чтобы не выдумывать несуществующую логику).
     incidents: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    # Комментарий волонтёра к добавленному МНО (≤500 символов). Только для волонтёрских
+    # МНО (POST /intake/mno); у ФГИС/ручных МНО остаётся NULL (миграция 0018).
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Список URL фото добавленного волонтёром МНО (/api/v1/intake/mno-photo/{id}/{i}.jpg).
+    # Только для волонтёрских МНО; у ФГИС/ручных МНО пусто (миграция 0018).
+    photo_urls: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))

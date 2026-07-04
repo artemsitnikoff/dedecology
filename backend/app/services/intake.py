@@ -530,34 +530,49 @@ async def _decode_uploads(photo_files: list) -> list[Image.Image]:
     return decoded
 
 
-def _store_decoded(incident_id, decoded: list[Image.Image]) -> tuple[list[str], int]:
-    """Сохраняет уже декодированные фото в {STORAGE_DIR}/incidents/{id}/.
+def _store_photos(
+    dest_dir: Path, url_prefix: str, decoded: list[Image.Image]
+) -> tuple[list[str], int]:
+    """Сохраняет уже декодированные фото в dest_dir → (photo_urls, count).
 
-    Каждое фото пере-кодируется в JPEG: FULL `{i}.jpg` (просмотр) + THUMB
-    `{i}_thumb.jpg` (превью). Возвращает (photo_urls, count). При сбое записи
-    частично созданный каталог удаляется (не оставляем мусор на диске).
+    Обобщённый конвейер записи (общий для инцидентов и волонтёрских МНО). Каждое
+    фото пере-кодируется в JPEG: FULL `{i}.jpg` (просмотр) + THUMB `{i}_thumb.jpg`
+    (превью); url каждого фото = `{url_prefix}/{i}.jpg`. При сбое записи частично
+    созданный каталог удаляется (не оставляем мусор на диске).
     """
     if not decoded:
         return [], 0
 
     photo_urls: list[str] = []
-    incident_dir = _incidents_dir() / str(incident_id)
     try:
-        incident_dir.mkdir(parents=True, exist_ok=True)
+        dest_dir.mkdir(parents=True, exist_ok=True)
         for i, img in enumerate(decoded):
-            _save_variant(img, incident_dir / f"{i}.jpg", _FULL_MAX_SIDE, _FULL_QUALITY)
+            _save_variant(img, dest_dir / f"{i}.jpg", _FULL_MAX_SIDE, _FULL_QUALITY)
             _save_variant(
                 img,
-                incident_dir / f"{i}_thumb.jpg",
+                dest_dir / f"{i}_thumb.jpg",
                 _THUMB_MAX_SIDE,
                 _THUMB_QUALITY,
             )
-            photo_urls.append(f"/api/v1/intake/photo/{incident_id}/{i}.jpg")
+            photo_urls.append(f"{url_prefix}/{i}.jpg")
     except Exception:
-        shutil.rmtree(incident_dir, ignore_errors=True)
+        shutil.rmtree(dest_dir, ignore_errors=True)
         raise
 
     return photo_urls, len(photo_urls)
+
+
+def _store_decoded(incident_id, decoded: list[Image.Image]) -> tuple[list[str], int]:
+    """Сохраняет уже декодированные фото инцидента в {STORAGE_DIR}/incidents/{id}/.
+
+    Тонкая обёртка над _store_photos: каталог инцидента + префикс URL инцидента.
+    Итоговые URL — `/api/v1/intake/photo/{id}/{i}.jpg` (контракт не изменился).
+    """
+    return _store_photos(
+        _incidents_dir() / str(incident_id),
+        f"/api/v1/intake/photo/{incident_id}",
+        decoded,
+    )
 
 
 async def _process_photos(incident_id, photo_files: list) -> tuple[list[str], int]:
@@ -567,6 +582,26 @@ async def _process_photos(incident_id, photo_files: list) -> tuple[list[str], in
     """
     decoded = await _decode_uploads(photo_files)
     return _store_decoded(incident_id, decoded)
+
+
+def _mno_dir() -> Path:
+    """Базовый каталог хранения фото волонтёрских МНО: {STORAGE_DIR}/mno."""
+    return Path(settings.STORAGE_DIR) / "mno"
+
+
+async def process_mno_photos(mno_id, photo_files: list) -> tuple[list[str], int]:
+    """Валидация/декод + сохранение фото волонтёрского МНО → (photo_urls, count).
+
+    Зеркалит конвейер фото инцидентов: те же лимиты (тип/размер/≤3 шт.) и
+    пере-кодирование в JPEG. Кладёт в {STORAGE_DIR}/mno/{mno_id}/, url каждого фото =
+    /api/v1/intake/mno-photo/{mno_id}/{i}.jpg. Невалидное фото → ValidationError (400).
+    """
+    decoded = await _decode_uploads(photo_files)
+    return _store_photos(
+        _mno_dir() / str(mno_id),
+        f"/api/v1/intake/mno-photo/{mno_id}",
+        decoded,
+    )
 
 
 async def create_incident_from_public_form(

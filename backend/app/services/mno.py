@@ -28,6 +28,10 @@ from ..schemas.mno import (
 )
 from .audit import audit
 from .geo import parse_bbox, parse_latlon
+# Конвейер фото волонтёрского МНО (валидация/декод/ресайз/запись на диск) — общий
+# с фото инцидентов. Импорт на уровне модуля безопасен: services/intake.py НЕ
+# импортирует services/mno.py, цикла нет.
+from .intake import process_mno_photos
 
 # Максимум точек, отдаваемых карте за КАДР (bbox) или глобально (карта не грузит весь реестр).
 MAX_POINTS = 2000
@@ -351,7 +355,10 @@ async def get_mno(session: AsyncSession, mno_id: uuid.UUID) -> MnoDetail:
     region_names = await _region_names(session)
     counts = await _incident_counts(session, [mno.id])
     item = _to_list_item(mno, region_names, counts.get(mno.id, 0))
-    return MnoDetail(**item.model_dump())
+    # comment/photo_urls есть только у волонтёрских МНО; у ФГИС/ручных — NULL/[].
+    return MnoDetail(
+        **item.model_dump(), comment=mno.comment, photo_urls=mno.photo_urls or []
+    )
 
 
 async def create_mno(
@@ -410,7 +417,7 @@ async def create_mno(
 
 
 async def create_mno_from_volunteer(
-    session: AsyncSession, data: MnoVolunteerCreate
+    session: AsyncSession, data: MnoVolunteerCreate, photo_files: list | None = None
 ) -> MnoDetail:
     """Создаёт МНО, добавленное волонтёром на ПУБЛИЧНОЙ форме (source='volunteer').
 
@@ -423,9 +430,12 @@ async def create_mno_from_volunteer(
     address и coords ОБЯЗАТЕЛЬНЫ: пустые → ValidationError (400 VALIDATION_ERROR).
     Мусорные coords → lat/lon=None (parse_latlon не бросает — точка просто не на карте).
     Тексты подрезаются под ширину колонок (публичный ввод не должен ронять INSERT):
-    name[:500], city[:255], region_code[:8], coords[:64]; address — TEXT, не режем.
-    Аудит — системный (actor_type='system': действующего пользователя нет). flush()
-    здесь, commit() — в роутере.
+    name[:500], city[:255], region_code[:8], coords[:64], comment[:500]; address —
+    TEXT, не режем. photo_files (необязательны) — фото нового МНО: валидируются и
+    сохраняются в {STORAGE_DIR}/mno/{id}/ (как у инцидентов), url'ы → mno.photo_urls;
+    невалидное фото (тип/размер/>3) → ValidationError (400) ДО commit. comment/photo_urls
+    есть только у волонтёрских МНО (у ФГИС/ручных — NULL/[]). Аудит — системный
+    (actor_type='system': действующего пользователя нет). flush() здесь, commit() — в роутере.
     """
     address = (data.address or "").strip()
     coords = (data.coords or "").strip()
@@ -435,6 +445,8 @@ async def create_mno_from_volunteer(
             details={"address": bool(address), "coords": bool(coords)},
         )
     coords = coords[:64]
+    # Комментарий волонтёра (необязателен) — стрипнутый, ≤500 символов; пусто → NULL.
+    comment_value = (data.comment or "").strip()[:500] or None
     # Числовые lat/lon для bbox-фильтра карты (NULL, если coords невалидны — не бросаем).
     lat, lon = parse_latlon(coords)
     mno = Mno(
@@ -447,13 +459,21 @@ async def create_mno_from_volunteer(
         coords=coords,
         lat=lat,
         lon=lon,
+        comment=comment_value,
         fgis_id=None,
         synced=False,
         sync_date=None,
         incidents=0,
     )
     session.add(mno)
-    await session.flush()
+    await session.flush()  # → mno.id
+    # Фото волонтёрского МНО (после flush — нужен mno.id): валидация/ресайз/запись на
+    # диск, url'ы → mno.photo_urls. Невалидное фото → ValidationError (400) до commit.
+    if photo_files:
+        photo_urls, _count = await process_mno_photos(mno.id, photo_files)
+        if photo_urls:
+            mno.photo_urls = photo_urls
+            await session.flush()
     await audit(
         session,
         action="create",
@@ -465,13 +485,17 @@ async def create_mno_from_volunteer(
             "coords": mno.coords,
             "source": mno.source,
             "synced": mno.synced,
+            "photos": len(mno.photo_urls or []),
         },
         actor_user_id=None,
         actor_type="system",
     )
     region_names = await _region_names(session)
     item = _to_list_item(mno, region_names)
-    return MnoDetail(**item.model_dump())
+    # comment/photo_urls есть только у волонтёрских МНО — отдаём их в карточке.
+    return MnoDetail(
+        **item.model_dump(), comment=mno.comment, photo_urls=(mno.photo_urls or [])
+    )
 
 
 def _stub_fgis_id() -> str:

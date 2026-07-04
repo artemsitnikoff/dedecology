@@ -1,14 +1,14 @@
 /**
- * Хелперы для работы с URL фотографий инцидентов.
+ * Хелперы для работы с URL фотографий intake (инциденты и волонтёрские МНО).
  *
  * Бэкенд отдаёт два варианта картинки по одному ресурсу:
- *   FULL  → /api/v1/intake/photo/<uuid>/<n>.jpg
- *   THUMB → /api/v1/intake/photo/<uuid>/<n>_thumb.jpg
+ *   FULL  → /api/v1/intake/photo|mno-photo/<uuid>/<n>.jpg
+ *   THUMB → /api/v1/intake/photo|mno-photo/<uuid>/<n>_thumb.jpg
  * Админка грузит THUMB для списков/превью (быстро), а FULL — в лайтбоксе.
  */
 
-/** Матчит ресурс фото intake: .../photo/<uuid>/<n>.jpg (без _thumb). */
-const INTAKE_PHOTO = /(\/api\/v1\/intake\/photo\/[0-9a-f-]+\/\d+)\.jpg$/i;
+/** Матчит ресурс фото intake: .../photo/ или .../mno-photo/<uuid>/<n>.jpg (без _thumb). */
+const INTAKE_PHOTO = /(\/api\/v1\/intake\/(?:mno-)?photo\/[0-9a-f-]+\/\d+)\.jpg$/i;
 
 /**
  * Возвращает URL уменьшенной версии (thumb) для intake-фото.

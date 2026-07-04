@@ -193,20 +193,37 @@ async def mno_points(
 
 @router.post("/mno", tags=["Отправка фотоотчёта"])
 async def create_volunteer_mno(
-    payload: MnoVolunteerCreate,
     session: AsyncSession = Depends(get_db),
+    address: str = Form(""),
+    coords: str = Form(""),
+    name: str = Form(""),
+    region_code: str = Form(""),
+    city: str = Form(""),
+    comment: str = Form(""),
+    website: str = Form(""),  # honeypot — у людей всегда пусто
+    photos: list[UploadFile] = File(default=[]),
 ):
-    """ПУБЛИЧНО: волонтёр добавляет МНО, если нужного нет на карте (source='volunteer').
+    """ПУБЛИЧНО: волонтёр добавляет МНО (multipart/form-data), если нужного нет на карте.
 
-    В ряду с /intake/form — без auth, honeypot website. Заполненный website → бот →
-    отдаём ok, ничего не создаём. Иначе создаём МНО (source='volunteer', synced=False,
-    fgis_id=None) и возвращаем его карточку (MnoDetail) — приложение кладёт id в mno_id
-    отчёта. Пустые address/coords → 400 VALIDATION_ERROR (проверка в сервисе).
+    В ряду с /intake/form — без auth, honeypot website (заполнен → бот → ok, ничего не
+    создаём). Иначе создаём МНО (source='volunteer', synced=False, fgis_id=None) с
+    необязательными комментарием (≤500) и фото, возвращаем карточку (MnoDetail) —
+    приложение кладёт id в mno_id отчёта. Тело — multipart (а не JSON), т.к. несёт файлы
+    фото. Пустые address/coords → 400 VALIDATION_ERROR; невалидное фото (тип/размер/>3) →
+    400 (обе проверки в сервисе, до записи).
     """
-    if payload.website.strip():
+    if website.strip():
         logger.info("intake public mno honeypot triggered — dropping submission")
         return {"ok": True}
-    mno = await mno_service.create_mno_from_volunteer(session, payload)
+    data = MnoVolunteerCreate(
+        address=address,
+        coords=coords,
+        name=name,
+        region_code=region_code,
+        city=city,
+        comment=comment,
+    )
+    mno = await mno_service.create_mno_from_volunteer(session, data, photo_files=photos)
     await session.commit()
     return mno
 
@@ -357,6 +374,38 @@ async def get_photo(incident_id: str, filename: str):
 
     base_dir = (Path(settings.STORAGE_DIR) / "incidents").resolve()
     path = (base_dir / incident_id / filename).resolve()
+    if base_dir not in path.parents:
+        raise NotFoundError("Фото")
+    if not path.is_file():
+        raise NotFoundError("Фото")
+
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+        },
+    )
+
+
+@router.get("/mno-photo/{mno_id}/{filename}", tags=["Загрузка фото"])
+async def get_mno_photo(mno_id: str, filename: str):
+    """ПУБЛИЧНО: отдаёт байты фото волонтёрского МНО. Жёсткий анти-traversal.
+
+    Зеркалит get_photo (фото инцидентов), но каталог — {STORAGE_DIR}/mno/{mno_id}/.
+    mno_id обязан быть UUID, filename — `^[0-9]+(_thumb)?\\.jpg$` (FULL `{i}.jpg` или
+    THUMB `{i}_thumb.jpg`), итоговый путь обязан остаться внутри каталога mno.
+    """
+    try:
+        uuid.UUID(mno_id)
+    except (ValueError, AttributeError, TypeError):
+        raise NotFoundError("Фото")
+    if not _PHOTO_FILENAME_RE.match(filename):
+        raise NotFoundError("Фото")
+
+    base_dir = (Path(settings.STORAGE_DIR) / "mno").resolve()
+    path = (base_dir / mno_id / filename).resolve()
     if base_dir not in path.parents:
         raise NotFoundError("Фото")
     if not path.is_file():
