@@ -1046,6 +1046,92 @@ async def test_public_service_derives_address_when_empty(fake_session):
 
 
 @pytest.mark.asyncio
+async def test_public_service_backfills_address_from_mno(fake_session):
+    """Выбран mno_id, адрес пуст → регион/город/адрес/координаты/mno_reg берутся из МНО.
+
+    Мобильное приложение шлёт только mno_id (адрес живёт на площадке) — отчёт не должен
+    остаться с пустыми region/city/street/coords (иначе «Мои отчёты» без адреса)."""
+    mid = uuid4()
+    mno = Mno(
+        reg="63-04-001162",
+        name="Контейнерная площадка",
+        region_code="63",
+        city="г. Самара",
+        address="ул. Ленина, 1",
+        coords="53.2, 50.6",
+    )
+    mno.id = mid
+    # 1-й execute → сам МНО (select Mno); 2-й → имя региона по region_code (select Region.name).
+    res_mno = MagicMock()
+    res_mno.scalar_one_or_none.return_value = mno
+    res_region = MagicMock()
+    res_region.scalar_one_or_none.return_value = "Самарская область"
+    fake_session.execute = AsyncMock(side_effect=[res_mno, res_region])
+    fake_session.add = MagicMock()
+
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="",
+        full_address="",
+        region="",
+        city="",
+        street="",
+        coords="",
+        photo_time="",
+        bins="",
+        photo_files=[],
+        mno_id=str(mid),
+    )
+    assert incident.mno_id == mid
+    assert incident.region == "Самарская область"
+    assert incident.city == "г. Самара"
+    assert incident.street == "ул. Ленина, 1"
+    assert incident.coords == "53.2, 50.6"
+    assert incident.mno_reg == "63-04-001162"
+    # координаты МНО распарсились в числовые lat/lon (bbox-фильтр карты).
+    assert incident.lat == 53.2 and incident.lon == 50.6
+
+
+@pytest.mark.asyncio
+async def test_public_service_mno_does_not_override_explicit_address(fake_session):
+    """Явный адрес с формы приоритетнее МНО; но пустой mno_reg подтягивается из МНО."""
+    mid = uuid4()
+    mno = Mno(
+        reg="63-04-777",
+        name="П",
+        region_code="63",
+        city="МНО-город",
+        address="МНО-адрес",
+        coords="1, 1",
+    )
+    mno.id = mid
+    res_mno = MagicMock()
+    res_mno.scalar_one_or_none.return_value = mno
+    fake_session.execute = AsyncMock(return_value=res_mno)
+    fake_session.add = MagicMock()
+
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="",
+        full_address="",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Мира, 5",
+        coords="53.1, 50.2",
+        photo_time="",
+        bins="",
+        photo_files=[],
+        mno_id=str(mid),  # mno_reg НЕ передан → None → подтянется из МНО
+    )
+    # Явные адресные поля НЕ перекрыты значениями МНО.
+    assert incident.city == "г. Самара"
+    assert incident.street == "ул. Мира, 5"
+    assert incident.coords == "53.1, 50.2"
+    # Пустой mno_reg заполнен из МНО.
+    assert incident.mno_reg == "63-04-777"
+
+
+@pytest.mark.asyncio
 async def test_public_service_resizes_full_and_thumb(fake_session, tmp_path, monkeypatch):
     """Валидное фото → принято и пере-кодировано: на диске FULL `{i}.jpg` + THUMB
     `{i}_thumb.jpg` (оба JPEG); thumb ≤400px и меньше full. Расширение всегда .jpg."""

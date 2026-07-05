@@ -15,11 +15,12 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..core.errors import ValidationError
-from ..models import Incident
+from ..models import Incident, Mno, Region
 from .addr_norm import normalize_city, normalize_region
 from .audit import audit
 from .dadata import clean_address, geocode_address
@@ -664,6 +665,35 @@ async def create_incident_from_public_form(
             mno_id_value = uuid.UUID(mno_id_clean)
         except (ValueError, AttributeError, TypeError):
             mno_id_value = None
+
+    # Если волонтёр выбрал МНО (mno_id), но адресные поля пусты — подтягиваем адрес из самой
+    # площадки: регион/город/адрес/координаты живут на МНО, мобильное приложение шлёт только
+    # mno_id. Так у отчёта в «Мои отчёты» и в админке появляется адрес, а не пустота. Заполняем
+    # ТОЛЬКО пустые поля (явный ввод веб-формы имеет приоритет); mno_reg берём из МНО, если не
+    # задан. МНО грузим лишь когда есть что заполнять (веб-форма обычно шлёт всё явно).
+    if mno_id_value is not None and (
+        not region or not city or not street or not coords or mno_reg_value is None
+    ):
+        mno = (
+            await session.execute(select(Mno).where(Mno.id == mno_id_value))
+        ).scalar_one_or_none()
+        if mno is not None:
+            if not coords:
+                coords = _clean_str(mno.coords)
+            if not city:
+                city = _clean_str(mno.city)
+            if not street:
+                street = _clean_str(mno.address)
+            if not region and _clean_str(mno.region_code):
+                region_name = (
+                    await session.execute(
+                        select(Region.name).where(Region.code == mno.region_code)
+                    )
+                ).scalar_one_or_none()
+                if region_name:
+                    region = region_name
+            if mno_reg_value is None and _clean_str(mno.reg):
+                mno_reg_value = _clean_str(mno.reg)[:64]
 
     if not (region or city or street):
         region, city, street = _parse_address(full_address)
