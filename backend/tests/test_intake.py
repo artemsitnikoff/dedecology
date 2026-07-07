@@ -2384,7 +2384,7 @@ def _mno_point(lat, lon, name="П", **kw):
 async def test_nearest_mno_orders_filters_and_returns_fields():
     """nearest_mno: сортировка по расстоянию, отсев далёких (>30 км) и без координат."""
     center_lat, center_lon = 55.75, 37.62
-    near = _mno_point(55.751, 37.621, name="near")
+    near = _mno_point(55.751, 37.621, name="near", reg="78-06-002210")
     mid = _mno_point(55.76, 37.63, name="mid")
     far_in = _mno_point(55.80, 37.70, name="far_in")  # ~7 км — в радиусе
     far_out = _mno_point(56.20, 38.50, name="far_out")  # >30 км — отброшен
@@ -2407,6 +2407,8 @@ async def test_nearest_mno_orders_filters_and_returns_fields():
     # поля площадки проброшены; id — строка
     first = res[0]
     assert first["name"] == "near"
+    # реестровый № площадки проброшен (бот показывает его в списке кандидатов)
+    assert first["reg"] == "78-06-002210"
     assert first["lat"] == 55.751 and first["lon"] == 37.621
     assert isinstance(first["id"], str)
     assert {"address", "city", "coords"} <= set(first.keys())

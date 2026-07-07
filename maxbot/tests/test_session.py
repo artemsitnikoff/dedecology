@@ -62,13 +62,18 @@ def test_decode_payload_rejects_garbage():
 # --- button_text truncation ----------------------------------------------
 
 
-def test_button_text_short_untouched():
-    assert button_text(1, "МНО-1", "ул. Ленина, 5") == "1. МНО-1 — ул. Ленина, 5"
+def test_button_text_prefers_reg():
+    # реестровый № приоритетнее названия
+    assert button_text(1, "78-06-002210", "МНО-1") == "1. 78-06-002210"
+
+
+def test_button_text_name_when_no_reg():
+    assert button_text(1, "", "МНО-1") == "1. МНО-1"
 
 
 def test_button_text_truncated():
-    long_name = "Очень длинное название площадки накопления твёрдых коммунальных отходов"
-    txt = button_text(2, long_name, "проспект Мира, дом 100, корпус 3")
+    long_reg = "Очень длинное название площадки накопления твёрдых коммунальных отходов"
+    txt = button_text(2, long_reg)
     assert len(txt) <= BUTTON_MAX
     assert txt.endswith("…")
     assert txt.startswith("2. ")

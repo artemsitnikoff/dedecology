@@ -615,6 +615,9 @@ async def nearest_mno(
         out.append(
             {
                 "id": str(m.id),
+                # Реестровый № МНО в ФГИС/УТКО (напр. «78-06-002210») — бот показывает
+                # его в списке кандидатов; пусто у ручных МНО без рег-номера.
+                "reg": m.reg,
                 "name": m.name,
                 "address": m.address,
                 "city": m.city,

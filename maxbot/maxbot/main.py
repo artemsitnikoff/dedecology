@@ -37,7 +37,7 @@ async def main() -> None:
     except Exception as exc:  # noqa: BLE001 — non-fatal; log and keep going
         logger.warning("delete_webhook failed: %s", exc)
 
-    logger.info("MAX bot polling started — build 0.4.0 (mno-select)")
+    logger.info("MAX bot polling started — build 0.4.1 (mno-select ux)")
     try:
         # Уведомления-карточки в группу ОТКЛЮЧЕНЫ (по требованию): бот отвечает прямо
         # в чате, где пришло сообщение (личка/группа), а обращения с формы видны

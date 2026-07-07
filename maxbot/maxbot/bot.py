@@ -14,6 +14,7 @@ loop never dies.
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 import time
@@ -25,6 +26,7 @@ from maxapi import Bot, Router
 from maxapi.client.default import DefaultConnectionProperties
 from maxapi.enums.attachment import AttachmentType
 from maxapi.enums.intent import Intent
+from maxapi.enums.parse_mode import ParseMode
 from maxapi.types import (
     CallbackButton,
     CommandStart,
@@ -132,6 +134,7 @@ _ADDR_UNRESOLVED = (
 # Callback-ответы (кнопки).
 _CB_EXPIRED = "Сессия истекла. Пришлите, пожалуйста, фото площадки заново."
 _CB_ALREADY = "Это обращение уже отправлено."
+_CB_PROCESSING = "Секунду, отправляю обращение…"
 _CB_BAD_CHOICE = "Не удалось распознать выбор. Пришлите фото заново."
 _CB_FINALIZE_FAIL = "Не удалось отправить обращение. Попробуйте ещё раз."
 
@@ -263,13 +266,24 @@ def _quote_of(result) -> str:
 
 
 def _candidate_line(i: int, c: dict) -> str:
-    """Строка нумерованного списка кандидатов: «i. Название — адрес (420 м)»."""
-    name = (c.get("name") or "").strip() or "Без названия"
+    """Строка нумерованного списка кандидатов (HTML-разметка).
+
+    Жирным — «i. <реестровый №>» (напр. «1. 78-06-002210»), дальше НЕ жирным адрес и
+    расстояние. Нет реестрового № → жирным «i.» + название. Динамику (reg/имя/адрес)
+    экранируем — идёт с parse_mode=HTML."""
+    reg = (c.get("reg") or "").strip()
+    name = (c.get("name") or "").strip()
     addr = (c.get("address") or "").strip()
     dist = human_distance(c.get("distance_m"))
-    line = f"{i}. {name}"
+    bold = f"{i}. {html.escape(reg)}" if reg else f"{i}."
+    line = f"<b>{bold}</b>"
+    tail: list[str] = []
+    if not reg and name:
+        tail.append(html.escape(name))
     if addr:
-        line += f" — {addr}"
+        tail.append(html.escape(addr))
+    if tail:
+        line += " — " + ", ".join(tail)
     if dist:
         line += f" ({dist})"
     return line
@@ -285,7 +299,7 @@ def _build_keyboard(pending_id: str, candidates: list[dict]):
     for idx, c in enumerate(candidates):
         b.row(
             CallbackButton(
-                text=button_text(idx + 1, c.get("name", ""), c.get("address", "")),
+                text=button_text(idx + 1, c.get("reg", ""), c.get("name", "")),
                 payload=encode_payload(pending_id, idx),
                 intent=Intent.DEFAULT,
             )
@@ -329,7 +343,10 @@ async def _send_report_prompt(
         if png:
             attachments.append(InputMediaBuffer(buffer=png, filename="map.png"))
         attachments.append(markup)
-        await msg.answer(text=text, attachments=attachments)
+        # parse_mode=HTML — жирные номера/реестровые № в списке (_candidate_line).
+        await msg.answer(
+            text=text, attachments=attachments, parse_mode=ParseMode.HTML
+        )
     else:
         # Кандидатов нет — карту не рисуем, только предложение отправить без привязки.
         await msg.answer(text=_NO_MNO_NEARBY, attachments=[markup])
@@ -564,8 +581,11 @@ def build_router() -> Router:
     async def on_callback(event: MessageCallback) -> None:
         """Тап по инлайн-кнопке выбора МНО → finalize обращения.
 
-        ИДЕМПОТЕНТНО: event.answer ПЕРЕ-шлёт исходные вложения (кнопки остаются
-        на месте), поэтому повторный тап по уже отправленному → просто тост.
+        После успеха УБИРАЕМ клавиатуру (edit_message без attachments → кнопки+карта
+        снимаются, остаётся текст-подтверждение) — иначе кнопки «висят» и непонятно,
+        нажал или нет. Против двойного создания при частых тапах — синхронный флаг
+        report.processing (ставим ДО await finalize). Повторный тап по уже
+        отправленному/обрабатываемому → только тост, второго обращения не будет.
         """
         try:
             decoded = decode_payload(event.callback.payload or "")
@@ -582,42 +602,80 @@ def build_router() -> Router:
             if report.finalized:
                 await _notify_callback(event, _CB_ALREADY)
                 return
+            if report.processing:
+                # Уже отправляем это обращение (частые тапы) — не создаём второе.
+                await _notify_callback(event, _CB_PROCESSING)
+                return
 
             # Определяем выбранную площадку (idx==NO_MNO → без привязки).
             if idx == NO_MNO:
                 mno_id = ""
-                mno_name = ""
+                mno_label = ""
             else:
                 if not isinstance(idx, int) or idx >= len(report.candidates):
                     await _notify_callback(event, _CB_BAD_CHOICE)
                     return
                 cand = report.candidates[idx]
                 mno_id = str(cand.get("id") or "")
-                mno_name = (cand.get("name") or "").strip()
+                # Подпись выбранной площадки — реестровый № (или название), как в списке.
+                mno_label = (cand.get("reg") or "").strip() or (
+                    cand.get("name") or ""
+                ).strip()
 
+            # Замок ДО первого await — второй одновременный тап увидит processing=True.
+            report.processing = True
             try:
                 result = await _finalize(report, mno_id)
             except IntakeError:
-                # НЕ помечаем finalized — пользователь может повторить тап.
+                # Снимаем замок — пользователь может повторить тап (обращение НЕ создано).
+                report.processing = False
                 await _notify_callback(event, _CB_FINALIZE_FAIL)
                 return
 
             report.finalized = True
+            report.processing = False
             report.photos = []  # освободить память (байты фото уже отправлены)
             _STORE.put(report)
 
-            lines = ["✅ Спасибо! Обращение принято."]
-            if mno_name:
-                lines.append(f"Площадка: {mno_name}")
+            # Подтверждение (HTML): жирная площадка + цитата.
+            parts = ["✅ Спасибо! Обращение принято."]
+            if mno_label:
+                parts.append(f"Площадка: <b>{html.escape(mno_label)}</b>")
             elif idx == NO_MNO:
-                lines.append("Отправлено без привязки к площадке.")
+                parts.append("Отправлено без привязки к площадке.")
             quote = _quote_of(result)
             if quote:
-                lines.append("")
-                lines.append(quote)
-            # event.answer перепишет текст сообщения на подтверждение и оставит
-            # исходные вложения (карту/кнопки). notification — короткий тост.
-            await event.answer(new_text="\n".join(lines), notification="Принято")
+                parts.append("")
+                parts.append(html.escape(quote))
+            confirmation = "\n".join(parts)
+
+            # 1) Подтвердить callback — тост + погасить «загрузку» на нажатой кнопке.
+            await _notify_callback(event, "Принято ✅")
+            # 2) Убрать клавиатуру: edit_message без attachments шлёт attachments=[]
+            #    (см. исходник maxapi 0.9.4 EditMessage) → кнопки и карта снимаются.
+            bot = getattr(event, "bot", None)
+            body = getattr(getattr(event, "message", None), "body", None)
+            mid = getattr(body, "mid", None)
+            edited = False
+            if bot is not None and mid:
+                try:
+                    await bot.edit_message(
+                        message_id=mid, text=confirmation, parse_mode=ParseMode.HTML
+                    )
+                    edited = True
+                except Exception:  # noqa: BLE001 — не вышло отредактировать → фолбэк ниже
+                    logger.exception(
+                        "edit_message (снять клавиатуру) не удалось mid=%s", mid
+                    )
+            if not edited:
+                # Фолбэк: отдельным сообщением (кнопки могут остаться, но обращение уже
+                # создано и finalized — повторный тап получит «уже отправлено»).
+                try:
+                    await event.message.answer(
+                        text=confirmation, parse_mode=ParseMode.HTML
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("confirm fallback answer не удалось")
 
         except Exception:  # noqa: BLE001 — poller must never die on one bad callback
             logger.exception("unexpected error handling callback")

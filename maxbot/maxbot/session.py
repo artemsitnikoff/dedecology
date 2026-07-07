@@ -82,13 +82,15 @@ def _truncate(s: str, limit: int) -> str:
     return s[: max(0, limit - 1)].rstrip() + "…"
 
 
-def button_text(i: int, name: str, address: str = "") -> str:
-    """Подпись кнопки кандидата: «i. Название — адрес», обрезанная до BUTTON_MAX."""
+def button_text(i: int, reg: str = "", name: str = "") -> str:
+    """Подпись кнопки кандидата: «i. <реестровый № или название>», обрезка до BUTTON_MAX.
+
+    Реестровый № (reg, напр. «78-06-002210») приоритетнее — короткий и однозначно
+    идентифицирует площадку; нет reg → название; нет и его → «Без названия». Адрес в
+    кнопку НЕ кладём (он есть в нумерованном списке рядом) — иначе кнопка разрастается."""
+    reg = (reg or "").strip()
     name = (name or "").strip()
-    address = (address or "").strip()
-    label = name or "Без названия"
-    if address:
-        label = f"{label} — {address}"
+    label = reg or name or "Без названия"
     return _truncate(f"{i}. {label}", BUTTON_MAX)
 
 
@@ -148,6 +150,10 @@ class PendingReport:
     candidates: list[dict] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     finalized: bool = False
+    # Идёт finalize по этому обращению (между тапом кнопки и ответом бэка). Синхронный
+    # флаг-замок против ДВОЙНОГО создания при частых тапах («тыкаешь 5 раз»): ставится
+    # до await finalize, снимается при ошибке (можно повторить) или заменяется finalized.
+    processing: bool = False
     # Ждём от пользователя адрес текстом (координаты не распознались из подписи).
     awaiting_address: bool = False
 
