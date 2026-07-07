@@ -1,4 +1,5 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate } from '@/lib/format';
@@ -65,8 +66,9 @@ type RowProps = {
   r: RegionListItem;
   active: boolean;
   onOpen: (code: string) => void;
+  onIncidents: (name: string) => void;
 };
-const RegionRow = memo(function RegionRow({ r, active, onOpen }: RowProps) {
+const RegionRow = memo(function RegionRow({ r, active, onOpen, onIncidents }: RowProps) {
   const more = r.operators.length > 1;
   return (
     <div className={`de-reg-row ${active ? 'active' : ''}`} onClick={() => onOpen(r.code)}>
@@ -83,7 +85,22 @@ const RegionRow = memo(function RegionRow({ r, active, onOpen }: RowProps) {
         {more && <span className="de-reg-ops-more">+{r.operators.length - 1}</span>}
       </div>
       <div className="de-reg-cell de-reg-c-mno">{r.mno_count}</div>
-      <div className="de-reg-cell de-reg-c-inc">{r.incidents_count}</div>
+      {/* Обращений >0 → ссылка на список обращений этого региона (фильтр по имени
+          региона, как в дропдауне /incidents). 0 — без ссылки, приглушённый ноль. */}
+      <div className="de-reg-cell de-reg-c-inc" onClick={(e) => e.stopPropagation()}>
+        {r.incidents_count > 0 ? (
+          <button
+            type="button"
+            className="de-reg-inc-link"
+            title="Показать обращения по этому региону"
+            onClick={() => onIncidents(r.name)}
+          >
+            {r.incidents_count}
+          </button>
+        ) : (
+          <span className="de-reg-inc-zero">0</span>
+        )}
+      </div>
       <div className="de-reg-c-status">
         <span className={`de-reg-pill ${r.active ? 'on' : 'off'}`}>
           <span
@@ -110,6 +127,15 @@ export function RegionsPage() {
   const [addOpen, setAddOpen] = useState(false);
 
   const { message, showToast } = useToast();
+  const navigate = useNavigate();
+
+  // Клик по счётчику обращений региона → список инцидентов, отфильтрованный по этому
+  // региону. Инциденты фильтруются по ТЕКСТУ региона (Incident.region == имя), и
+  // incidents_count в справочнике считается по тому же имени — значения консистентны.
+  const openIncidentsForRegion = useCallback(
+    (name: string) => navigate(`/incidents?region=${encodeURIComponent(name)}`),
+    [navigate]
+  );
 
   const regionsQuery = useRegionsDirectory({});
   const districtsQuery = useFederalDistricts();
@@ -245,7 +271,13 @@ export function RegionsPage() {
               })}
             </div>
             {filtered.map((r) => (
-              <RegionRow key={r.code} r={r} active={detailCode === r.code} onOpen={setDetailCode} />
+              <RegionRow
+                key={r.code}
+                r={r}
+                active={detailCode === r.code}
+                onOpen={setDetailCode}
+                onIncidents={openIncidentsForRegion}
+              />
             ))}
           </div>
         )}

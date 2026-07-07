@@ -316,6 +316,28 @@
   font-size: var(--fs-13);
   color: var(--fg-2);
 }
+/* Счётчик обращений >0 — кликабельная ссылка на список обращений региона. */
+.de-reg-inc-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--de-brand);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  transition: text-decoration-color var(--dur-fast) var(--ease-out);
+}
+.de-reg-inc-link:hover {
+  text-decoration-color: currentColor;
+}
+/* Ноль обращений — приглушённый, без ссылки. */
+.de-reg-inc-zero {
+  color: var(--fg-4);
+}
 .de-reg-c-status {
   width: 160px;
   padding: 8px 12px;
