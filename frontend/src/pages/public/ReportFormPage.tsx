@@ -237,6 +237,10 @@ export default function ReportFormPage() {
       setSubmitError('Пожалуйста, укажите заявителя.');
       return;
     }
+    if (!mnoId.trim()) {
+      setSubmitError('Пожалуйста, выберите МНО на карте.');
+      return;
+    }
     if (!incidentType) {
       setSubmitError('Пожалуйста, выберите тип инцидента.');
       return;
@@ -276,7 +280,8 @@ export default function ReportFormPage() {
       fd.append('city', city.trim());
       fd.append('street', street.trim());
       fd.append('coords', coords.trim());
-      // Рег-номер + UUID выбранного МНО (необязательные; пусто → бэк трактует как «не выбрано»).
+      // Рег-номер + UUID выбранного МНО. На форме выбор МНО обязателен (проверка выше),
+      // поэтому mno_id здесь всегда непуст; бэк по-прежнему принимает пустое от др. клиентов.
       fd.append('mno_reg', mnoReg.trim());
       fd.append('mno_id', mnoId.trim());
       fd.append('photo_time', photoTime || '');
@@ -340,8 +345,12 @@ export default function ReportFormPage() {
                 />
               </label>
 
-              {/* Выбор МНО на карте (перед регионом): подставляет регион+город+улицу+координаты+рег-номер */}
+              {/* Выбор МНО на карте (перед регионом): подставляет регион+город+улицу+координаты+рег-номер.
+                  Обязателен — форма не отправится, пока площадка не выбрана. */}
               <div className="de-rf-field">
+                <span className="de-rf-label">
+                  МНО (место накопления отходов) <span className="de-rf-req">*</span>
+                </span>
                 <button type="button" className="de-rf-mno-btn" onClick={openPicker}>
                   <span aria-hidden>📍</span> Выбрать МНО на карте
                 </button>
