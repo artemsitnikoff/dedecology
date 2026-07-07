@@ -171,11 +171,13 @@ async def finalize_max(
     msg_url: str,
     mno_id: str,
     photo_bytes_list: list[bytes],
+    incident_type: str = "",
 ) -> dict:
     """Создать обращение (source='max') из уже разобранных полей + выбранного МНО.
 
     POST {api_base}/intake/max/finalize (multipart, X-Intake-Token). AI на
     backend НЕ дёргается повторно. `mno_id=""` → «Нет в списке» (без привязки).
+    `incident_type` — код из справочника (пусто/неизвестный → NULL на бэке).
 
     :raises IntakeError: сеть/таймаут/не-2xx/не-JSON.
     """
@@ -193,6 +195,7 @@ async def finalize_max(
         "sender_name": sender_name or "",
         "msg_url": msg_url or "",
         "mno_id": mno_id or "",
+        "incident_type": incident_type or "",
     }
     files = [
         ("photos", (f"{i}.jpg", photo, "image/jpeg"))
@@ -251,6 +254,34 @@ async def fetch_map(lat: float, lon: float, pts: str) -> bytes | None:
         logger.warning("fetch_map returned empty body url=%s", url)
         return None
     return content
+
+
+async def fetch_incident_types() -> list[dict]:
+    """Справочник типов инцидента [{code,label}] для кнопок выбора (шаг 2 диалога).
+
+    GET {api_base}/intake/incident-types (публичный эндпоинт — тот же, что у формы).
+    При ЛЮБОЙ ошибке / не-2xx / неожиданном формате → [] (бот тогда пропускает шаг
+    выбора типа и создаёт обращение без типа — деградация, не фейл).
+    """
+    url = f"{settings.api_base}/intake/incident-types"
+    try:
+        async with httpx.AsyncClient(timeout=_NOTIFY_TIMEOUT) as client:
+            resp = await client.get(url)
+        resp.raise_for_status()
+        payload = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("fetch_incident_types failed url=%s: %s", url, exc)
+        return []
+    if not isinstance(payload, list):
+        logger.warning("fetch_incident_types: unexpected payload: %r", payload)
+        return []
+    # Оставляем только валидные {code,label}.
+    out = [
+        {"code": str(t.get("code") or ""), "label": str(t.get("label") or "")}
+        for t in payload
+        if isinstance(t, dict) and t.get("code")
+    ]
+    return out
 
 
 async def fetch_pending() -> list[dict]:

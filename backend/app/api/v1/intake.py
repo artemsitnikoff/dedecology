@@ -376,6 +376,7 @@ async def max_finalize(
     sender_name: str = Form(""),
     msg_url: str = Form(""),
     mno_id: str = Form(""),
+    incident_type: str = Form(""),
     photos: list[UploadFile] = File(default=[]),
 ):
     """Вторая фаза приёма из Макс-бота: создаёт Incident(source='max') из разобранных
@@ -399,6 +400,7 @@ async def max_finalize(
         msg_url=msg_url,
         photo_time=photo_time or None,
         photo_files=photos,
+        incident_type=incident_type,
     )
     await session.commit()
     # Цитату генерируем ПОСЛЕ commit — медленный/упавший CLI не блокирует запись.

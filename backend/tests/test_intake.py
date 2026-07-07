@@ -2631,6 +2631,46 @@ async def test_max_selected_garbage_mno_id_is_none(fake_session):
 
 
 @pytest.mark.asyncio
+async def test_max_selected_sets_incident_type(fake_session):
+    """Валидный код типа (code_exists=True) сохраняется; мусор (False) → None."""
+    fake_session.add = MagicMock()
+    with patch("app.services.intake.code_exists", new=AsyncMock(return_value=True)):
+        inc = await create_incident_from_max_selected(
+            fake_session,
+            region="",
+            city="",
+            street="",
+            coords="",
+            comment="",
+            mno_id="",
+            msg_id="m",
+            sender_name="И",
+            msg_url="",
+            photo_time=None,
+            photo_files=[],
+            incident_type="fire",
+        )
+    assert inc.incident_type == "fire"
+    with patch("app.services.intake.code_exists", new=AsyncMock(return_value=False)):
+        inc2 = await create_incident_from_max_selected(
+            fake_session,
+            region="",
+            city="",
+            street="",
+            coords="",
+            comment="",
+            mno_id="",
+            msg_id="m",
+            sender_name="И",
+            msg_url="",
+            photo_time=None,
+            photo_files=[],
+            incident_type="not_a_type",
+        )
+    assert inc2.incident_type is None
+
+
+@pytest.mark.asyncio
 async def test_max_finalize_route_creates_and_quotes(client, monkeypatch):
     """POST /max/finalize (токен + фото) → 200 ok+incident_id+quote; поля проброшены в сервис."""
     monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")

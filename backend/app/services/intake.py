@@ -913,6 +913,7 @@ async def create_incident_from_max_selected(
     msg_url: str,
     photo_time,
     photo_files: list,
+    incident_type: str = "",
     actor_user_id=None,
 ) -> Incident:
     """Создаёт Incident(source='max') из УЖЕ разобранных полей + выбранного МНО.
@@ -934,6 +935,14 @@ async def create_incident_from_max_selected(
     msg = _clean_str(msg_id) or None
     # Готовый https-URL сообщения (личка с ботом обычно пуста → None).
     msg_url_clean = _clean_str(msg_url) or None
+
+    # Тип инцидента: код из редактируемого справочника (таблица incident_types), как в
+    # публичной форме. Неизвестный/пустой код → NULL (мусор не пишем). Бот присылает код,
+    # выбранный кнопкой из GET /intake/incident-types.
+    type_code = _clean_str(incident_type)
+    incident_type_value = (
+        type_code if type_code and await code_exists(session, type_code) else None
+    )
 
     # ССЫЛКА на выбранное МНО (Mno.id) — парсим как UUID: пусто/мусор → NULL (не роняем
     # INSERT). Пусто = «Нет в списке» (обращение без привязки к площадке).
@@ -993,6 +1002,7 @@ async def create_incident_from_max_selected(
         mno_reg=mno_reg_value,
         mno_id=mno_id_value,
         comment=comment_value,
+        incident_type=incident_type_value,
         photo_time=parsed_photo_time,
         photos=0,
         photo_urls=[],

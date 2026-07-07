@@ -15,7 +15,9 @@ from maxbot.session import (
     button_text,
     chat_key,
     decode_payload,
+    decode_type_payload,
     encode_payload,
+    encode_type_payload,
     human_distance,
     map_query,
     merge_parsed,
@@ -57,6 +59,31 @@ def test_decode_payload_rejects_garbage():
     assert decode_payload("m::0") is None  # пустой pid
     assert decode_payload("m:pid:abc") is None  # idx не int и не 'x'
     assert decode_payload("m:pid:-1") is None  # отрицательный индекс
+
+
+# --- type payload (шаг 2: выбор типа инцидента) ----------------------------
+
+
+def test_type_payload_roundtrip():
+    p = encode_type_payload("abc123", "fire")
+    assert decode_type_payload(p) == ("abc123", "fire")
+
+
+def test_type_payload_empty_code_is_skip():
+    p = encode_type_payload("abc123", "")
+    assert decode_type_payload(p) == ("abc123", "")
+
+
+def test_decode_type_payload_rejects_foreign():
+    assert decode_type_payload("m:abc:0") is None  # это МНО-payload, не типовой
+    assert decode_type_payload("garbage") is None
+    assert decode_type_payload("") is None
+
+
+def test_mno_and_type_payloads_do_not_collide():
+    # decode_payload не принимает типовой payload и наоборот
+    assert decode_payload(encode_type_payload("p", "fire")) is None
+    assert decode_type_payload(encode_payload("p", 0)) is None
 
 
 # --- button_text truncation ----------------------------------------------

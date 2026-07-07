@@ -29,6 +29,10 @@ PAYLOAD_PREFIX = "m"
 # Спец-индекс «без привязки к площадке» («Нет в списке» / «Отправить без привязки»).
 NO_MNO = "x"
 
+# Префикс payload для кнопок выбора ТИПА инцидента (шаг 2 диалога): «t:{pid}:{code}»,
+# где code — код из справочника incident_types (пусто = «Пропустить»).
+PAYLOAD_PREFIX_TYPE = "t"
+
 # Максимальная длина текста инлайн-кнопки (в MAX Button.text — 1..64 символа;
 # держим короче для читаемости в узком столбце клавиатуры).
 BUTTON_MAX = 40
@@ -73,6 +77,27 @@ def decode_payload(s: str) -> tuple[str, int | str] | None:
     if idx < 0:
         return None
     return pid, idx
+
+
+def encode_type_payload(pending_id: str, code: str) -> str:
+    """Payload кнопки выбора типа: «t:{pending_id}:{code}». code — код справочника
+    incident_types (пусто = «Пропустить»)."""
+    return f"{PAYLOAD_PREFIX_TYPE}:{pending_id}:{code}"
+
+
+def decode_type_payload(s: str) -> tuple[str, str] | None:
+    """Разобрать payload выбора типа. Вернуть (pending_id, code) либо None, если формат
+    чужой/битый. code может быть пустым («Пропустить»). split с лимитом — код в теории
+    мог бы содержать двоеточие (справочные коды snake_case — нет, но подстраховка)."""
+    if not s:
+        return None
+    parts = s.split(":", 2)
+    if len(parts) != 3 or parts[0] != PAYLOAD_PREFIX_TYPE:
+        return None
+    pid, code = parts[1], parts[2]
+    if not pid:
+        return None
+    return pid, code
 
 
 def _truncate(s: str, limit: int) -> str:
@@ -156,6 +181,12 @@ class PendingReport:
     processing: bool = False
     # Ждём от пользователя адрес текстом (координаты не распознались из подписи).
     awaiting_address: bool = False
+    # Двухшаговый выбор: сначала МНО, затем тип инцидента. Между шагами держим выбранную
+    # площадку (id+подпись) и справочник типов (для подписи выбранного типа в подтверждении).
+    chosen_mno_id: str | None = None
+    chosen_mno_label: str = ""
+    awaiting_type: bool = False
+    incident_types: list = field(default_factory=list)
 
     @property
     def key(self) -> str:

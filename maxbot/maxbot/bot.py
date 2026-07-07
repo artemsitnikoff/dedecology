@@ -40,7 +40,13 @@ from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 
 from .config import settings
 from .errors import AppError, IntakeError
-from .intake_client import fetch_map, finalize_max, prepare_max, push_incident
+from .intake_client import (
+    fetch_incident_types,
+    fetch_map,
+    finalize_max,
+    prepare_max,
+    push_incident,
+)
 from .session import (
     NO_MNO,
     PendingReport,
@@ -48,7 +54,9 @@ from .session import (
     button_text,
     chat_key,
     decode_payload,
+    decode_type_payload,
     encode_payload,
+    encode_type_payload,
     human_distance,
     map_query,
     merge_parsed,
@@ -124,6 +132,11 @@ _HDR_PICK = (
     "Нашёл ближайшие площадки накопления ТКО. Выберите, к какой относится "
     "обращение, либо «Нет в списке»:"
 )
+# Шаг 2 диалога — вопрос о типе инцидента (после выбора площадки).
+_HDR_TYPE = "Площадка выбрана. Теперь выберите тип обращения:"
+_TYPE_SKIP = "Пропустить"
+# Потолок текста кнопки типа (в MAX Button.text ≤ 64; типы бывают длинными).
+_TYPE_BUTTON_MAX = 60
 _NO_MNO_NEARBY = (
     "Рядом (в радиусе 30 км) не нашёл известных площадок ТКО. Можно отправить "
     "обращение без привязки к площадке — инспектор разберётся."
@@ -325,6 +338,49 @@ def _build_keyboard(pending_id: str, candidates: list[dict]):
     return b.as_markup()
 
 
+def _build_type_keyboard(pending_id: str, types: list[dict]):
+    """Инлайн-клавиатура выбора типа инцидента (справочник incident_types) + «Пропустить».
+
+    По кнопке на тип (payload «t:{pid}:{code}», подпись — label, обрезанная до
+    _TYPE_BUTTON_MAX) и кнопка «Пропустить» (payload «t:{pid}:» — пустой код → без типа)."""
+    b = InlineKeyboardBuilder()
+    for t in types:
+        code = str(t.get("code") or "")
+        label = str(t.get("label") or code).strip() or code
+        if not code:
+            continue
+        if len(label) > _TYPE_BUTTON_MAX:
+            label = label[: _TYPE_BUTTON_MAX - 1].rstrip() + "…"
+        b.row(
+            CallbackButton(
+                text=label,
+                payload=encode_type_payload(pending_id, code),
+                intent=Intent.DEFAULT,
+            )
+        )
+    b.row(
+        CallbackButton(
+            text=_TYPE_SKIP,
+            payload=encode_type_payload(pending_id, ""),
+            intent=Intent.NEGATIVE,
+        )
+    )
+    # maxapi 0.9.4: билдер стартует с пустого ряда [[]] — отфильтровать пустые ряды.
+    b.payload = [r for r in b.payload if r]
+    return b.as_markup()
+
+
+def _type_label(types: list[dict], code: str) -> str:
+    """Подпись типа по коду из сохранённого справочника; «» — если код пуст/не найден."""
+    code = (code or "").strip()
+    if not code:
+        return ""
+    for t in types or []:
+        if str(t.get("code") or "") == code:
+            return str(t.get("label") or "").strip()
+    return ""
+
+
 async def _send_report_prompt(
     msg: Message, report: PendingReport, point: tuple[float, float] | None
 ) -> None:
@@ -354,8 +410,8 @@ async def _send_report_prompt(
         await msg.answer(text=_NO_MNO_NEARBY, attachments=[markup])
 
 
-async def _finalize(report: PendingReport, mno_id: str) -> dict:
-    """Создать обращение из полей pending + выбранного МНО (или без него)."""
+async def _finalize(report: PendingReport, mno_id: str, incident_type: str = "") -> dict:
+    """Создать обращение из полей pending + выбранного МНО (или без него) + типа."""
     p = report.parsed
     return await finalize_max(
         region=p.get("region", ""),
@@ -369,6 +425,7 @@ async def _finalize(report: PendingReport, mno_id: str) -> dict:
         msg_url=report.msg_url,
         mno_id=mno_id,
         photo_bytes_list=report.photos,
+        incident_type=incident_type,
     )
 
 
@@ -481,28 +538,81 @@ async def _notify_callback(event: MessageCallback, text: str) -> None:
     await bot.send_callback(callback_id=event.callback.callback_id, notification=text)
 
 
-async def _edit_callback_message(event: MessageCallback, text: str) -> None:
-    """Отредактировать сообщение с кнопками: заменить текст и СНЯТЬ вложения.
+async def _edit_callback_message(event: MessageCallback, text: str, markup=None) -> None:
+    """Отредактировать сообщение с кнопками: заменить текст и вложения.
 
-    edit_message без attachments отправляет `attachments: []` (см. исходник maxapi
-    0.9.4 EditMessage) → клавиатура и карта убираются. Зовём СРАЗУ по тапу, чтобы
-    кнопки не оставались жать до ответа бэка. Бот/mid недоступны или edit не прошёл →
-    фолбэк отдельным сообщением (кнопки в этом случае могут остаться)."""
+    markup=None → attachments НЕ передаём, edit_message шлёт `attachments: []` (см.
+    исходник maxapi 0.9.4 EditMessage) → клавиатура и карта УБИРАЮТСЯ. markup задан →
+    ставим новую клавиатуру (шаг 2: вопрос о типе). Зовём сразу по тапу, чтобы кнопки
+    не оставались жать до ответа бэка. Бот/mid недоступны или edit не прошёл → фолбэк
+    отдельным сообщением."""
+    attachments = [markup] if markup is not None else None
     bot = getattr(event, "bot", None)
     body = getattr(getattr(event, "message", None), "body", None)
     mid = getattr(body, "mid", None)
     if bot is not None and mid:
         try:
             await bot.edit_message(
-                message_id=mid, text=text, parse_mode=ParseMode.HTML
+                message_id=mid,
+                text=text,
+                attachments=attachments,
+                parse_mode=ParseMode.HTML,
             )
             return
         except Exception:  # noqa: BLE001 — не вышло отредактировать → фолбэк ниже
             logger.exception("edit_message не удалось mid=%s", mid)
     try:
-        await event.message.answer(text=text, parse_mode=ParseMode.HTML)
+        await event.message.answer(
+            text=text, attachments=attachments, parse_mode=ParseMode.HTML
+        )
     except Exception:  # noqa: BLE001
         logger.exception("edit fallback answer не удалось")
+
+
+async def _do_finalize(
+    event: MessageCallback,
+    report: PendingReport,
+    mno_id: str,
+    incident_type: str,
+    mno_label: str,
+    is_no_mno: bool,
+) -> None:
+    """Финал обоих шагов: замок → «⏳» (снять клавиатуру) → finalize → подтверждение.
+
+    Мгновенно гасит клавиатуру и показывает прогресс (finalize ≈ загрузка фото + цитата),
+    ставит синхронный замок report.processing против двойного создания. Успех → «✅ Спасибо»
+    с площадкой и типом; IntakeError → просьба прислать фото заново (обращение НЕ создано)."""
+    report.processing = True
+    await _notify_callback(event, "Принято ✅")
+    await _edit_callback_message(event, "⏳ Отправляю обращение…")
+    try:
+        result = await _finalize(report, mno_id, incident_type)
+    except IntakeError:
+        report.processing = False
+        await _edit_callback_message(
+            event,
+            "❌ Не удалось отправить. Пришлите, пожалуйста, фото площадки заново.",
+        )
+        return
+
+    report.finalized = True
+    report.processing = False
+    report.photos = []  # освободить память (байты фото уже отправлены)
+    _STORE.put(report)
+
+    parts = ["✅ Спасибо! Обращение принято."]
+    if mno_label:
+        parts.append(f"Площадка: <b>{html.escape(mno_label)}</b>")
+    elif is_no_mno:
+        parts.append("Отправлено без привязки к площадке.")
+    type_label = _type_label(report.incident_types, incident_type)
+    if type_label:
+        parts.append(f"Тип: <b>{html.escape(type_label)}</b>")
+    quote = _quote_of(result)
+    if quote:
+        parts.append("")
+        parts.append(html.escape(quote))
+    await _edit_callback_message(event, "\n".join(parts))
 
 
 def build_router() -> Router:
@@ -605,20 +715,23 @@ def build_router() -> Router:
 
     @router.message_callback()
     async def on_callback(event: MessageCallback) -> None:
-        """Тап по инлайн-кнопке выбора МНО → finalize обращения.
+        """Тап по кнопке. Двухшаговый диалог: шаг 1 — выбор площадки (→ спросить тип),
+        шаг 2 — выбор типа инцидента (→ создать обращение).
 
-        После успеха УБИРАЕМ клавиатуру (edit_message без attachments → кнопки+карта
-        снимаются, остаётся текст-подтверждение) — иначе кнопки «висят» и непонятно,
-        нажал или нет. Против двойного создания при частых тапах — синхронный флаг
-        report.processing (ставим ДО await finalize). Повторный тап по уже
-        отправленному/обрабатываемому → только тост, второго обращения не будет.
+        Клавиатуру после каждого шага меняем/убираем через edit_message (кнопки не
+        «висят»), тост даёт мгновенную обратную связь. Против двойного создания —
+        синхронный замок report.processing в _do_finalize. Повторный тап по уже
+        отправленному/обрабатываемому → только тост.
         """
         try:
-            decoded = decode_payload(event.callback.payload or "")
-            if decoded is None:
+            payload = event.callback.payload or ""
+            mno_dec = decode_payload(payload)  # (pid, idx) — шаг 1
+            # Типовой payload разбираем только если это НЕ МНО-payload.
+            type_dec = decode_type_payload(payload) if mno_dec is None else None
+            if mno_dec is None and type_dec is None:
                 await _notify_callback(event, _CB_BAD_CHOICE)
                 return
-            pid, idx = decoded
+            pid = mno_dec[0] if mno_dec is not None else type_dec[0]
 
             _STORE.purge(time.time())
             report = _STORE.get(pid)
@@ -629,11 +742,20 @@ def build_router() -> Router:
                 await _notify_callback(event, _CB_ALREADY)
                 return
             if report.processing:
-                # Уже отправляем это обращение (частые тапы) — не создаём второе.
                 await _notify_callback(event, _CB_PROCESSING)
                 return
 
-            # Определяем выбранную площадку (idx==NO_MNO → без привязки).
+            # === Шаг 2: выбран тип инцидента → создаём обращение ===
+            if type_dec is not None:
+                _, code = type_dec
+                mno_id = report.chosen_mno_id or ""
+                await _do_finalize(
+                    event, report, mno_id, code, report.chosen_mno_label, mno_id == ""
+                )
+                return
+
+            # === Шаг 1: выбрана площадка → спрашиваем тип инцидента ===
+            idx = mno_dec[1]
             if idx == NO_MNO:
                 mno_id = ""
                 mno_label = ""
@@ -648,43 +770,23 @@ def build_router() -> Router:
                     cand.get("name") or ""
                 ).strip()
 
-            # Замок ДО первого await — второй одновременный тап увидит processing=True.
-            report.processing = True
+            report.chosen_mno_id = mno_id
+            report.chosen_mno_label = mno_label
 
-            # СРАЗУ гасим клавиатуру и показываем прогресс: finalize занимает ≈ загрузку
-            # фото + генерацию цитаты, и всё это время кнопки оставались бы жать (человек
-            # тыкает по 5 раз). Тост «Принято» — мгновенная обратная связь.
-            await _notify_callback(event, "Принято ✅")
-            await _edit_callback_message(event, "⏳ Отправляю обращение…")
-
-            try:
-                result = await _finalize(report, mno_id)
-            except IntakeError:
-                # Обращение НЕ создано — снимаем замок; кнопки уже убраны, поэтому просим
-                # прислать фото заново (повторный тап невозможен).
-                report.processing = False
+            types = await fetch_incident_types()
+            if types:
+                report.incident_types = types
+                report.awaiting_type = True
+                _STORE.put(report)
+                # Меняем сообщение на вопрос о типе + клавиатуру типов (карта/МНО-кнопки уходят).
+                await _notify_callback(event, "Площадка выбрана")
                 await _edit_callback_message(
-                    event,
-                    "❌ Не удалось отправить. Пришлите, пожалуйста, фото площадки заново.",
+                    event, _HDR_TYPE, markup=_build_type_keyboard(pid, types)
                 )
                 return
 
-            report.finalized = True
-            report.processing = False
-            report.photos = []  # освободить память (байты фото уже отправлены)
-            _STORE.put(report)
-
-            # Финальное подтверждение (HTML): жирная площадка + цитата.
-            parts = ["✅ Спасибо! Обращение принято."]
-            if mno_label:
-                parts.append(f"Площадка: <b>{html.escape(mno_label)}</b>")
-            elif idx == NO_MNO:
-                parts.append("Отправлено без привязки к площадке.")
-            quote = _quote_of(result)
-            if quote:
-                parts.append("")
-                parts.append(html.escape(quote))
-            await _edit_callback_message(event, "\n".join(parts))
+            # Справочник типов недоступен → создаём сразу без типа (деградация).
+            await _do_finalize(event, report, mno_id, "", mno_label, idx == NO_MNO)
 
         except Exception:  # noqa: BLE001 — poller must never die on one bad callback
             logger.exception("unexpected error handling callback")
