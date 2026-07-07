@@ -316,27 +316,30 @@
   font-size: var(--fs-13);
   color: var(--fg-2);
 }
-/* Счётчик обращений >0 — кликабельная ссылка на список обращений региона. */
+/* Счётчик обращений >0 — красный бейдж-ссылка на список обращений региона.
+   Визуально идентичен счётчику в списке МНО (.de-mno-inc-badge-link). */
 .de-reg-inc-link {
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 12px;
   border: none;
-  background: none;
-  font: inherit;
+  border-radius: var(--radius-lg);
+  background: var(--ark-red-100);
+  color: var(--ark-red-600);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  color: var(--de-brand);
+  font-size: var(--fs-13);
   font-weight: 600;
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 2px;
-  transition: text-decoration-color var(--dur-fast) var(--ease-out);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
 }
 .de-reg-inc-link:hover {
-  text-decoration-color: currentColor;
+  box-shadow: inset 0 0 0 1px var(--ark-red-500);
 }
-/* Ноль обращений — приглушённый, без ссылки. */
+/* Ноль обращений — приглушённый, без ссылки (как .de-mno-inc-zero). */
 .de-reg-inc-zero {
-  color: var(--fg-4);
+  color: var(--fg-3);
 }
 .de-reg-c-status {
   width: 160px;
