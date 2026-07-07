@@ -761,6 +761,34 @@ async def test_get_mno_incidents_is_live_count():
     assert detail.incidents == 5
 
 
+@pytest.mark.asyncio
+async def test_query_sort_incidents_orders_by_live_count():
+    """sort='incidents' → ORDER BY по коррелированному COUNT(incidents.id) WHERE
+    incidents.mno_id = mno.id, а НЕ по статичной колонке mno.incidents (та дрейфует)."""
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=rows_res)
+
+    await mno_service._query(
+        session,
+        search=None,
+        region=None,
+        synced=None,
+        sort="incidents",
+        order="desc",
+        offset=0,
+        limit=100,
+    )
+
+    sql = str(session.execute.call_args.args[0]).lower()
+    assert "count(incidents.id)" in sql
+    assert "incidents.mno_id = mno.id" in sql
+    assert "order by" in sql
+    # По статичной колонке mno.incidents НЕ сортируем.
+    assert "order by mno.incidents" not in sql
+
+
 def test_filters_bbox_adds_latlon_clauses():
     """bbox в списке /mno → фильтр по числовым lat/lon (отдаём МНО кадра, как /mno/points);
     без bbox / мусор → фильтров нет (прежнее поведение)."""

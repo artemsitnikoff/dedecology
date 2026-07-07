@@ -46,7 +46,7 @@ const HEADS: Head[] = [
   { key: 'city', label: 'Город', cellClass: 'de-mno-c-city' },
   { key: 'address', label: 'Адрес', cellClass: 'de-mno-c-address' },
   { key: 'coords', label: 'Координаты', cellClass: 'de-mno-c-coords', nosort: true },
-  { key: 'incidents', label: 'Обращ.', cellClass: 'de-mno-c-incidents', nosort: true },
+  { key: 'incidents', label: 'Обращ.', cellClass: 'de-mno-c-incidents' },
   { key: 'sync', label: 'Синхрон.', cellClass: 'de-mno-c-sync', nosort: true },
 ];
 
@@ -298,7 +298,10 @@ export function MnoPage() {
   };
 
   const onSort = (key: MnoSortKey) => {
-    setSortDir((prev) => (sortKey === key && prev === 'asc' ? 'desc' : 'asc'));
+    // Первый клик по столбцу «Обращ.» — по убыванию (проблемные площадки вперёд);
+    // по остальным столбцам — по возрастанию. Повторный клик по тому же — реверс.
+    const firstDir: SortOrder = key === 'incidents' ? 'desc' : 'asc';
+    setSortDir((prev) => (sortKey === key ? (prev === 'asc' ? 'desc' : 'asc') : firstDir));
     setSortKey(key);
     resetPage();
   };

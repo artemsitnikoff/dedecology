@@ -3,7 +3,7 @@ import { api } from '@/api/client';
 import type { MnoDetail, MnoListItem, MnoPointsResponse, Paginated } from '@/api/aliases';
 
 /** Ключ сортировки таблицы МНО (сортируемые колонки прототипа). */
-export type MnoSortKey = 'reg' | 'name' | 'region' | 'city' | 'address';
+export type MnoSortKey = 'reg' | 'name' | 'region' | 'city' | 'address' | 'incidents';
 /** Направление сортировки. */
 export type SortOrder = 'asc' | 'desc';
 

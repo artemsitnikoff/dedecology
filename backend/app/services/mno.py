@@ -172,9 +172,22 @@ async def _query(
     stmt = select(Mno)
     if filters:
         stmt = stmt.where(*filters)
-    sort_col = _SORT_COLUMNS.get(sort, Mno.name)
     direction = asc if order == "asc" else desc
-    stmt = stmt.order_by(direction(sort_col), direction(Mno.id))
+    if sort == "incidents":
+        # Сортировка по числу обращений — по ЖИВОМУ COUNT инцидентов (incidents.mno_id),
+        # а НЕ по статичной колонке Mno.incidents (та дрейфует и перекрывается на чтение
+        # живым счётчиком, см. _incident_counts). Коррелированный скалярный подзапрос
+        # считает COUNT прямо в SQL, чтобы серверная пагинация отдавала верную страницу.
+        count_expr = (
+            select(func.count(Incident.id))
+            .where(Incident.mno_id == Mno.id)
+            .correlate(Mno)
+            .scalar_subquery()
+        )
+        stmt = stmt.order_by(direction(count_expr), direction(Mno.id))
+    else:
+        sort_col = _SORT_COLUMNS.get(sort, Mno.name)
+        stmt = stmt.order_by(direction(sort_col), direction(Mno.id))
     if offset is not None:
         stmt = stmt.offset(offset)
     if limit is not None:
