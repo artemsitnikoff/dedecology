@@ -14,11 +14,16 @@ from PIL import Image
 from app.config import settings
 from app.models import Incident, Mno
 from app.schemas.mno import MnoVolunteerCreate
+from app.services import intake as intake_svc
 from app.services import mno as mno_service
 from app.services.intake import (
+    _deg2num,
+    _pick_zoom,
     create_incident_from_form,
     create_incident_from_max,
+    create_incident_from_max_selected,
     create_incident_from_public_form,
+    prepare_max_report,
 )
 
 
@@ -2343,3 +2348,572 @@ async def test_mark_notified_service_empty_noop():
     session = AsyncMock()
     assert await incident_service.mark_notified(session, []) == 0
     session.execute.assert_not_awaited()
+
+
+# --------------------------------------------------------------------------- #
+# Выбор МНО в Макс-боте: nearest_mno (haversine + bbox-предфильтр)             #
+# --------------------------------------------------------------------------- #
+
+
+def _nearest_session(mnos):
+    """Fake session: execute → результат, чей scalars().all() отдаёт заданный список МНО."""
+    session = AsyncMock()
+    res = MagicMock()
+    res.scalars.return_value.all.return_value = mnos
+    session.execute = AsyncMock(return_value=res)
+    return session
+
+
+def _mno_point(lat, lon, name="П", **kw):
+    """Mno с координатами (или lat/lon=None) и произвольными адресными полями."""
+    m = Mno(
+        name=name,
+        address=kw.get("address", "адрес"),
+        city=kw.get("city", "город"),
+        coords=kw.get("coords", (f"{lat}, {lon}" if lat is not None else "")),
+        region_code=kw.get("region_code", "63"),
+        reg=kw.get("reg", ""),
+        lat=lat,
+        lon=lon,
+    )
+    m.id = uuid4()
+    return m
+
+
+@pytest.mark.asyncio
+async def test_nearest_mno_orders_filters_and_returns_fields():
+    """nearest_mno: сортировка по расстоянию, отсев далёких (>30 км) и без координат."""
+    center_lat, center_lon = 55.75, 37.62
+    near = _mno_point(55.751, 37.621, name="near")
+    mid = _mno_point(55.76, 37.63, name="mid")
+    far_in = _mno_point(55.80, 37.70, name="far_in")  # ~7 км — в радиусе
+    far_out = _mno_point(56.20, 38.50, name="far_out")  # >30 км — отброшен
+    nocoords = _mno_point(None, None, name="nocoords")  # без координат — отброшен
+    # порядок на входе намеренно перемешан
+    session = _nearest_session([mid, far_out, near, nocoords, far_in])
+
+    res = await mno_service.nearest_mno(
+        session, center_lat, center_lon, limit=5, max_km=30.0
+    )
+
+    ids = [r["id"] for r in res]
+    assert ids == [str(near.id), str(mid.id), str(far_in.id)]
+    assert str(far_out.id) not in ids
+    assert str(nocoords.id) not in ids
+    # расстояние — целые метры по возрастанию
+    dists = [r["distance_m"] for r in res]
+    assert dists == sorted(dists)
+    assert all(isinstance(d, int) for d in dists)
+    # поля площадки проброшены; id — строка
+    first = res[0]
+    assert first["name"] == "near"
+    assert first["lat"] == 55.751 and first["lon"] == 37.621
+    assert isinstance(first["id"], str)
+    assert {"address", "city", "coords"} <= set(first.keys())
+
+
+@pytest.mark.asyncio
+async def test_nearest_mno_respects_limit():
+    """limit срезает выдачу после сортировки по расстоянию."""
+    near = _mno_point(55.751, 37.621, name="near")
+    mid = _mno_point(55.76, 37.63, name="mid")
+    far_in = _mno_point(55.80, 37.70, name="far_in")
+    session = _nearest_session([far_in, near, mid])
+
+    res = await mno_service.nearest_mno(session, 55.75, 37.62, limit=2, max_km=30.0)
+    assert [r["name"] for r in res] == ["near", "mid"]
+
+
+@pytest.mark.asyncio
+async def test_nearest_mno_radius_excludes_all():
+    """Все МНО дальше max_km → пустой список."""
+    a = _mno_point(60.0, 40.0, name="a")
+    b = _mno_point(50.0, 30.0, name="b")
+    session = _nearest_session([a, b])
+    res = await mno_service.nearest_mno(session, 55.75, 37.62, max_km=5.0)
+    assert res == []
+
+
+# --------------------------------------------------------------------------- #
+# POST /intake/max/prepare — разбор адреса + ближайшие МНО (ничего не пишет)   #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_prepare_max_need_address_when_no_coords(fake_session):
+    """Координаты не распознаны → status need_address; parsed с region/city; МНО не ищем."""
+    with patch(
+        "app.services.intake.ai_parse_incident",
+        new=AsyncMock(return_value={"comment": "Радар №1", "time": ""}),
+    ), patch(
+        "app.services.intake.resolve_address",
+        new=AsyncMock(return_value=("Самарская область", "г. Самара", "", "")),
+    ), patch("app.services.mno.nearest_mno", new=AsyncMock()) as near:
+        res = await prepare_max_report(fake_session, text="текст без адреса")
+
+    assert res["status"] == "need_address"
+    assert res["parsed"]["region"] == "Самарская область"
+    assert res["parsed"]["city"] == "г. Самара"
+    assert res["parsed"]["coords"] == ""
+    assert res["parsed"]["comment"] == "Радар №1"
+    assert "candidates" not in res and "point" not in res
+    near.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prepare_max_ok_with_candidates(fake_session):
+    """Координаты есть → status ok, point + кандидаты; ai.time ЧЧ:ММ → photo_time сегодня@ЧЧ:ММ."""
+    candidates = [
+        {
+            "id": str(uuid4()),
+            "name": "МНО-1",
+            "address": "ул. 1",
+            "city": "г. Самара",
+            "coords": "53.21, 50.17",
+            "lat": 53.21,
+            "lon": 50.17,
+            "distance_m": 120,
+        }
+    ]
+    near = AsyncMock(return_value=candidates)
+    with patch(
+        "app.services.intake.ai_parse_incident",
+        new=AsyncMock(return_value={"comment": "c", "time": "19:30"}),
+    ), patch(
+        "app.services.intake.resolve_address",
+        new=AsyncMock(
+            return_value=("Самарская область", "г. Самара", "ул. Ленина, 1", "53.2, 50.15")
+        ),
+    ), patch("app.services.mno.nearest_mno", new=near):
+        res = await prepare_max_report(fake_session, text="Самара Ленина 1")
+
+    assert res["status"] == "ok"
+    assert res["point"] == {"lat": 53.2, "lon": 50.15}
+    assert res["candidates"] == candidates
+    assert res["parsed"]["street"] == "ул. Ленина, 1"
+    assert res["parsed"]["coords"] == "53.2, 50.15"
+    # ai.time «19:30» → сегодня@19:30 в ISO без секунд
+    assert res["parsed"]["photo_time"].endswith("T19:30")
+    near.assert_awaited_once()
+    # nearest_mno вызван с распарсенными координатами точки обращения
+    assert near.await_args.args[1] == 53.2
+    assert near.await_args.args[2] == 50.15
+
+
+@pytest.mark.asyncio
+async def test_prepare_max_passthrough_photo_time_when_no_ai_time(fake_session):
+    """Нет ai.time → parsed.photo_time = переданный вход как есть."""
+    with patch(
+        "app.services.intake.ai_parse_incident",
+        new=AsyncMock(return_value={"comment": "", "time": ""}),
+    ), patch(
+        "app.services.intake.resolve_address",
+        new=AsyncMock(return_value=("Р", "Г", "ул", "53.2, 50.15")),
+    ), patch("app.services.mno.nearest_mno", new=AsyncMock(return_value=[])):
+        res = await prepare_max_report(
+            fake_session, text="Самара", photo_time="2026-04-26T08:05"
+        )
+    assert res["status"] == "ok"
+    assert res["parsed"]["photo_time"] == "2026-04-26T08:05"
+    assert res["candidates"] == []
+
+
+# --------------------------------------------------------------------------- #
+# POST /intake/max/finalize — create_incident_from_max_selected               #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_max_selected_creates_incident_without_mno(fake_session):
+    """mno_id пуст → без привязки; source='max', поля/координаты/msg_url проброшены."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_max_selected(
+        fake_session,
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="53.2, 50.15",
+        comment="Радар №5",
+        mno_id="",
+        msg_id="m-1",
+        sender_name="Иванов Иван",
+        msg_url="https://max.ru/c/1/2",
+        photo_time="2026-04-26T08:05:00",
+        photo_files=[],
+    )
+    assert incident.source == "max"
+    assert incident.status == "new"
+    assert incident.fio == "Иванов Иван"
+    assert incident.region == "Самарская область"
+    assert incident.city == "г. Самара"
+    assert incident.street == "ул. Ленина, 1"
+    assert incident.coords == "53.2, 50.15"
+    assert incident.comment == "Радар №5"
+    assert incident.mno_id is None
+    assert incident.mno_reg is None
+    assert incident.msg == "m-1"
+    assert incident.msg_url == "https://max.ru/c/1/2"
+    assert incident.lat == 53.2 and incident.lon == 50.15
+    assert incident.photo_time is not None and incident.photo_time.tzinfo is not None
+    assert incident.photos == 0
+
+
+@pytest.mark.asyncio
+async def test_max_selected_backfills_address_from_mno(fake_session):
+    """Выбран mno_id, адрес пуст → регион/город/адрес/координаты/mno_reg берутся из МНО."""
+    mid = uuid4()
+    mno = Mno(
+        reg="63-04-001162",
+        name="Контейнерная площадка",
+        region_code="63",
+        city="г. Самара",
+        address="ул. Ленина, 1",
+        coords="53.2, 50.6",
+    )
+    mno.id = mid
+    # 1-й execute → сам МНО; 2-й → имя региона по region_code.
+    res_mno = MagicMock()
+    res_mno.scalar_one_or_none.return_value = mno
+    res_region = MagicMock()
+    res_region.scalar_one_or_none.return_value = "Самарская область"
+    fake_session.execute = AsyncMock(side_effect=[res_mno, res_region])
+    fake_session.add = MagicMock()
+
+    incident = await create_incident_from_max_selected(
+        fake_session,
+        region="",
+        city="",
+        street="",
+        coords="",
+        comment="",
+        mno_id=str(mid),
+        msg_id="m-2",
+        sender_name="Пётр",
+        msg_url="",
+        photo_time="",
+        photo_files=[],
+    )
+    assert incident.source == "max"
+    assert incident.mno_id == mid
+    assert incident.region == "Самарская область"
+    assert incident.city == "г. Самара"
+    assert incident.street == "ул. Ленина, 1"
+    assert incident.coords == "53.2, 50.6"
+    assert incident.mno_reg == "63-04-001162"
+    assert incident.lat == 53.2 and incident.lon == 50.6
+    # пустой comment/msg_url → NULL
+    assert incident.comment is None
+    assert incident.msg_url is None
+
+
+@pytest.mark.asyncio
+async def test_max_selected_garbage_mno_id_is_none(fake_session):
+    """Мусорный (не-UUID) mno_id → NULL (не роняет INSERT), бэкфилл не запускается."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_max_selected(
+        fake_session,
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="53.2, 50.15",
+        comment="",
+        mno_id="not-a-uuid",
+        msg_id="m-3",
+        sender_name="Аноним",
+        msg_url="",
+        photo_time="",
+        photo_files=[],
+    )
+    assert incident.mno_id is None
+    fake_session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_max_finalize_route_creates_and_quotes(client, monkeypatch):
+    """POST /max/finalize (токен + фото) → 200 ok+incident_id+quote; поля проброшены в сервис."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    fake_incident = Incident(source="max", status="new")
+    fake_incident.id = uuid4()
+    create = AsyncMock(return_value=fake_incident)
+    quote = AsyncMock(return_value="«цитата» — Автор")
+    mno_id = str(uuid4())
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_max_selected",
+        new=create,
+    ), patch("app.api.v1.intake.quotes_service.nature_quote", new=quote):
+        resp = await client.post(
+            "/api/v1/intake/max/finalize",
+            headers={"X-Intake-Token": "secret-token"},
+            data={
+                "region": "Самарская область",
+                "city": "г. Самара",
+                "street": "ул. Ленина, 1",
+                "coords": "53.2, 50.15",
+                "comment": "Радар №5",
+                "photo_time": "2026-04-26T08:05:00",
+                "msg_id": "m-1",
+                "sender_name": "Иванов Иван",
+                "msg_url": "https://max.ru/c/1/2",
+                "mno_id": mno_id,
+            },
+            files=[("photos", ("0.jpg", BytesIO(_FAKE_IMG), "image/jpeg"))],
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["incident_id"] == str(fake_incident.id)
+    assert body["quote"] == "«цитата» — Автор"
+    # цитата сохранена на инциденте 2-м коммитом
+    assert fake_incident.quote == "«цитата» — Автор"
+    create.assert_awaited_once()
+    kwargs = create.call_args.kwargs
+    assert kwargs["region"] == "Самарская область"
+    assert kwargs["mno_id"] == mno_id
+    assert kwargs["sender_name"] == "Иванов Иван"
+    assert len(kwargs["photo_files"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_max_finalize_wrong_token_403(client, monkeypatch):
+    """POST /max/finalize с неверным токеном → 403, сервис не вызывается."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    create = AsyncMock()
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_max_selected",
+        new=create,
+    ):
+        resp = await client.post(
+            "/api/v1/intake/max/finalize",
+            headers={"X-Intake-Token": "WRONG"},
+            data={"sender_name": "X"},
+        )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_max_prepare_route_returns_status(client, monkeypatch):
+    """POST /max/prepare (токен + JSON) → проксирует dict сервиса; text проброшен."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    prep = AsyncMock(
+        return_value={
+            "status": "need_address",
+            "parsed": {
+                "region": "Р",
+                "city": "",
+                "street": "",
+                "coords": "",
+                "comment": "",
+                "photo_time": "",
+            },
+        }
+    )
+    with patch("app.api.v1.intake.intake_service.prepare_max_report", new=prep):
+        resp = await client.post(
+            "/api/v1/intake/max/prepare",
+            headers={"X-Intake-Token": "secret-token"},
+            json={"text": "мусор без адреса"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "need_address"
+    prep.assert_awaited_once()
+    assert prep.call_args.kwargs["text"] == "мусор без адреса"
+
+
+@pytest.mark.asyncio
+async def test_max_prepare_wrong_token_403(client, monkeypatch):
+    """POST /max/prepare без валидного токена → 403, сервис не вызывается."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    prep = AsyncMock()
+    with patch("app.api.v1.intake.intake_service.prepare_max_report", new=prep):
+        resp = await client.post(
+            "/api/v1/intake/max/prepare",
+            headers={"X-Intake-Token": "WRONG"},
+            json={"text": "x"},
+        )
+    assert resp.status_code == 403
+    prep.assert_not_awaited()
+
+
+# --------------------------------------------------------------------------- #
+# OpenStreetMap-рендер карты выбора МНО: _deg2num / _pick_zoom / render_max_map #
+# + GET /intake/max/map                                                        #
+# --------------------------------------------------------------------------- #
+
+
+def _png_tile(size=(256, 256), color=(200, 220, 200)) -> bytes:
+    """Валидный PNG-тайл, сгенерированный Pillow (замена реальной загрузки тайла)."""
+    buf = BytesIO()
+    Image.new("RGB", size, color).save(buf, "PNG")
+    return buf.getvalue()
+
+
+_PNG_TILE = _png_tile()
+
+
+class _TileResp:
+    """Фейковый httpx-ответ тайла: .content + .raise_for_status (бросает при ok=False)."""
+
+    def __init__(self, content: bytes, ok: bool = True):
+        self.content = content
+        self._ok = ok
+
+    def raise_for_status(self):
+        if not self._ok:
+            raise RuntimeError("non-2xx tile")
+
+
+def _tile_client_factory(mode: str):
+    """Класс фейкового httpx.AsyncClient: mode = all_ok | one_fail | all_fail.
+
+    render_max_map создаёт ОДИН клиент и зовёт .get на каждый тайл — instance-счётчик
+    в 'one_fail' роняет ровно первый тайл. Реальная сеть НЕ дёргается.
+    """
+
+    class _TileClient:
+        def __init__(self, *a, **k):
+            self.n = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url):
+            self.n += 1
+            if mode == "all_fail":
+                return _TileResp(b"", ok=False)
+            if mode == "one_fail":
+                return _TileResp(_PNG_TILE, ok=(self.n != 1))
+            return _TileResp(_PNG_TILE, ok=True)
+
+    return _TileClient
+
+
+def test_deg2num_known_values():
+    """_deg2num: детерминированные тайловые координаты (центр Москвы, z=13)."""
+    x, y = _deg2num(55.75, 37.62, 13)
+    # Целая часть — номер тайла; проверяем и floor, и дробное значение.
+    assert int(x) == 4952
+    assert int(y) == 2561
+    assert x == pytest.approx(4952.064, abs=1e-2)
+    assert y == pytest.approx(2561.0748, abs=1e-2)
+
+
+def test_deg2num_latitude_clamp():
+    """_deg2num: широта за пределами проекции (~±85.05°) клэмпится (tan не взрывается)."""
+    # Севернее предела → тот же y, что и на самом пределе.
+    _, y_over_n = _deg2num(89.0, 10.0, 5)
+    _, y_lim_n = _deg2num(85.05112878, 10.0, 5)
+    assert y_over_n == pytest.approx(y_lim_n, abs=1e-6)
+    # Южнее предела → тот же y, что и на нижнем пределе.
+    _, y_over_s = _deg2num(-89.0, 10.0, 5)
+    _, y_lim_s = _deg2num(-85.05112878, 10.0, 5)
+    assert y_over_s == pytest.approx(y_lim_s, abs=1e-6)
+
+
+def test_pick_zoom_small_bbox_high_zoom():
+    """Крошечный bbox → максимальный зум из диапазона."""
+    z = _pick_zoom(55.750, 37.620, 55.751, 37.621)
+    zmin, zmax = intake_svc._MAP_ZOOM_RANGE
+    assert z == zmax
+
+
+def test_pick_zoom_wide_bbox_low_zoom():
+    """Широкий bbox (полстраны) → минимальный зум из диапазона."""
+    z = _pick_zoom(40.0, 20.0, 60.0, 120.0)
+    zmin, zmax = intake_svc._MAP_ZOOM_RANGE
+    assert z == zmin
+
+
+def test_pick_zoom_degenerate_default():
+    """Вырожденный bbox (одна точка) → дефолтный зум 15, в пределах диапазона."""
+    z = _pick_zoom(55.75, 37.62, 55.75, 37.62)
+    zmin, zmax = intake_svc._MAP_ZOOM_RANGE
+    assert z == 15
+    assert zmin <= z <= zmax
+
+
+@pytest.mark.asyncio
+async def test_render_max_map_returns_valid_png(monkeypatch):
+    """render_max_map: все тайлы ок (мок) → валидный PNG размера _MAP_SIZE, непустой."""
+    monkeypatch.setattr(
+        intake_svc.httpx, "AsyncClient", _tile_client_factory("all_ok")
+    )
+    png = await intake_svc.render_max_map((55.7, 37.6), [(55.71, 37.61), (55.72, 37.62)])
+    assert png  # непустой
+    img = Image.open(BytesIO(png))
+    img.load()
+    assert img.format == "PNG"
+    assert img.size == intake_svc._MAP_SIZE
+
+
+@pytest.mark.asyncio
+async def test_render_max_map_one_tile_fails_still_png(monkeypatch):
+    """Один тайл не-2xx → серая дырка, но карта всё равно валидный PNG нужного размера."""
+    monkeypatch.setattr(
+        intake_svc.httpx, "AsyncClient", _tile_client_factory("one_fail")
+    )
+    png = await intake_svc.render_max_map((55.7, 37.6), [(55.71, 37.61)])
+    img = Image.open(BytesIO(png))
+    img.load()
+    assert img.format == "PNG"
+    assert img.size == intake_svc._MAP_SIZE
+
+
+@pytest.mark.asyncio
+async def test_render_max_map_all_tiles_fail_raises(monkeypatch):
+    """Все тайлы сбойны → render_max_map бросает (роутер превратит в 502)."""
+    monkeypatch.setattr(
+        intake_svc.httpx, "AsyncClient", _tile_client_factory("all_fail")
+    )
+    with pytest.raises(Exception):
+        await intake_svc.render_max_map((55.7, 37.6), [(55.71, 37.61)])
+
+
+@pytest.mark.asyncio
+async def test_max_map_requires_token_403(client, monkeypatch):
+    """GET /max/map без X-Intake-Token → 403 (гейт токена)."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    resp = await client.get(
+        "/api/v1/intake/max/map", params={"lat": 55.7, "lon": 37.6}
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_max_map_returns_png(client, monkeypatch):
+    """GET /max/map (токен) → 200 image/png; точка и pts переданы в сервис."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    render = AsyncMock(return_value=b"\x89PNG\r\n\x1a\nDATA")
+    with patch("app.api.v1.intake.intake_service.render_max_map", new=render):
+        resp = await client.get(
+            "/api/v1/intake/max/map",
+            headers={"X-Intake-Token": "secret-token"},
+            params={"lat": 55.7, "lon": 37.6, "pts": "55.71,37.61;55.72,37.62"},
+        )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content == b"\x89PNG\r\n\x1a\nDATA"
+    render.assert_awaited_once()
+    point, pts = render.await_args.args
+    assert point == (55.7, 37.6)
+    assert pts == [(55.71, 37.61), (55.72, 37.62)]
+
+
+@pytest.mark.asyncio
+async def test_max_map_upstream_error_502(client, monkeypatch):
+    """Сбой рендера карты (render_max_map бросает) → 502 MAP_UPSTREAM_ERROR."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    render = AsyncMock(side_effect=RuntimeError("boom"))
+    with patch("app.api.v1.intake.intake_service.render_max_map", new=render):
+        resp = await client.get(
+            "/api/v1/intake/max/map",
+            headers={"X-Intake-Token": "secret-token"},
+            params={"lat": 55.7, "lon": 37.6},
+        )
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "MAP_UPSTREAM_ERROR"

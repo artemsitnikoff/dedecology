@@ -111,6 +111,148 @@ async def push_incident(
     return payload
 
 
+async def prepare_max(text: str, photo_time: str = "") -> dict:
+    """Разбор адреса + поиск ближайших МНО БЕЗ создания обращения.
+
+    POST {api_base}/intake/max/prepare (JSON, X-Intake-Token). Возвращает dict
+    контракта: `{"status":"need_address"|"ok", "parsed":{...}, "point":{...},
+    "candidates":[...]}`.
+
+    :param text: Текст-описание (подпись к фото или присланный адрес).
+    :param photo_time: ISO "%Y-%m-%dT%H:%M" — время фотофиксации из подписи
+        (fallback для backend, если AI не извлёк время). Пустая строка → не шлём.
+    :raises IntakeError: сеть/таймаут/не-2xx/не-JSON — вызывающий отвечает мягко.
+    """
+    url = f"{settings.api_base}/intake/max/prepare"
+    headers = {"X-Intake-Token": settings.INTAKE_TOKEN}
+    body: dict = {"text": text}
+    if photo_time:
+        body["photo_time"] = photo_time
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(url, json=body, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.error("prepare_max request failed url=%s: %s", url, exc)
+        raise IntakeError(f"Не удалось связаться с intake API: {exc}") from exc
+
+    if not resp.is_success:
+        body_preview = resp.text[:500]
+        logger.error("prepare_max returned %s: %s", resp.status_code, body_preview)
+        raise IntakeError(
+            f"prepare ответил {resp.status_code}",
+            details={"backend_status": resp.status_code, "body": body_preview},
+        )
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        logger.error("prepare_max non-JSON: %s", resp.text[:500])
+        raise IntakeError("prepare вернул не-JSON ответ") from exc
+
+    logger.info(
+        "prepare_max status=%s candidates=%d",
+        payload.get("status") if isinstance(payload, dict) else "?",
+        len(payload.get("candidates") or []) if isinstance(payload, dict) else 0,
+    )
+    return payload
+
+
+async def finalize_max(
+    *,
+    region: str,
+    city: str,
+    street: str,
+    coords: str,
+    comment: str,
+    photo_time: str,
+    msg_id: str,
+    sender_name: str,
+    msg_url: str,
+    mno_id: str,
+    photo_bytes_list: list[bytes],
+) -> dict:
+    """Создать обращение (source='max') из уже разобранных полей + выбранного МНО.
+
+    POST {api_base}/intake/max/finalize (multipart, X-Intake-Token). AI на
+    backend НЕ дёргается повторно. `mno_id=""` → «Нет в списке» (без привязки).
+
+    :raises IntakeError: сеть/таймаут/не-2xx/не-JSON.
+    """
+    url = f"{settings.api_base}/intake/max/finalize"
+    headers = {"X-Intake-Token": settings.INTAKE_TOKEN}
+    # None-безопасность: Form-поля должны быть строками, не «None».
+    data = {
+        "region": region or "",
+        "city": city or "",
+        "street": street or "",
+        "coords": coords or "",
+        "comment": comment or "",
+        "photo_time": photo_time or "",
+        "msg_id": msg_id or "",
+        "sender_name": sender_name or "",
+        "msg_url": msg_url or "",
+        "mno_id": mno_id or "",
+    }
+    files = [
+        ("photos", (f"{i}.jpg", photo, "image/jpeg"))
+        for i, photo in enumerate(photo_bytes_list)
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(url, data=data, files=files or None, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.error("finalize_max request failed url=%s: %s", url, exc)
+        raise IntakeError(f"Не удалось связаться с intake API: {exc}") from exc
+
+    if not resp.is_success:
+        body_preview = resp.text[:500]
+        logger.error("finalize_max returned %s: %s", resp.status_code, body_preview)
+        raise IntakeError(
+            f"finalize ответил {resp.status_code}",
+            details={"backend_status": resp.status_code, "body": body_preview},
+        )
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        logger.error("finalize_max non-JSON: %s", resp.text[:500])
+        raise IntakeError("finalize вернул не-JSON ответ") from exc
+
+    logger.info(
+        "finalize_max ok incident=%s mno_id=%s photos=%d",
+        payload.get("incident_id") if isinstance(payload, dict) else "?",
+        mno_id or "-",
+        len(photo_bytes_list),
+    )
+    return payload
+
+
+async def fetch_map(lat: float, lon: float, pts: str) -> bytes | None:
+    """Скачать PNG-скрин карты (точка обращения + метки МНО) у backend.
+
+    GET {api_base}/intake/max/map?lat&lon&pts (X-Intake-Token). Возвращает
+    байты PNG или None при ЛЮБОЙ ошибке / не-2xx / пустом ответе — бот тогда
+    деградирует до текстового списка без картинки (карта не критична).
+    """
+    url = f"{settings.api_base}/intake/max/map"
+    headers = {"X-Intake-Token": settings.INTAKE_TOKEN}
+    params = {"lat": lat, "lon": lon, "pts": pts}
+    try:
+        async with httpx.AsyncClient(timeout=_NOTIFY_TIMEOUT) as client:
+            resp = await client.get(url, params=params, headers=headers)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("fetch_map failed url=%s: %s", url, exc)
+        return None
+    content = resp.content
+    if not content:
+        logger.warning("fetch_map returned empty body url=%s", url)
+        return None
+    return content
+
+
 async def fetch_pending() -> list[dict]:
     """Забрать у backend обращения, ещё не отправленные в групповой чат.
 

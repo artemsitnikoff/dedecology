@@ -550,6 +550,83 @@ async def create_mno_from_volunteer(
     )
 
 
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Расстояние между двумя точками на сфере (метры), формула гаверсинуса.
+
+    Без внешних зависимостей (math). Радиус Земли — 6371 км. Точность достаточна
+    для «ближайшие МНО в радиусе десятков км».
+    """
+    r = 6_371_000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+async def nearest_mno(
+    session: AsyncSession,
+    lat: float,
+    lon: float,
+    *,
+    limit: int = 5,
+    max_km: float = 30.0,
+) -> list[dict]:
+    """Ближайшие к точке (lat, lon) МНО в радиусе max_km км, по возрастанию расстояния.
+
+    Двухступенчато: сперва грубый bbox-предфильтр по индексу ix_mno_lat_lon (рамка
+    ±max_km в градусах: dlat=max_km/111, dlon с поправкой на cos(lat)) — чтобы не
+    тянуть весь реестр; затем точный haversine в питоне, отсечение по радиусу,
+    сортировка по расстоянию и срез limit. МНО без числовых координат (lat/lon IS
+    NULL) не участвуют. Возврат — список dict: id(str), name, address, city, coords,
+    lat, lon, distance_m(int, метры).
+    """
+    dlat = max_km / 111.0
+    cos_lat = math.cos(math.radians(lat))
+    # У полюсов cos(lat)→0: не делим на ноль — берём максимально широкую рамку по
+    # долготе (haversine ниже всё равно отсечёт лишнее по реальному радиусу).
+    dlon = 360.0 if abs(cos_lat) < 1e-6 else max_km / (111.0 * abs(cos_lat))
+
+    stmt = select(Mno).where(
+        Mno.lat.is_not(None),
+        Mno.lon.is_not(None),
+        Mno.lat.between(lat - dlat, lat + dlat),
+        Mno.lon.between(lon - dlon, lon + dlon),
+    )
+    rows = list((await session.execute(stmt)).scalars().all())
+
+    scored: list[tuple[float, Mno]] = []
+    for m in rows:
+        # Страховка: строки без координат в выборку не должны попадать (SQL is_not),
+        # но проверяем и здесь — точка без координат не измеряется.
+        if m.lat is None or m.lon is None:
+            continue
+        dist = _haversine_m(lat, lon, m.lat, m.lon)
+        if dist <= max_km * 1000.0:
+            scored.append((dist, m))
+    scored.sort(key=lambda t: t[0])
+
+    out: list[dict] = []
+    for dist, m in scored[: max(0, limit)]:
+        out.append(
+            {
+                "id": str(m.id),
+                "name": m.name,
+                "address": m.address,
+                "city": m.city,
+                "coords": m.coords,
+                "lat": m.lat,
+                "lon": m.lon,
+                "distance_m": int(round(dist)),
+            }
+        )
+    return out
+
+
 def _stub_fgis_id() -> str:
     """Placeholder-идентификатор ФГИС (реальной интеграции нет)."""
     return f"STUB-{uuid.uuid4().hex[:8]}"

@@ -6,7 +6,9 @@
 гарантий типов нет (str / None / list).
 """
 
+import asyncio
 import logging
+import math
 import re
 import shutil
 import uuid
@@ -14,7 +16,8 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+import httpx
+from PIL import Image, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +45,30 @@ _FULL_QUALITY = 85
 _THUMB_MAX_SIDE = (400, 400)
 _THUMB_QUALITY = 80
 _WHITE = (255, 255, 255)
+
+# --- Карта выбора МНО в Макс-боте: самостоятельная сшивка тайлов OpenStreetMap ---
+# Отказались от Yandex Static Maps (ключ не прогревался). Рисуем карту сами из
+# растровых тайлов OSM + Pillow — без API-ключа. ВНИМАНИЕ: тайлы public-сервера OSM
+# подпадают под их usage policy (https://operations.osmfoundation.org/policies/tiles/):
+# идентифицирующий User-Agent ОБЯЗАТЕЛЕН, объёмы должны быть скромными. Для низкого
+# трафика бота (несколько запросов на обращение) это допустимо; при росте нагрузки —
+# переехать на провайдера тайлов с ключом или self-hosted рендерер (без выдумок).
+_OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+_OSM_TILE_SIZE = 256  # растровые тайлы OSM — 256×256 px
+_MAP_SIZE = (640, 480)  # итоговый кадр (ширина, высота) в пикселях
+# ОБЯЗАТЕЛЬНЫЙ идентифицирующий User-Agent — без него сервер тайлов OSM банит.
+_MAP_UA = "EcoPulse/1.0 (+https://ecopulse.reo.ru)"
+_MAP_TILE_TIMEOUT = 10.0  # таймаут загрузки одного тайла, сек
+_MAP_MAX_TILES = 30  # гард на число тайлов (при нормальном подборе зума ≤ ~12)
+_MAP_ZOOM_RANGE = (3, 18)  # допустимый диапазон OSM-зума
+_MAP_DEFAULT_ZOOM = 15  # дефолт для вырожденного bbox (одна точка)
+_MAP_PAD_PX = 64  # запас по краям кадра при подборе зума, px
+
+# Цвета меток (RGB).
+_MAP_GRAY = (232, 232, 232)  # #E8E8E8 — заливка сбойного тайла
+_MAP_RED = (208, 20, 20)  # точка обращения «вы здесь»
+_MAP_BLUE = (30, 111, 216)  # #1E6FD8 — нумерованные кандидаты-МНО
+_MAP_WHITE = (255, 255, 255)
 
 # Лимиты длины текстовых полей = ширине колонок БД. Отсекаем over-long значение,
 # чтобы оно не вызвало DataError/500 на INSERT (легитимные данные укладываются).
@@ -666,34 +693,18 @@ async def create_incident_from_public_form(
         except (ValueError, AttributeError, TypeError):
             mno_id_value = None
 
-    # Если волонтёр выбрал МНО (mno_id), но адресные поля пусты — подтягиваем адрес из самой
-    # площадки: регион/город/адрес/координаты живут на МНО, мобильное приложение шлёт только
-    # mno_id. Так у отчёта в «Мои отчёты» и в админке появляется адрес, а не пустота. Заполняем
-    # ТОЛЬКО пустые поля (явный ввод веб-формы имеет приоритет); mno_reg берём из МНО, если не
-    # задан. МНО грузим лишь когда есть что заполнять (веб-форма обычно шлёт всё явно).
-    if mno_id_value is not None and (
-        not region or not city or not street or not coords or mno_reg_value is None
-    ):
-        mno = (
-            await session.execute(select(Mno).where(Mno.id == mno_id_value))
-        ).scalar_one_or_none()
-        if mno is not None:
-            if not coords:
-                coords = _clean_str(mno.coords)
-            if not city:
-                city = _clean_str(mno.city)
-            if not street:
-                street = _clean_str(mno.address)
-            if not region and _clean_str(mno.region_code):
-                region_name = (
-                    await session.execute(
-                        select(Region.name).where(Region.code == mno.region_code)
-                    )
-                ).scalar_one_or_none()
-                if region_name:
-                    region = region_name
-            if mno_reg_value is None and _clean_str(mno.reg):
-                mno_reg_value = _clean_str(mno.reg)[:64]
+    # Если волонтёр выбрал МНО (mno_id), но адресные поля пусты — подтягиваем адрес из
+    # самой площадки (общий хелпер, см. _backfill_address_from_mno): заполняем ТОЛЬКО
+    # пустые поля (явный ввод веб-формы имеет приоритет).
+    region, city, street, coords, mno_reg_value = await _backfill_address_from_mno(
+        session,
+        mno_id_value,
+        region=region,
+        city=city,
+        street=street,
+        coords=coords,
+        mno_reg_value=mno_reg_value,
+    )
 
     if not (region or city or street):
         region, city, street = _parse_address(full_address)
@@ -763,3 +774,522 @@ async def create_incident_from_public_form(
         actor_type="system",
     )
     return incident
+
+
+async def _backfill_address_from_mno(
+    session: AsyncSession,
+    mno_id_value: uuid.UUID | None,
+    *,
+    region: str,
+    city: str,
+    street: str,
+    coords: str,
+    mno_reg_value: str | None,
+) -> tuple[str, str, str, str, str | None]:
+    """Подтягивает адрес выбранной площадки (МНО) в ПУСТЫЕ поля обращения.
+
+    Общий для приёма из веб-формы (create_incident_from_public_form) и из Макс-бота
+    (create_incident_from_max_selected): регион/город/адрес/координаты живут на самом
+    МНО, а мобильное приложение/бот часто присылают только mno_id. Заполняем ТОЛЬКО
+    пустые поля (явный ввод имеет приоритет); mno_reg берём из МНО, если он ещё не
+    задан. МНО грузим лишь когда есть что заполнять (обычный ввод шлёт всё явно), а
+    имя региона — только если пуст region и у площадки известен region_code.
+
+    Поведение НЕ отличается от прежнего инлайн-блока: возвращает обновлённый кортеж
+    (region, city, street, coords, mno_reg_value).
+    """
+    if mno_id_value is not None and (
+        not region or not city or not street or not coords or mno_reg_value is None
+    ):
+        mno = (
+            await session.execute(select(Mno).where(Mno.id == mno_id_value))
+        ).scalar_one_or_none()
+        if mno is not None:
+            if not coords:
+                coords = _clean_str(mno.coords)
+            if not city:
+                city = _clean_str(mno.city)
+            if not street:
+                street = _clean_str(mno.address)
+            if not region and _clean_str(mno.region_code):
+                region_name = (
+                    await session.execute(
+                        select(Region.name).where(Region.code == mno.region_code)
+                    )
+                ).scalar_one_or_none()
+                if region_name:
+                    region = region_name
+            if mno_reg_value is None and _clean_str(mno.reg):
+                mno_reg_value = _clean_str(mno.reg)[:64]
+    return region, city, street, coords, mno_reg_value
+
+
+async def prepare_max_report(
+    session: AsyncSession,
+    *,
+    text: str,
+    photo_time=None,
+) -> dict:
+    """Разбор адреса Макс-обращения + поиск ближайших МНО. НИЧЕГО не пишет в БД.
+
+    Реализует контракт POST /intake/max/prepare (двухфазный приём: сначала разбираем и
+    показываем кандидатов, инцидент создаётся позже в finalize после выбора площадки):
+      1. AI (ai_parse_incident) разбирает свободный текст один раз — нужен и адресу, и
+         времени/комментарию;
+      2. resolve_address(text, ai) → region/city/street/coords (тот же конвейер, что и
+         остальной приём);
+      3. photo_time для parsed: AI-время ЧЧ:ММ → сегодня@ЧЧ:ММ (ISO %Y-%m-%dT%H:%M);
+         иначе переданный photo_time как есть; иначе "" (finalize подставит now);
+      4. parse_latlon(coords): координат нет → status="need_address" (бот попросит
+         адрес текстом); есть → status="ok" + point + до 5 ближайших МНО (nearest_mno,
+         радиус 30 км, по возрастанию расстояния; может быть []).
+
+    Любой сбой AI/DaData деградирует внутри resolve_address (не бросает). Возврат —
+    обычный dict (не Pydantic) по контракту.
+    """
+    # Локальный импорт: services/mno.py импортирует из этого модуля (process_mno_photos),
+    # поэтому обратный импорт держим внутри функции, чтобы не создавать цикл на загрузке.
+    from .mno import nearest_mno
+
+    raw_text = _clean_str(text)
+
+    # AI-разбор один раз (graceful: любой сбой → None; resolve_address примет готовый ai).
+    ai: dict | None = None
+    try:
+        ai = await ai_parse_incident(raw_text)
+    except Exception as e:  # noqa: BLE001 — AI не должен ронять приём
+        logger.warning(
+            "[intake.max.prepare] ai_parse_incident сбой: %s: %s", type(e).__name__, e
+        )
+        ai = None
+
+    region, city, street, coords = await resolve_address(raw_text, ai=ai)
+
+    # Прочая не-адресная информация (Радар/ФИО/описание) — из AI; нет → "".
+    comment = (_clean_str(ai.get("comment")) if ai else "") or ""
+
+    # Время фотофиксации для parsed: AI-время ЧЧ:ММ → сегодня@ЧЧ:ММ (ISO без секунд);
+    # иначе переданный photo_time как есть; иначе "".
+    ai_dt = _hhmm_today_utc(ai.get("time")) if ai else None
+    if ai_dt is not None:
+        photo_time_iso = ai_dt.strftime("%Y-%m-%dT%H:%M")
+    else:
+        photo_time_iso = _clean_str(photo_time)
+
+    parsed = {
+        "region": region,
+        "city": city,
+        "street": street,
+        "coords": coords,
+        "comment": comment,
+        "photo_time": photo_time_iso,
+    }
+
+    lat, lon = parse_latlon(coords)
+    if lat is None or lon is None:
+        # Координаты не распознаны — бот попросит адрес текстом.
+        return {"status": "need_address", "parsed": parsed}
+
+    candidates = await nearest_mno(session, lat, lon, limit=5, max_km=30.0)
+    return {
+        "status": "ok",
+        "parsed": parsed,
+        "point": {"lat": lat, "lon": lon},
+        "candidates": candidates,
+    }
+
+
+async def create_incident_from_max_selected(
+    session: AsyncSession,
+    *,
+    region: str,
+    city: str,
+    street: str,
+    coords: str,
+    comment: str,
+    mno_id: str,
+    msg_id: str,
+    sender_name: str,
+    msg_url: str,
+    photo_time,
+    photo_files: list,
+    actor_user_id=None,
+) -> Incident:
+    """Создаёт Incident(source='max') из УЖЕ разобранных полей + выбранного МНО.
+
+    Реализует контракт POST /intake/max/finalize (вторая фаза приёма: адрес разобран в
+    prepare, здесь AI НЕ дёргаем повторно). Зеркалит create_incident_from_public_form,
+    но source='max': тот же бэкфилл адреса из МНО (_backfill_address_from_mno — заполняем
+    только пустые поля), normalize_region/city, обрезка до ширин колонок, parse_latlon,
+    валидация/сохранение фото (_decode_uploads → _store_decoded), системный audit
+    'intake_max'. mno_id пуст/мусор → без привязки (NULL). flush() здесь, commit() — в
+    роутере. Невалидные фото → ValidationError (400) ДО записи в БД.
+    """
+    region = _clean_str(region)
+    city = _clean_str(city)
+    street = _clean_str(street)
+    coords = _clean_str(coords)
+    fio = _clean_str(sender_name)
+    comment_value = _clean_str(comment) or None
+    msg = _clean_str(msg_id) or None
+    # Готовый https-URL сообщения (личка с ботом обычно пуста → None).
+    msg_url_clean = _clean_str(msg_url) or None
+
+    # ССЫЛКА на выбранное МНО (Mno.id) — парсим как UUID: пусто/мусор → NULL (не роняем
+    # INSERT). Пусто = «Нет в списке» (обращение без привязки к площадке).
+    mno_id_clean = _clean_str(mno_id)
+    mno_id_value: uuid.UUID | None = None
+    if mno_id_clean:
+        try:
+            mno_id_value = uuid.UUID(mno_id_clean)
+        except (ValueError, AttributeError, TypeError):
+            mno_id_value = None
+
+    # Бэкфилл адреса из выбранного МНО (в форме finalize отдельного mno_reg нет — тянем
+    # реестровый № из площадки, если она выбрана).
+    mno_reg_value: str | None = None
+    region, city, street, coords, mno_reg_value = await _backfill_address_from_mno(
+        session,
+        mno_id_value,
+        region=region,
+        city=city,
+        street=street,
+        coords=coords,
+        mno_reg_value=mno_reg_value,
+    )
+
+    # Унификация ТИПА региона/города к полной канонической форме (как в остальном приёме).
+    region = normalize_region(region)
+    city = normalize_city(city)
+
+    # Отсекаем текст до ширины колонок БД.
+    fio = fio[: _FIELD_LIMITS["fio"]]
+    region = region[: _FIELD_LIMITS["region"]]
+    city = city[: _FIELD_LIMITS["city"]]
+    street = street[: _FIELD_LIMITS["street"]]
+    coords = coords[: _FIELD_LIMITS["coords"]]
+    if msg is not None:
+        msg = msg[: _FIELD_LIMITS["msg"]]
+
+    parsed_photo_time = _parse_photo_time(photo_time)
+
+    # Валидируем/декодируем фото ДО создания инцидента — битый файл отбивается 400 без
+    # записи в БД (как в публичной форме).
+    decoded = await _decode_uploads(photo_files)
+
+    # Числовые lat/lon для bbox-фильтра карты (NULL, если coords пусты/невалидны).
+    lat, lon = parse_latlon(coords)
+
+    incident = Incident(
+        source="max",
+        status="new",
+        fio=fio or "",
+        region=region,
+        city=city,
+        street=street,
+        coords=coords or "",
+        lat=lat,
+        lon=lon,
+        mno_reg=mno_reg_value,
+        mno_id=mno_id_value,
+        comment=comment_value,
+        photo_time=parsed_photo_time,
+        photos=0,
+        photo_urls=[],
+        msg=msg,
+        msg_url=msg_url_clean,
+        received_at=datetime.now(timezone.utc),
+    )
+    session.add(incident)
+    await session.flush()  # → incident.id
+
+    photo_urls, count = _store_decoded(incident.id, decoded)
+    if count:
+        incident.photo_urls = photo_urls
+        incident.photos = count
+        await session.flush()
+
+    await audit(
+        session,
+        action="intake_max",
+        entity_type="incident",
+        entity_id=incident.id,
+        after={
+            "source": "max",
+            "fio": fio,
+            "msg": msg,
+            "mno_id": str(mno_id_value) if mno_id_value else None,
+        },
+        actor_user_id=actor_user_id,
+        actor_type="system",
+    )
+    return incident
+
+
+def _deg2num(lat: float, lon: float, z: int) -> tuple[float, float]:
+    """Гео-координата → ДРОБНЫЕ тайловые координаты OSM (slippy map) на зуме z.
+
+    Прямая формула проекции Web Mercator (EPSG:3857): для зума z карта = сетка
+    2**z × 2**z тайлов. Возвращает (x, y) с дробной частью — целая часть = номер
+    тайла, дробная = смещение внутри тайла. `math.asinh(tan(φ))` тождественно
+    `ln(tan(φ)+sec(φ))` из классической формулы. Широту клэмпим к пределам
+    проекции (~±85.05°), иначе tan(φ) у полюсов взрывается.
+    """
+    lat = max(-85.05112878, min(85.05112878, lat))
+    n = 2**z
+    x = (lon + 180.0) / 360.0 * n
+    y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n
+    return x, y
+
+
+def _pick_zoom(
+    min_lat: float,
+    min_lon: float,
+    max_lat: float,
+    max_lon: float,
+    size: tuple[int, int] = _MAP_SIZE,
+) -> int:
+    """Подбирает наибольший OSM-зум, при котором bbox влезает в кадр `size` с запасом.
+
+    Идём от максимального зума диапазона вниз: на каждом z считаем размер bbox в
+    пикселях (через _deg2num) и берём первый z, где он умещается в кадр за вычетом
+    полей (_MAP_PAD_PX с каждой стороны) — так метки не липнут к краю. Вырожденный
+    bbox (одна точка / нулевой размер) → дефолт _MAP_DEFAULT_ZOOM. Результат —
+    всегда int в пределах _MAP_ZOOM_RANGE.
+    """
+    zmin, zmax = _MAP_ZOOM_RANGE
+    span_lat = max_lat - min_lat
+    span_lon = max_lon - min_lon
+    if span_lat <= 0 and span_lon <= 0:
+        # Одна точка / нулевой bbox — подгонять нечего, берём разумный «городской» зум.
+        return max(zmin, min(zmax, _MAP_DEFAULT_ZOOM))
+
+    w, h = size
+    avail_w = w - 2 * _MAP_PAD_PX
+    avail_h = h - 2 * _MAP_PAD_PX
+    for z in range(zmax, zmin - 1, -1):
+        # Северо-западный угол bbox (max_lat даёт меньший y), юго-восточный.
+        x_nw, y_nw = _deg2num(max_lat, min_lon, z)
+        x_se, y_se = _deg2num(min_lat, max_lon, z)
+        px_w = abs(x_se - x_nw) * _OSM_TILE_SIZE
+        px_h = abs(y_se - y_nw) * _OSM_TILE_SIZE
+        if px_w <= avail_w and px_h <= avail_h:
+            return z
+    return zmin
+
+
+def _tile_window(
+    c_lat: float, c_lon: float, z: int, size: tuple[int, int]
+) -> tuple[float, float, int, int, int, int]:
+    """Пиксельный левый-верхний угол кадра + диапазон покрывающих его тайлов на зуме z.
+
+    Кадр `size` центрируем на гео-центре (c_lat, c_lon). Возвращает (left, top,
+    tx0, tx1, ty0, ty1): left/top — пиксельные координаты угла кадра в мировой
+    пиксельной сетке зума z; tx0..tx1 / ty0..ty1 — включительный диапазон тайлов,
+    целиком покрывающих кадр.
+    """
+    w, h = size
+    x_c, y_c = _deg2num(c_lat, c_lon, z)
+    cx = x_c * _OSM_TILE_SIZE
+    cy = y_c * _OSM_TILE_SIZE
+    left = cx - w / 2.0
+    top = cy - h / 2.0
+    tx0 = math.floor(left / _OSM_TILE_SIZE)
+    tx1 = math.floor((left + w - 1) / _OSM_TILE_SIZE)
+    ty0 = math.floor(top / _OSM_TILE_SIZE)
+    ty1 = math.floor((top + h - 1) / _OSM_TILE_SIZE)
+    return left, top, tx0, tx1, ty0, ty1
+
+
+async def _fetch_tile(
+    client: httpx.AsyncClient, z: int, tx: int, ty: int
+) -> Image.Image | None:
+    """Тянет один тайл OSM (z/x/y) → RGB-изображение 256×256 или None при любом сбое.
+
+    x заворачиваем по модулю 2**z (карта циклична по долготе); y вне [0, 2**z) —
+    за пределами мира, тайла нет → None. Не-2xx / сеть / битые байты → None
+    (одна дырка не рушит карту, вызывающий зальёт её серым).
+    """
+    n = 2**z
+    if ty < 0 or ty >= n:
+        return None
+    x = tx % n
+    url = _OSM_TILE_URL.format(z=z, x=x, y=ty)
+    try:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        img = Image.open(BytesIO(resp.content))
+        img.load()  # форсируем декод — ловим усечённые/битые тайлы
+        return img.convert("RGB")
+    except Exception as e:  # noqa: BLE001 — сбой тайла не должен ронять карту
+        logger.warning("[intake.max.map] тайл %s сбой: %s: %s", url, type(e).__name__, e)
+        return None
+
+
+def _to_frame_px(
+    lat: float, lon: float, z: int, left: float, top: float
+) -> tuple[float, float]:
+    """Гео-координата → пиксель внутри кадра (мировой пиксель минус угол кадра left/top)."""
+    x, y = _deg2num(lat, lon, z)
+    return x * _OSM_TILE_SIZE - left, y * _OSM_TILE_SIZE - top
+
+
+def _draw_markers(
+    frame: Image.Image,
+    point: tuple[float, float],
+    pts: list[tuple[float, float]],
+    z: int,
+    left: float,
+    top: float,
+) -> None:
+    """Рисует на кадре метки: нумерованные кандидаты 1..N + красную точку обращения.
+
+    Кандидаты (`pts` по порядку) — синие кружки с белой цифрой по центру; нумерация
+    1-based СОВПАДАЕТ с нумерацией списка/кнопок в боте. Точка обращения (`point`) —
+    красный кружок «вы здесь», рисуется ПОВЕРХ. Метку рисуем ТОЛЬКО если её пиксель
+    попал в кадр.
+    """
+    w, h = frame.size
+    draw = ImageDraw.Draw(frame)
+    # Крупнее встроенного мелкого шрифта — цифры на метках читаемы (иначе «5»/«6»
+    # сливаются). load_default(size=) есть в Pillow≥10; на старом — мягкий фолбэк.
+    try:
+        font = ImageFont.load_default(size=17)
+    except TypeError:
+        font = ImageFont.load_default()
+
+    def _in_frame(px: float, py: float) -> bool:
+        return 0 <= px < w and 0 <= py < h
+
+    def _dot(px: float, py: float, r: int, fill: tuple[int, int, int]) -> None:
+        draw.ellipse(
+            [px - r, py - r, px + r, py + r], fill=fill, outline=_MAP_WHITE, width=3
+        )
+
+    # Кандидаты — нумерованные синие метки (рисуем первыми, под точкой обращения).
+    for i, (plat, plon) in enumerate(pts, start=1):
+        px, py = _to_frame_px(plat, plon, z, left, top)
+        if not _in_frame(px, py):
+            continue
+        _dot(px, py, 13, _MAP_BLUE)
+        label = str(i)
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        # Центрируем цифру по кружку с учётом внутренних отступов bbox шрифта.
+        draw.text(
+            (px - tw / 2 - bbox[0], py - th / 2 - bbox[1]),
+            label,
+            fill=_MAP_WHITE,
+            font=font,
+        )
+
+    # Точка обращения — красная, поверх всего (различимый «вы здесь»).
+    px, py = _to_frame_px(point[0], point[1], z, left, top)
+    if _in_frame(px, py):
+        _dot(px, py, 9, _MAP_RED)
+
+
+def _draw_attribution(frame: Image.Image) -> None:
+    """Атрибуция OSM (требует usage policy): «© OpenStreetMap» в правом нижнем углу."""
+    w, h = frame.size
+    draw = ImageDraw.Draw(frame)
+    font = ImageFont.load_default()
+    text = "© OpenStreetMap"
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+    margin = 4
+    box_left = w - tw - 2 * margin
+    box_top = h - th - 2 * margin
+    # Светлая подложка под текст (читаемость поверх пёстрой карты).
+    draw.rectangle([box_left, box_top, w, h], fill=_MAP_WHITE)
+    draw.text(
+        (box_left + margin - bbox[0], box_top + margin - bbox[1]),
+        text,
+        fill=(60, 60, 60),
+        font=font,
+    )
+
+
+async def render_max_map(
+    point: tuple[float, float],
+    pts: list[tuple[float, float]],
+) -> bytes:
+    """Рисует карту выбора МНО из тайлов OpenStreetMap. Возвращает байты PNG 640×480.
+
+    point — точка обращения (lat, lon); pts — координаты МНО-кандидатов (lat, lon) В ТОМ
+    ЖЕ ПОРЯДКЕ, что и candidates. Порядок работы:
+      1. bbox по всем точкам, расширенный на ~20% (метки не липнут к краю);
+      2. _pick_zoom подбирает зум, центр bbox → пиксельный центр кадра;
+      3. качаем нужные тайлы OSM (обязательный User-Agent, параллельно), сшиваем в холст;
+         сбойный тайл → серая заливка (одна дырка карту не рушит);
+      4. обрезаем холст до кадра 640×480, рисуем метки (кандидаты 1..N + красная точка)
+         и атрибуцию «© OpenStreetMap».
+    Если сбойны ВСЕ тайлы — БРОСАЕМ исключение: роутер отдаёт 502, бот деградирует на
+    текст без картинки. Никакого API-ключа не требуется (см. коммент про usage policy).
+    """
+    all_points = [point, *pts]
+    lats = [p[0] for p in all_points]
+    lons = [p[1] for p in all_points]
+    min_lat, max_lat = min(lats), max(lats)
+    min_lon, max_lon = min(lons), max(lons)
+
+    # Расширяем bbox на ~20% span-а, чтобы крайние метки не липли к рамке.
+    pad_lat = (max_lat - min_lat) * 0.2
+    pad_lon = (max_lon - min_lon) * 0.2
+    min_lat -= pad_lat
+    max_lat += pad_lat
+    min_lon -= pad_lon
+    max_lon += pad_lon
+
+    z = _pick_zoom(min_lat, min_lon, max_lat, max_lon)
+    c_lat = (min_lat + max_lat) / 2.0
+    c_lon = (min_lon + max_lon) / 2.0
+
+    # Диапазон тайлов + гард _MAP_MAX_TILES (для кадра 640×480 их всегда ≤ ~12, но
+    # при экзотическом bbox страхуемся — снижаем зум, пока не влезем в лимит).
+    while True:
+        left, top, tx0, tx1, ty0, ty1 = _tile_window(c_lat, c_lon, z, _MAP_SIZE)
+        n_tiles = (tx1 - tx0 + 1) * (ty1 - ty0 + 1)
+        if n_tiles <= _MAP_MAX_TILES or z <= _MAP_ZOOM_RANGE[0]:
+            break
+        z -= 1
+
+    n_x = tx1 - tx0 + 1
+    n_y = ty1 - ty0 + 1
+    canvas = Image.new("RGB", (n_x * _OSM_TILE_SIZE, n_y * _OSM_TILE_SIZE), _MAP_GRAY)
+
+    # Качаем все тайлы параллельно под общим клиентом с обязательным User-Agent.
+    coords = [(tx, ty) for ty in range(ty0, ty1 + 1) for tx in range(tx0, tx1 + 1)]
+    async with httpx.AsyncClient(
+        headers={"User-Agent": _MAP_UA}, timeout=_MAP_TILE_TIMEOUT
+    ) as client:
+        tiles = await asyncio.gather(
+            *(_fetch_tile(client, z, tx, ty) for tx, ty in coords)
+        )
+
+    # Сшиваем: успешный тайл — на своё место; сбойный оставляем серым (фон холста).
+    any_ok = False
+    for (tx, ty), tile in zip(coords, tiles):
+        if tile is None:
+            continue
+        any_ok = True
+        canvas.paste(tile, ((tx - tx0) * _OSM_TILE_SIZE, (ty - ty0) * _OSM_TILE_SIZE))
+
+    if not any_ok:
+        # Все тайлы сбойны — карту не построить, отдаём ошибку (роутер → 502).
+        raise RuntimeError("Не удалось загрузить ни одного тайла OSM")
+
+    # Обрезаем холст до кадра 640×480 (угол кадра относительно угла тайлового диапазона).
+    crop_x = int(round(left - tx0 * _OSM_TILE_SIZE))
+    crop_y = int(round(top - ty0 * _OSM_TILE_SIZE))
+    w, h = _MAP_SIZE
+    frame = canvas.crop((crop_x, crop_y, crop_x + w, crop_y + h))
+
+    _draw_markers(frame, point, pts, z, left, top)
+    _draw_attribution(frame)
+
+    buf = BytesIO()
+    frame.save(buf, "PNG")
+    return buf.getvalue()

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -23,15 +24,40 @@ import httpx
 from maxapi import Bot, Router
 from maxapi.client.default import DefaultConnectionProperties
 from maxapi.enums.attachment import AttachmentType
-from maxapi.types import CommandStart, InputMediaBuffer, MessageCreated
+from maxapi.enums.intent import Intent
+from maxapi.types import (
+    CallbackButton,
+    CommandStart,
+    InputMediaBuffer,
+    MessageCallback,
+    MessageCreated,
+)
 from maxapi.types.attachments.image import Image
 from maxapi.types.message import Message
+from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 
 from .config import settings
-from .errors import AppError
-from .intake_client import push_incident
+from .errors import AppError, IntakeError
+from .intake_client import fetch_map, finalize_max, prepare_max, push_incident
+from .session import (
+    NO_MNO,
+    PendingReport,
+    PendingStore,
+    button_text,
+    chat_key,
+    decode_payload,
+    encode_payload,
+    human_distance,
+    map_query,
+    merge_parsed,
+    new_pending_id,
+)
 
 logger = logging.getLogger("dedecology.maxbot")
+
+# Процессное хранилище отложенных обращений лички (создаётся ПОСЛЕ выбора МНО).
+# Один long-polling процесс на бота → одного стора достаточно (см. session.py).
+_STORE = PendingStore()
 
 _DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
@@ -86,6 +112,28 @@ _REPLY_SOFT_ERROR = (
     "Не удалось обработать обращение прямо сейчас. Пожалуйста, попробуйте "
     "отправить его ещё раз чуть позже."
 )
+
+# --- тексты интерактивного флоу выбора МНО (только личка) ---
+_ASK_ADDRESS = (
+    "Не удалось определить адрес по описанию. Напишите, пожалуйста, адрес "
+    "площадки одним сообщением: город, улица, дом."
+)
+_HDR_PICK = (
+    "Нашёл ближайшие площадки накопления ТКО. Выберите, к какой относится "
+    "обращение, либо «Нет в списке»:"
+)
+_NO_MNO_NEARBY = (
+    "Рядом (в радиусе 30 км) не нашёл известных площадок ТКО. Можно отправить "
+    "обращение без привязки к площадке — инспектор разберётся."
+)
+_ADDR_UNRESOLVED = (
+    "Адрес не распознал, но обращение принято по описанию — инспектор разберётся."
+)
+# Callback-ответы (кнопки).
+_CB_EXPIRED = "Сессия истекла. Пришлите, пожалуйста, фото площадки заново."
+_CB_ALREADY = "Это обращение уже отправлено."
+_CB_BAD_CHOICE = "Не удалось распознать выбор. Пришлите фото заново."
+_CB_FINALIZE_FAIL = "Не удалось отправить обращение. Попробуйте ещё раз."
 
 
 def create_bot() -> Bot:
@@ -170,6 +218,250 @@ async def _send_example(msg: Message) -> None:
     await msg.answer(text=_GREETING_CAPTION, attachments=[photo])
 
 
+def _extract_photo_time(text: str) -> str:
+    """Время фотофиксации из текста: любое ЧЧ:ММ (напр. «…, 10:28» или «Время
+    19:30»); иначе — текущее время приёма. Возврат — ISO "%Y-%m-%dT%H:%M"."""
+    now = datetime.now()
+    tm = _ANY_TIME_RE.search(text)
+    if tm:
+        return now.replace(
+            hour=int(tm.group(1)), minute=int(tm.group(2)), second=0, microsecond=0
+        ).strftime("%Y-%m-%dT%H:%M")
+    return now.strftime("%Y-%m-%dT%H:%M")
+
+
+async def _download_all(images: list[Image], mid) -> list[bytes]:
+    """Скачать до 3 картинок; сбойную/слишком большую — молча пропустить."""
+    photos: list[bytes] = []
+    for img in images:
+        try:
+            photos.append(await _download_image(img, max_bytes=settings.MAX_PHOTO_BYTES))
+        except AppError as exc:
+            logger.warning("skip image mid=%s: %s", mid, exc.code)
+    return photos
+
+
+def _point_of(prep: dict) -> tuple[float, float] | None:
+    """Достать (lat, lon) точки обращения из ответа /prepare; None — если нет."""
+    pt = prep.get("point") if isinstance(prep, dict) else None
+    if not isinstance(pt, dict):
+        return None
+    lat, lon = pt.get("lat"), pt.get("lon")
+    if lat is None or lon is None:
+        return None
+    try:
+        return (float(lat), float(lon))
+    except (TypeError, ValueError):
+        return None
+
+
+def _quote_of(result) -> str:
+    """Мотивирующая цитата из ответа finalize (может отсутствовать)."""
+    if isinstance(result, dict):
+        return (result.get("quote") or "").strip()
+    return ""
+
+
+def _candidate_line(i: int, c: dict) -> str:
+    """Строка нумерованного списка кандидатов: «i. Название — адрес (420 м)»."""
+    name = (c.get("name") or "").strip() or "Без названия"
+    addr = (c.get("address") or "").strip()
+    dist = human_distance(c.get("distance_m"))
+    line = f"{i}. {name}"
+    if addr:
+        line += f" — {addr}"
+    if dist:
+        line += f" ({dist})"
+    return line
+
+
+def _build_keyboard(pending_id: str, candidates: list[dict]):
+    """Инлайн-клавиатура: по кнопке на кандидата + кнопка «без привязки».
+
+    idx в payload — 0-based индекс в candidates (в callback берём candidates[idx]);
+    номер в подписи — 1-based. Пустой список → одна кнопка «Отправить без привязки».
+    """
+    b = InlineKeyboardBuilder()
+    for idx, c in enumerate(candidates):
+        b.row(
+            CallbackButton(
+                text=button_text(idx + 1, c.get("name", ""), c.get("address", "")),
+                payload=encode_payload(pending_id, idx),
+                intent=Intent.DEFAULT,
+            )
+        )
+    if candidates:
+        b.row(
+            CallbackButton(
+                text="Нет в списке",
+                payload=encode_payload(pending_id, NO_MNO),
+                intent=Intent.NEGATIVE,
+            )
+        )
+    else:
+        b.row(
+            CallbackButton(
+                text="Отправить без привязки",
+                payload=encode_payload(pending_id, NO_MNO),
+                intent=Intent.POSITIVE,
+            )
+        )
+    # maxapi 0.9.4: билдер стартует с пустого ряда [[]] — отфильтровать пустые ряды.
+    b.payload = [r for r in b.payload if r]
+    return b.as_markup()
+
+
+async def _send_report_prompt(
+    msg: Message, report: PendingReport, point: tuple[float, float] | None
+) -> None:
+    """Показать карту + список кандидатов + инлайн-кнопки выбора (одно сообщение)."""
+    candidates = report.candidates
+    markup = _build_keyboard(report.pending_id, candidates)
+
+    if candidates:
+        lines = [_HDR_PICK]
+        lines += [_candidate_line(i + 1, c) for i, c in enumerate(candidates)]
+        text = "\n".join(lines)
+        png = None
+        if point is not None:
+            png = await fetch_map(point[0], point[1], map_query(point, candidates))
+        attachments = []
+        if png:
+            attachments.append(InputMediaBuffer(buffer=png, filename="map.png"))
+        attachments.append(markup)
+        await msg.answer(text=text, attachments=attachments)
+    else:
+        # Кандидатов нет — карту не рисуем, только предложение отправить без привязки.
+        await msg.answer(text=_NO_MNO_NEARBY, attachments=[markup])
+
+
+async def _finalize(report: PendingReport, mno_id: str) -> dict:
+    """Создать обращение из полей pending + выбранного МНО (или без него)."""
+    p = report.parsed
+    return await finalize_max(
+        region=p.get("region", ""),
+        city=p.get("city", ""),
+        street=p.get("street", ""),
+        coords=p.get("coords", ""),
+        comment=p.get("comment", ""),
+        photo_time=p.get("photo_time", ""),
+        msg_id=report.msg_id,
+        sender_name=report.sender_name,
+        msg_url=report.msg_url,
+        mno_id=mno_id,
+        photo_bytes_list=report.photos,
+    )
+
+
+async def _start_report(
+    msg: Message,
+    *,
+    text: str,
+    photos: list[bytes],
+    sender_name: str,
+    msg_id: str,
+    msg_url: str,
+    chat_id,
+    user_id,
+) -> None:
+    """DM: фото+текст → prepare → карта+кнопки (или просьба прислать адрес)."""
+    photo_time = _extract_photo_time(text)
+    prep = await prepare_max(text, photo_time=photo_time)  # IntakeError → внешний soft-reply
+    report = PendingReport(
+        pending_id=new_pending_id(),
+        chat_id=chat_id,
+        user_id=user_id,
+        photos=photos,
+        sender_name=sender_name,
+        msg_url=msg_url,
+        msg_id=msg_id,
+        parsed=(prep.get("parsed") or {}),
+    )
+    if prep.get("status") == "need_address":
+        report.awaiting_address = True
+        _STORE.put(report)
+        await msg.answer(text=_ASK_ADDRESS)
+        return
+    report.candidates = prep.get("candidates") or []
+    _STORE.put(report)
+    await _send_report_prompt(msg, report, _point_of(prep))
+
+
+async def _handle_address_reply(msg: Message, report: PendingReport, address: str) -> None:
+    """DM: пользователь прислал адрес текстом на просьбу уточнить.
+
+    ok → показать карту+кнопки; снова need_address → принять обращение по
+    описанию БЕЗ привязки (чтобы не потерять фото/описание)."""
+    prep = await prepare_max(address, photo_time=report.parsed.get("photo_time", ""))
+    # Новый разбор поверх исходного, НЕ затирая непустые comment/photo_time из подписи.
+    report.parsed = merge_parsed(report.parsed, prep.get("parsed") or {})
+
+    if prep.get("status") == "ok":
+        report.candidates = prep.get("candidates") or []
+        report.awaiting_address = False
+        _STORE.put(report)
+        await _send_report_prompt(msg, report, _point_of(prep))
+        return
+
+    # Адрес снова не распознан → принимаем по описанию, без привязки к МНО.
+    report.awaiting_address = False
+    try:
+        result = await _finalize(report, mno_id="")
+    except IntakeError:
+        report.awaiting_address = True  # вернуть ожидание — пусть повторит
+        _STORE.put(report)
+        raise  # внешний обработчик ответит мягкой ошибкой
+    report.finalized = True
+    report.photos = []  # освободить память — байты фото больше не нужны
+    _STORE.put(report)
+    quote = _quote_of(result)
+    reply = _ADDR_UNRESOLVED + (f"\n\n{quote}" if quote else "")
+    await msg.answer(text=reply)
+
+
+async def _handle_group_report(
+    msg: Message, *, text: str, mid, sender_name: str, images: list[Image]
+) -> None:
+    """ГРУППА: прежний прямой приём (push_incident), БЕЗ интерактива с МНО."""
+    if not (images and text):
+        logger.info("ignored group message mid=%s (нет фото или пустой текст)", mid)
+        return
+    photos = await _download_all(images, mid)
+    if not photos:
+        logger.info("ignored group message mid=%s (нет пригодного фото)", mid)
+        return
+    photo_time = _extract_photo_time(text)
+    msg_url = getattr(msg, "url", None) or ""
+    logger.info(
+        "max msg url=%r chat_id=%s seq=%s mid=%s",
+        getattr(msg, "url", None),
+        getattr(getattr(msg, "recipient", None), "chat_id", None),
+        getattr(getattr(msg, "body", None), "seq", None),
+        mid,
+    )
+    result = await push_incident(
+        text=text,
+        msg_id=str(mid),
+        sender_name=sender_name,
+        photo_bytes_list=photos,
+        photo_time=photo_time,
+        msg_url=msg_url,
+    )
+    quote = _quote_of(result)
+    reply = _REPLY_ACCEPTED + (f"\n\n{quote}" if quote else "")
+    await msg.answer(text=reply)
+
+
+async def _notify_callback(event: MessageCallback, text: str) -> None:
+    """Показать ТОЛЬКО тост-уведомление, НЕ трогая исходное сообщение (список +
+    кнопки остаются как есть — важно для повторов/ошибок с возможностью retry).
+    В отличие от event.answer, message=None → текст/вложения не переписываются."""
+    bot = getattr(event, "bot", None)
+    if bot is None:
+        return
+    await bot.send_callback(callback_id=event.callback.callback_id, notification=text)
+
+
 def build_router() -> Router:
     """Build the router: a `/start` handler plus the main message handler."""
     router = Router()
@@ -190,9 +482,8 @@ def build_router() -> Router:
     @router.message_created()
     async def on_message_created(event: MessageCreated) -> None:
         msg = event.message
-        # В ГРУППЕ бот не болтает: принимает только фото+подпись (создаёт обращение,
-        # уведомление шлёт notify_loop карточкой). Пример/приветствие/ошибки и любые
-        # не-фото сообщения (pptx, файлы, текст) в группе игнорируются молча.
+        # В ГРУППЕ бот не болтает: принимает только фото+подпись (прямой push_incident,
+        # без интерактива с МНО). Приветствие/ошибки/не-фото в группе — молча.
         ct = getattr(getattr(msg, "recipient", None), "chat_type", None)
         is_group = getattr(ct, "value", ct) == "chat"
         try:
@@ -202,65 +493,56 @@ def build_router() -> Router:
             sender_name = _sender_display_name(msg.sender)
             images = _all_images(msg)
 
-            # Приветствие/пустое сообщение без фото → пример (ТОЛЬКО в личке, не в группе).
-            if not is_group and not images and _is_greeting(text):
+            # --- ГРУППА: прежнее поведение без изменений ---
+            if is_group:
+                await _handle_group_report(
+                    msg, text=text, mid=mid, sender_name=sender_name, images=images
+                )
+                return
+
+            # --- ЛИЧКА: интерактивный флоу с отложенным созданием обращения ---
+            chat_id = getattr(getattr(msg, "recipient", None), "chat_id", None)
+            user_id = getattr(getattr(msg, "sender", None), "user_id", None)
+
+            # 1) Ответ-адрес: текст без фото, а мы ждём адрес по этому чату.
+            if not images and text:
+                now = time.time()
+                _STORE.purge(now)
+                pending = _STORE.find_awaiting(chat_key(chat_id, user_id), now=now)
+                if pending is not None and not _is_greeting(text):
+                    await _handle_address_reply(msg, pending, text)
+                    return
+
+            # 2) Приветствие/пустое сообщение без фото → пример формата.
+            if not images and _is_greeting(text):
                 await _send_example(msg)
                 return
 
-            # Валидное обращение = ФОТО + непустой текст (адрес). Слово «Время» НЕ обязательно.
+            # 3) Новое обращение = ФОТО + непустой текст (адрес/описание).
             if images and text:
-                # Скачиваем ВСЕ картинки (до 3); сбойную/слишком большую — пропускаем.
-                photos: list[bytes] = []
-                for img in images:
-                    try:
-                        photos.append(
-                            await _download_image(img, max_bytes=settings.MAX_PHOTO_BYTES)
-                        )
-                    except AppError as exc:
-                        logger.warning("skip image mid=%s: %s", mid, exc.code)
+                photos = await _download_all(images, mid)
                 if photos:
-                    # Время фотофиксации: любое ЧЧ:ММ из текста (напр. «…, 10:28)» или «Время 19:30»),
-                    # иначе — текущее время приёма.
-                    now = datetime.now()
-                    tm = _ANY_TIME_RE.search(text)
-                    if tm:
-                        photo_time = now.replace(
-                            hour=int(tm.group(1)), minute=int(tm.group(2)), second=0, microsecond=0
-                        ).strftime("%Y-%m-%dT%H:%M")
-                    else:
-                        photo_time = now.strftime("%Y-%m-%dT%H:%M")
-                    # Готовый веб-URL сообщения из MAX (Optional[str]); для лички с ботом обычно None.
-                    # Берём через getattr на случай отсутствия поля в текущей версии maxapi.
                     msg_url = getattr(msg, "url", None) or ""
-                    # Диагностика прода: подтверждаем, что реально шлёт API (url/chat_id/seq/mid).
                     logger.info(
                         "max msg url=%r chat_id=%s seq=%s mid=%s",
                         getattr(msg, "url", None),
-                        getattr(getattr(msg, "recipient", None), "chat_id", None),
+                        chat_id,
                         getattr(body, "seq", None),
                         mid,
                     )
-                    # Весь текст уходит как адрес → бэк разберёт его через DaData Clean.
-                    result = await push_incident(
+                    await _start_report(
+                        msg,
                         text=text,
-                        msg_id=str(mid),
+                        photos=photos,
                         sender_name=sender_name,
-                        photo_bytes_list=photos,
-                        photo_time=photo_time,
+                        msg_id=str(mid),
                         msg_url=msg_url,
+                        chat_id=chat_id,
+                        user_id=user_id,
                     )
-                    # Бэк возвращает мотивирующую цитату о природе — дописываем к ответу.
-                    quote = ""
-                    if isinstance(result, dict):
-                        quote = (result.get("quote") or "").strip()
-                    reply = _REPLY_ACCEPTED + (f"\n\n{quote}" if quote else "")
-                    # Отвечаем в ТОМ ЖЕ чате, где пришло сообщение: личка → в личку,
-                    # группа → в группу. Отдельную карточку в группу для max-обращений
-                    # больше НЕ шлём (notify-карточка осталась только для формы).
-                    await msg.answer(text=reply)
                     return
 
-            # Невалидно (нет фото / пустой текст) — МОЛЧИМ, в чат ничего не пишем (по требованию).
+            # Невалидно (нет фото / пустой текст) — молчим.
             logger.info("ignored message mid=%s (нет фото или пустой текст)", mid)
 
         except AppError as exc:
@@ -277,6 +559,72 @@ def build_router() -> Router:
                 getattr(getattr(msg, "body", None), "mid", None),
             )
             await _safe_reply(msg)
+
+    @router.message_callback()
+    async def on_callback(event: MessageCallback) -> None:
+        """Тап по инлайн-кнопке выбора МНО → finalize обращения.
+
+        ИДЕМПОТЕНТНО: event.answer ПЕРЕ-шлёт исходные вложения (кнопки остаются
+        на месте), поэтому повторный тап по уже отправленному → просто тост.
+        """
+        try:
+            decoded = decode_payload(event.callback.payload or "")
+            if decoded is None:
+                await _notify_callback(event, _CB_BAD_CHOICE)
+                return
+            pid, idx = decoded
+
+            _STORE.purge(time.time())
+            report = _STORE.get(pid)
+            if report is None:
+                await _notify_callback(event, _CB_EXPIRED)
+                return
+            if report.finalized:
+                await _notify_callback(event, _CB_ALREADY)
+                return
+
+            # Определяем выбранную площадку (idx==NO_MNO → без привязки).
+            if idx == NO_MNO:
+                mno_id = ""
+                mno_name = ""
+            else:
+                if not isinstance(idx, int) or idx >= len(report.candidates):
+                    await _notify_callback(event, _CB_BAD_CHOICE)
+                    return
+                cand = report.candidates[idx]
+                mno_id = str(cand.get("id") or "")
+                mno_name = (cand.get("name") or "").strip()
+
+            try:
+                result = await _finalize(report, mno_id)
+            except IntakeError:
+                # НЕ помечаем finalized — пользователь может повторить тап.
+                await _notify_callback(event, _CB_FINALIZE_FAIL)
+                return
+
+            report.finalized = True
+            report.photos = []  # освободить память (байты фото уже отправлены)
+            _STORE.put(report)
+
+            lines = ["✅ Спасибо! Обращение принято."]
+            if mno_name:
+                lines.append(f"Площадка: {mno_name}")
+            elif idx == NO_MNO:
+                lines.append("Отправлено без привязки к площадке.")
+            quote = _quote_of(result)
+            if quote:
+                lines.append("")
+                lines.append(quote)
+            # event.answer перепишет текст сообщения на подтверждение и оставит
+            # исходные вложения (карту/кнопки). notification — короткий тост.
+            await event.answer(new_text="\n".join(lines), notification="Принято")
+
+        except Exception:  # noqa: BLE001 — poller must never die on one bad callback
+            logger.exception("unexpected error handling callback")
+            try:
+                await _notify_callback(event, _CB_FINALIZE_FAIL)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to send callback error notification")
 
     return router
 

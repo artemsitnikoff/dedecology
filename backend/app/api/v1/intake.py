@@ -13,7 +13,7 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from ...core.errors import AppError, ForbiddenError, NotFoundError, ValidationEr
 from ...database import get_db
 from ...deps import get_optional_volunteer
 from ...models import Volunteer
+from ...services.geo import parse_latlon
 from ...schemas.incident import (
     MarkNotified,
     MarkNotifiedResult,
@@ -333,6 +334,118 @@ async def max_intake(
     incident.quote = quote
     await session.commit()
     return {"ok": True, "incident_id": str(incident.id), "quote": quote}
+
+
+@router.post("/max/prepare", tags=["Приём вебхуков (server-to-server)"])
+async def max_prepare(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """Первая фаза приёма из Макс-бота: разбор адреса + поиск ближайших МНО (без записи).
+
+    Гейт X-Intake-Token (как /max). Тело — JSON `{"text": "<подпись>", "photo_time":
+    "<опц. ISO>"}` (толерантный разбор). Возвращает dict по контракту: status
+    "need_address" (координаты не распознаны) либо "ok" + point + до 5 кандидатов-МНО.
+    Инцидент НЕ создаётся — это делает /max/finalize после выбора площадки.
+    """
+    _require_intake_token(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    text = body.get("text") or ""
+    photo_time = body.get("photo_time") or ""
+    return await intake_service.prepare_max_report(
+        session, text=text, photo_time=photo_time
+    )
+
+
+@router.post("/max/finalize", tags=["Приём вебхуков (server-to-server)"])
+async def max_finalize(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    region: str = Form(""),
+    city: str = Form(""),
+    street: str = Form(""),
+    coords: str = Form(""),
+    comment: str = Form(""),
+    photo_time: str = Form(""),
+    msg_id: str = Form(""),
+    sender_name: str = Form(""),
+    msg_url: str = Form(""),
+    mno_id: str = Form(""),
+    photos: list[UploadFile] = File(default=[]),
+):
+    """Вторая фаза приёма из Макс-бота: создаёт Incident(source='max') из разобранных
+    полей + выбранного МНО (multipart/form-data). AI НЕ дёргаем повторно.
+
+    Гейт X-Intake-Token. mno_id пуст = «Нет в списке» (обращение без привязки к площадке).
+    Возвращает {"ok": true, "incident_id": ..., "quote": ...}; цитата — 2-м коммитом на
+    incident.quote (как в /max).
+    """
+    _require_intake_token(request)
+    incident = await intake_service.create_incident_from_max_selected(
+        session,
+        region=region,
+        city=city,
+        street=street,
+        coords=coords,
+        comment=comment,
+        mno_id=mno_id,
+        msg_id=msg_id,
+        sender_name=sender_name,
+        msg_url=msg_url,
+        photo_time=photo_time or None,
+        photo_files=photos,
+    )
+    await session.commit()
+    # Цитату генерируем ПОСЛЕ commit — медленный/упавший CLI не блокирует запись.
+    quote = await quotes_service.nature_quote()
+    incident.quote = quote
+    await session.commit()
+    return {"ok": True, "incident_id": str(incident.id), "quote": quote}
+
+
+def _parse_map_pts(pts: str) -> list[tuple[float, float]]:
+    """«lat,lon;lat,lon;...» → список (lat, lon). Пустые/битые сегменты пропускаются."""
+    out: list[tuple[float, float]] = []
+    for seg in (pts or "").split(";"):
+        seg = seg.strip()
+        if not seg:
+            continue
+        lat, lon = parse_latlon(seg)
+        if lat is not None and lon is not None:
+            out.append((lat, lon))
+    return out
+
+
+@router.get("/max/map", tags=["Приём вебхуков (server-to-server)"])
+async def max_map(
+    request: Request,
+    lat: float = Query(..., description="Широта точки обращения"),
+    lon: float = Query(..., description="Долгота точки обращения"),
+    pts: str = Query("", description="Координаты МНО «lat,lon;lat,lon;...» (0..5)"),
+):
+    """Карта из тайлов OpenStreetMap с метками ближайших МНО + точкой обращения → image/png.
+
+    Гейт X-Intake-Token. Карта рисуется сервером самостоятельно (сшивка тайлов OSM,
+    без API-ключа) — всегда доступна. Сбой рендера (все тайлы недоступны и т.п.) → 502
+    (бот деградирует на текст без картинки).
+    """
+    _require_intake_token(request)
+    points = _parse_map_pts(pts)
+    try:
+        png = await intake_service.render_max_map((lat, lon), points)
+    except Exception as e:  # noqa: BLE001 — любой сбой рендера карты → 502
+        logger.warning("[intake.max.map] render failed: %s: %s", type(e).__name__, e)
+        raise AppError(
+            code="MAP_UPSTREAM_ERROR",
+            message="Map provider error",
+            status_code=502,
+        )
+    return Response(content=png, media_type="image/png")
 
 
 @router.get(
