@@ -333,9 +333,11 @@ async def _send_report_prompt(
     markup = _build_keyboard(report.pending_id, candidates)
 
     if candidates:
-        lines = [_HDR_PICK]
-        lines += [_candidate_line(i + 1, c) for i, c in enumerate(candidates)]
-        text = "\n".join(lines)
+        # Пустая строка между пунктами — список читается легче (по просьбе с прода).
+        body = "\n\n".join(
+            _candidate_line(i + 1, c) for i, c in enumerate(candidates)
+        )
+        text = f"{_HDR_PICK}\n\n{body}"
         png = None
         if point is not None:
             png = await fetch_map(point[0], point[1], map_query(point, candidates))
@@ -477,6 +479,30 @@ async def _notify_callback(event: MessageCallback, text: str) -> None:
     if bot is None:
         return
     await bot.send_callback(callback_id=event.callback.callback_id, notification=text)
+
+
+async def _edit_callback_message(event: MessageCallback, text: str) -> None:
+    """Отредактировать сообщение с кнопками: заменить текст и СНЯТЬ вложения.
+
+    edit_message без attachments отправляет `attachments: []` (см. исходник maxapi
+    0.9.4 EditMessage) → клавиатура и карта убираются. Зовём СРАЗУ по тапу, чтобы
+    кнопки не оставались жать до ответа бэка. Бот/mid недоступны или edit не прошёл →
+    фолбэк отдельным сообщением (кнопки в этом случае могут остаться)."""
+    bot = getattr(event, "bot", None)
+    body = getattr(getattr(event, "message", None), "body", None)
+    mid = getattr(body, "mid", None)
+    if bot is not None and mid:
+        try:
+            await bot.edit_message(
+                message_id=mid, text=text, parse_mode=ParseMode.HTML
+            )
+            return
+        except Exception:  # noqa: BLE001 — не вышло отредактировать → фолбэк ниже
+            logger.exception("edit_message не удалось mid=%s", mid)
+    try:
+        await event.message.answer(text=text, parse_mode=ParseMode.HTML)
+    except Exception:  # noqa: BLE001
+        logger.exception("edit fallback answer не удалось")
 
 
 def build_router() -> Router:
@@ -624,12 +650,23 @@ def build_router() -> Router:
 
             # Замок ДО первого await — второй одновременный тап увидит processing=True.
             report.processing = True
+
+            # СРАЗУ гасим клавиатуру и показываем прогресс: finalize занимает ≈ загрузку
+            # фото + генерацию цитаты, и всё это время кнопки оставались бы жать (человек
+            # тыкает по 5 раз). Тост «Принято» — мгновенная обратная связь.
+            await _notify_callback(event, "Принято ✅")
+            await _edit_callback_message(event, "⏳ Отправляю обращение…")
+
             try:
                 result = await _finalize(report, mno_id)
             except IntakeError:
-                # Снимаем замок — пользователь может повторить тап (обращение НЕ создано).
+                # Обращение НЕ создано — снимаем замок; кнопки уже убраны, поэтому просим
+                # прислать фото заново (повторный тап невозможен).
                 report.processing = False
-                await _notify_callback(event, _CB_FINALIZE_FAIL)
+                await _edit_callback_message(
+                    event,
+                    "❌ Не удалось отправить. Пришлите, пожалуйста, фото площадки заново.",
+                )
                 return
 
             report.finalized = True
@@ -637,7 +674,7 @@ def build_router() -> Router:
             report.photos = []  # освободить память (байты фото уже отправлены)
             _STORE.put(report)
 
-            # Подтверждение (HTML): жирная площадка + цитата.
+            # Финальное подтверждение (HTML): жирная площадка + цитата.
             parts = ["✅ Спасибо! Обращение принято."]
             if mno_label:
                 parts.append(f"Площадка: <b>{html.escape(mno_label)}</b>")
@@ -647,35 +684,7 @@ def build_router() -> Router:
             if quote:
                 parts.append("")
                 parts.append(html.escape(quote))
-            confirmation = "\n".join(parts)
-
-            # 1) Подтвердить callback — тост + погасить «загрузку» на нажатой кнопке.
-            await _notify_callback(event, "Принято ✅")
-            # 2) Убрать клавиатуру: edit_message без attachments шлёт attachments=[]
-            #    (см. исходник maxapi 0.9.4 EditMessage) → кнопки и карта снимаются.
-            bot = getattr(event, "bot", None)
-            body = getattr(getattr(event, "message", None), "body", None)
-            mid = getattr(body, "mid", None)
-            edited = False
-            if bot is not None and mid:
-                try:
-                    await bot.edit_message(
-                        message_id=mid, text=confirmation, parse_mode=ParseMode.HTML
-                    )
-                    edited = True
-                except Exception:  # noqa: BLE001 — не вышло отредактировать → фолбэк ниже
-                    logger.exception(
-                        "edit_message (снять клавиатуру) не удалось mid=%s", mid
-                    )
-            if not edited:
-                # Фолбэк: отдельным сообщением (кнопки могут остаться, но обращение уже
-                # создано и finalized — повторный тап получит «уже отправлено»).
-                try:
-                    await event.message.answer(
-                        text=confirmation, parse_mode=ParseMode.HTML
-                    )
-                except Exception:  # noqa: BLE001
-                    logger.exception("confirm fallback answer не удалось")
+            await _edit_callback_message(event, "\n".join(parts))
 
         except Exception:  # noqa: BLE001 — poller must never die on one bad callback
             logger.exception("unexpected error handling callback")
