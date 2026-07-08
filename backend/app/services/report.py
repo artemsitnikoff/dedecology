@@ -61,6 +61,17 @@ async def create_incidents_report(
 
     content = build_xlsx(rows, base_url)
 
+    # Формирование отчёта = выгрузка: включённые в него обращения СРАЗУ переходят в
+    # статус «Выгружен» (по требованию). Файл собран ВЫШЕ — в нём статусы на момент
+    # выгрузки (снимок). Идемпотентно: уже выгруженные не трогаем и не считаем.
+    exported_now = 0
+    for inc in rows:
+        if inc.status != "exported":
+            inc.status = "exported"
+            exported_now += 1
+    if exported_now:
+        await session.flush()
+
     now = datetime.now(timezone.utc)
     if req.ids:
         filename = f"Обращения_ЭкоПульс_{now:%Y-%m-%d_%H-%M}_выбранные.xlsx"
@@ -93,6 +104,16 @@ async def create_incidents_report(
         },
         actor_user_id=current_user.id,
     )
+    # Отдельный аудит массового перевода в «Выгружен» (если что-то реально изменилось).
+    if exported_now:
+        await audit(
+            session,
+            action="incidents_marked_exported",
+            entity_type="incident",
+            entity_id=None,
+            after={"count": exported_now, "report": report.filename},
+            actor_user_id=current_user.id,
+        )
     await session.flush()
     return report
 

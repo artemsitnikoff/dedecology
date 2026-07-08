@@ -7,7 +7,7 @@ tmp_path) — реального STORAGE_DIR не трогаем, сеть/БД 
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -176,10 +176,16 @@ async def test_create_by_filters_writes_file_and_row(tmp_path, monkeypatch):
     session, added = _session_for_create()
     user = _user()
     req = ReportCreateRequest(region="63", status=["new"])
+    # Строки со статусами — проверяем авто-перевод в «Выгружен» при формировании отчёта.
+    fake_rows = [
+        SimpleNamespace(status="new"),
+        SimpleNamespace(status="found"),
+        SimpleNamespace(status="exported"),  # уже выгружен — не считаем повторно
+    ]
 
     with patch(
         "app.services.report.incident_service.list_for_export",
-        new=AsyncMock(return_value=[object(), object(), object()]),
+        new=AsyncMock(return_value=fake_rows),
     ) as m_export, patch(
         "app.services.report.incident_service.list_by_ids",
         new=AsyncMock(side_effect=AssertionError("не должен вызываться по фильтру")),
@@ -207,6 +213,8 @@ async def test_create_by_filters_writes_file_and_row(tmp_path, monkeypatch):
     path = tmp_path / "reports" / f"{report.id}.xlsx"
     assert path.exists()
     assert path.read_bytes() == b"xlsxbytes"
+    # Все включённые обращения переведены в «Выгружен» (в т.ч. уже выгруженное осталось им).
+    assert all(r.status == "exported" for r in fake_rows)
 
 
 @pytest.mark.asyncio
@@ -216,9 +224,10 @@ async def test_create_by_ids_uses_list_by_ids_and_suffix(tmp_path, monkeypatch):
     session, added = _session_for_create()
     req = ReportCreateRequest(ids=[str(uuid4()), str(uuid4())])
 
+    ids_row = SimpleNamespace(status="new")
     with patch(
         "app.services.report.incident_service.list_by_ids",
-        new=AsyncMock(return_value=[object()]),
+        new=AsyncMock(return_value=[ids_row]),
     ) as m_ids, patch(
         "app.services.report.incident_service.list_for_export",
         new=AsyncMock(side_effect=AssertionError("не должен вызываться по ids")),
@@ -232,8 +241,11 @@ async def test_create_by_ids_uses_list_by_ids_and_suffix(tmp_path, monkeypatch):
         )
 
     m_ids.assert_awaited_once()
+    # ids в запросе — UUID (не str): иначе list_by_ids матчит по UUID-ключам впустую → 0 строк.
+    assert all(isinstance(i, UUID) for i in req.ids)
     assert report.filename.endswith("_выбранные.xlsx")
     assert report.row_count == 1
+    assert ids_row.status == "exported"  # выбранное обращение переведено в «Выгружен»
     assert (tmp_path / "reports" / f"{report.id}.xlsx").exists()
 
 

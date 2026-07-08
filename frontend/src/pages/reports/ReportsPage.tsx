@@ -215,7 +215,7 @@ export function ReportsPage() {
         ) : rows.length > 0 ? (
           <div className="de-rep-table">
             <div className="de-rep-thead">
-              <div className="de-rep-th de-rep-c-date">Дата и время формирования</div>
+              <div className="de-rep-th de-rep-c-date">Дата и время</div>
               <div className="de-rep-th de-rep-c-kind">Тип</div>
               <div className="de-rep-th de-rep-c-rows">Строк</div>
               <div className="de-rep-th de-rep-c-size">Размер</div>

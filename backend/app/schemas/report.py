@@ -27,7 +27,9 @@ class ReportCreateRequest(BaseModel):
     Иначе — по фильтру (как GET /incidents/export): search/source/status/region/период/сортировка.
     """
 
-    ids: list[str] = []
+    # UUID (не str!): list_by_ids строит словарь по UUID-ключам и матчит эти id —
+    # со строками матч всегда пуст → отчёт по выбранным получался на 0 строк.
+    ids: list[UUID] = []
     search: str | None = None
     source: list[str] | None = None
     status: list[str] | None = None

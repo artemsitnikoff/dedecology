@@ -119,7 +119,9 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   иначе по фильтру) → 201 ReportListItem (СИНХРОННО формирует .xlsx, пишет файл + строку); `GET /reports`
   (page/page_size) → `Paginated[ReportListItem]` (новейшие первыми); `GET /reports/{id}/download` → .xlsx
   с диска (нет строки/файла → 404); `DELETE /reports/{id}` → `{message}` (удаляет строку+файл).
-  ReportListItem = id/kind/filename/row_count/size_bytes/created_by_fio/created_at.
+  ReportListItem = id/kind/filename/row_count/size_bytes/created_by_fio/created_at. ⚠️ `ids` в запросе —
+  UUID (не str, иначе `list_by_ids` матчит впустую → 0 строк). **Формирование отчёта СРАЗУ переводит все
+  включённые обращения в статус `exported`** (файл собирается ДО перевода — в нём снимок прежних статусов).
 - **settings/smtp** (только admin, гейт на роутере): `GET /settings/smtp` → статус (БЕЗ пароля:
   configured/verified/host/port/encryption/username/from_email/from_name/last_test_*); `POST
   /settings/smtp/config {host,port,encryption,username,password,from_email,from_name}` (пароль write-only:
