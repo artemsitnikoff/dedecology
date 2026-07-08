@@ -12,6 +12,7 @@ from .mno import router as mno_router
 from .profile import router as profile_router
 from .regions import fed_router as federal_districts_router
 from .regions import router as regions_router
+from .reports import router as reports_router
 from .smtp import router as smtp_router
 from .users import router as users_router
 from .volunteer import router as volunteer_router
@@ -25,6 +26,8 @@ api_router = APIRouter()
 # Поэтому здесь tags на include_router не задаются — только префиксы и зависимости.
 api_router.include_router(auth_router, prefix="/auth")
 api_router.include_router(incidents_router, prefix="/incidents")
+# Отчёты — история Excel-выгрузок обращений; доступ любому авторизованному, БЕЗ admin-гейта.
+api_router.include_router(reports_router, prefix="/reports")
 api_router.include_router(mno_router, prefix="/mno")
 api_router.include_router(regions_router, prefix="/regions")
 api_router.include_router(federal_districts_router, prefix="/federal-districts")

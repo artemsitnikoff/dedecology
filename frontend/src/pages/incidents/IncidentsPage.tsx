@@ -1,14 +1,17 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
+import { Toast, useToast } from '@/components/ui/Toast';
 import { useIncidents } from '@/api/hooks/useIncidents';
 import type { IncidentFilters, SortKey, SortOrder } from '@/api/hooks/useIncidents';
 import { useIncidentPoints } from '@/api/hooks/useIncidentPoints';
 import { useFunnelCounts } from '@/api/hooks/useFunnelCounts';
 import { useRegions } from '@/api/hooks/useRegions';
 import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
-import { exportAll, exportSelected, useBulkStatus, useBulkDelete } from '@/api/mutations/incidents';
-import type { Source, Status } from '@/api/aliases';
+import { useBulkStatus, useBulkDelete } from '@/api/mutations/incidents';
+import { useCreateIncidentsReport } from '@/api/mutations/reports';
+import type { CreateIncidentsReportBody } from '@/api/mutations/reports';
+import type { ApiError, Source, Status } from '@/api/aliases';
 import { YandexMap } from '@/components/YandexMap';
 import { Funnel } from './Funnel';
 import { FilterBar } from './FilterBar';
@@ -211,6 +214,8 @@ export function IncidentsPage() {
   const grandTotalQuery = useFunnelCounts({});
   const bulkStatus = useBulkStatus();
   const bulkDelete = useBulkDelete();
+  const createReport = useCreateIncidentsReport();
+  const { message, showToast } = useToast();
 
   const rows = incidentsQuery.data?.items ?? [];
   const total = incidentsQuery.data?.total ?? 0;
@@ -321,13 +326,45 @@ export function IncidentsPage() {
     [rows]
   );
 
-  const handleExportAll = useCallback(() => {
-    void exportAll(filters);
-  }, [filters]);
-
-  const handleExportSelected = useCallback(() => {
-    void exportSelected(Array.from(selectedRef.current));
+  /** Достаёт человекочитаемое сообщение из конверта ошибки бэка, иначе — fallback. */
+  const reportErrorMessage = useCallback((err: unknown, fallback: string): string => {
+    const message = (err as Partial<ApiError>)?.error?.message;
+    return message || fallback;
   }, []);
+
+  const handleCreateReport = useCallback(() => {
+    // Отчёт по текущему отфильтрованному набору (без ids — контракт /reports/incidents
+    // трактует пустой ids как «по фильтрам»). incident_type/mno_id вне контракта отчёта.
+    const body: CreateIncidentsReportBody = {
+      search: filters.search,
+      source: filters.source,
+      status: filters.status ? [filters.status] : undefined,
+      region: filters.region,
+      date_from: filters.date_from,
+      date_to: filters.date_to,
+      sort: filters.sort,
+      order: filters.order,
+    };
+    createReport.mutate(body, {
+      onSuccess: () => showToast('Отчёт сформирован — доступен в разделе «Отчёты».'),
+      onError: (err) => showToast(reportErrorMessage(err, 'Не удалось сформировать отчёт.')),
+    });
+  }, [createReport, filters, reportErrorMessage, showToast]);
+
+  const handleCreateReportSelected = useCallback(() => {
+    const ids = Array.from(selectedRef.current);
+    if (ids.length === 0) return;
+    createReport.mutate(
+      { ids },
+      {
+        onSuccess: () => {
+          showToast('Отчёт сформирован — доступен в разделе «Отчёты».');
+          clearSelection();
+        },
+        onError: (err) => showToast(reportErrorMessage(err, 'Не удалось сформировать отчёт.')),
+      }
+    );
+  }, [createReport, clearSelection, reportErrorMessage, showToast]);
 
   const handleMarkExported = useCallback(() => {
     const ids = Array.from(selectedRef.current);
@@ -364,11 +401,11 @@ export function IncidentsPage() {
         <button
           type="button"
           className="de-inc-btn de-inc-btn-outline"
-          onClick={handleExportAll}
-          disabled={total === 0}
+          onClick={handleCreateReport}
+          disabled={total === 0 || createReport.isPending}
         >
           <Icon name="download" size={15} />
-          Выгрузить всё
+          {createReport.isPending ? 'Формирование…' : 'Сформировать отчёт'}
         </button>
       </div>
 
@@ -471,10 +508,11 @@ export function IncidentsPage() {
               <button
                 type="button"
                 className="de-inc-btn de-inc-btn-success"
-                onClick={handleExportSelected}
+                onClick={handleCreateReportSelected}
+                disabled={createReport.isPending}
               >
                 <Icon name="download" size={14} />
-                Выгрузить в Excel
+                {createReport.isPending ? 'Формирование…' : 'Сформировать отчёт'}
               </button>
               <button
                 type="button"
@@ -582,6 +620,8 @@ export function IncidentsPage() {
           onNext={() => lbStep(1)}
         />
       )}
+
+      <Toast message={message} />
     </div>
   );
 }

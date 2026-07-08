@@ -15,6 +15,9 @@ const SettingsPage = lazy(() =>
   import('@/pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage }))
 );
 const MnoPage = lazy(() => import('@/pages/mno/MnoPage').then((m) => ({ default: m.MnoPage })));
+const ReportsPage = lazy(() =>
+  import('@/pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage }))
+);
 const RegionsPage = lazy(() =>
   import('@/pages/regions/RegionsPage').then((m) => ({ default: m.RegionsPage }))
 );
@@ -109,6 +112,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="/incidents" replace />} />
         <Route path="incidents" element={<IncidentsPage />} />
+        <Route path="reports" element={<ReportsPage />} />
         <Route path="mno" element={<MnoPage />} />
         <Route path="regions" element={<RegionsPage />} />
         <Route path="incident-types" element={<IncidentTypesPage />} />

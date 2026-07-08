@@ -70,6 +70,12 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
 - **audit_log:** id, action, entity_type, entity_id, changes (JSONB before/after), actor_type
   `human|system`, actor_user_id (FK users SET NULL), created_at. Пишется на каждое изменение статуса/
   массовое изменение/создание/удаление пользователя/смену профиля/сохранение-тест-отключение SMTP.
+- **reports:** история сформированных Excel-выгрузок обращений. id, kind (`incidents`), filename
+  (человекочит. имя скачивания), row_count, size_bytes, created_by_id (FK users SET NULL),
+  created_by_fio (снимок ФИО), created_at. Файл — на диске `{STORAGE_DIR}/reports/{id}.xlsx` (колонки
+  пути нет). Генерация СИНХРОННАЯ (в запросе, без arq): reuse `export.build_xlsx` +
+  `incident.list_for_export`/`list_by_ids`. ⚠️ фильтры incident_type/mno_id в отчёт НЕ входят (паритет
+  со старым GET /incidents/export).
 - **smtp_settings:** ЕДИНСТВЕННАЯ строка (single-tenant, get-or-create) — почтовый сервер, настраиваемый
   из UI («Настройки → Почта (SMTP)»). host, port, encryption `tls|ssl|none`, username, **password_enc**
   (Fernet-шифр — НАРУЖУ НИКОГДА не отдаётся), from_email, from_name, status `disconnected|connected`
@@ -78,7 +84,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   ОТДЕЛЬНЫЙ канал от env-mailer писем волонтёрам (SMTP_* env → verify/reset); каналы независимы.
 - Миграции: `0001_initial` (сначала `CREATE EXTENSION pgcrypto`) · `0002` notified_at+quote ·
   `0003` msg_url · `0004` is_superadmin (бэкфилл = старейший admin = pulse@reo.ru) · `0005` comment ·
-  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at · `0014` incidents.mno_reg · `0015` volunteers.email_code · `0016` incidents.mno_id · `0017` mno.source (МНО от волонтёра) · `0018` mno.comment+photo_urls · `0019` incidents/mno.volunteer_id (авторство) · `0020` smtp_settings.
+  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at · `0014` incidents.mno_reg · `0015` volunteers.email_code · `0016` incidents.mno_id · `0017` mno.source (МНО от волонтёра) · `0018` mno.comment+photo_urls · `0019` incidents/mno.volunteer_id (авторство) · `0020` smtp_settings · `0021` reports.
 
 ## 5. API (`/api/v1`, конверт ошибок `{error:{code,message,details}}`)
 - **auth:** `POST /auth/login` → `{access_token,token_type}` + HttpOnly refresh-cookie (path
@@ -104,6 +110,12 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   (нельзя удалить супер-админа, admin-роль и себя).
 - **profile** (self): `PATCH /profile {fio}`; `POST /profile/password {new_password}` (без ввода
   текущего, по ТЗ §9.1; min 6 / max 128).
+- **reports** (любой авторизованный — admin И user, как экспорт): `POST /reports/incidents`
+  `{ids?,search?,source?[],status?[],region?,date_from?,date_to?,sort,order}` (ids непуст → по выбранным,
+  иначе по фильтру) → 201 ReportListItem (СИНХРОННО формирует .xlsx, пишет файл + строку); `GET /reports`
+  (page/page_size) → `Paginated[ReportListItem]` (новейшие первыми); `GET /reports/{id}/download` → .xlsx
+  с диска (нет строки/файла → 404); `DELETE /reports/{id}` → `{message}` (удаляет строку+файл).
+  ReportListItem = id/kind/filename/row_count/size_bytes/created_by_fio/created_at.
 - **settings/smtp** (только admin, гейт на роутере): `GET /settings/smtp` → статус (БЕЗ пароля:
   configured/verified/host/port/encryption/username/from_email/from_name/last_test_*); `POST
   /settings/smtp/config {host,port,encryption,username,password,from_email,from_name}` (пароль write-only:
@@ -123,6 +135,11 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   снять), **таблица** 10 колонок (Фото·Дата·Время·Регион·Город·Адрес·Координаты·Статус·Источник·Чат),
   сортировка по клику на заголовок (**первый клик — убывание**, повтор — возрастание, ▲/▼), чекбоксы,
   пустое состояние 💚. Строка → **drawer** (карточка вкл. «Комментарий» + смена статуса). Миниатюра → **lightbox**.
+- **/reports** — «Отчёты»: история сформированных .xlsx-выгрузок обращений (таблица: дата+время
+  формирования · тип · строк · размер · сформировал · скачать/удалить), серверная пагинация `?rpage`,
+  пустое состояние 💚. Формируются со страницы «Инциденты»: кнопки «Выгрузить всё»/«Выгрузить в Excel»
+  ЗАМЕНЕНЫ на «Сформировать отчёт» (шапка — по фильтру, bulk — по выбранным); прямого скачивания со
+  страницы больше нет — файл уходит в «Отчёты». Пункт сайдбара «Отчёты» (icon download), виден всем ролям.
 - **/settings** — профиль (Заявитель / email readonly / смена пароля) + блок «Пользователи» (только admin:
   список, бейджи роли/статуса + «Супер-админ», создание юзера С ПАРОЛЕМ (сразу active, без temp_password),
   кнопка «Задать пароль» у каждого, удаление; у супер-админа удаление/сброс скрыты) + блок **«Почта (SMTP)»**

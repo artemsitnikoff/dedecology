@@ -7,6 +7,7 @@ from .mno import Mno
 from .incident_type import IncidentType
 from .volunteer import Volunteer
 from .smtp import SmtpSettings
+from .report import Report
 
 __all__ = [
     "Base",
@@ -20,4 +21,5 @@ __all__ = [
     "IncidentType",
     "Volunteer",
     "SmtpSettings",
+    "Report",
 ]

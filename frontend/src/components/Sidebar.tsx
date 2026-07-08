@@ -44,6 +44,7 @@ export function Sidebar() {
   const getActiveSection = () => {
     const path = location.pathname;
     if (path.startsWith('/incidents') || path === '/') return 'incidents';
+    if (path.startsWith('/reports')) return 'reports';
     if (path.startsWith('/mno')) return 'mno';
     if (path.startsWith('/regions')) return 'regions';
     if (path.startsWith('/incident-types')) return 'incident-types';
@@ -58,6 +59,7 @@ export function Sidebar() {
   // Основная навигация (до группы «Справочники»).
   const mainNav: NavItem[] = [
     { id: 'incidents', label: 'Инциденты', icon: 'incidents', count: incidentsCount },
+    { id: 'reports', label: 'Отчёты', icon: 'download' },
     { id: 'mno', label: 'МНО', icon: 'pin', count: mnoCount },
   ];
   // Справочники.

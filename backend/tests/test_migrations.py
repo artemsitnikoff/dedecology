@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0020():
-    """Цепочка ревизий консистентна: ровно один head, и это 0020 (0020→0019→…)."""
+def test_migration_chain_single_head_is_0021():
+    """Цепочка ревизий консистентна: ровно один head, и это 0021 (0021→0020→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0020"}
+    assert heads == {"0021"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -235,3 +235,38 @@ def test_0020_downgrade_drops_smtp_settings(monkeypatch):
     m.downgrade()
 
     fake_op.drop_table.assert_called_once_with("smtp_settings")
+
+
+def test_0021_revision_identifiers():
+    m = _load("0021_reports.py")
+    assert m.revision == "0021"
+    assert m.down_revision == "0020"
+
+
+def test_0021_upgrade_creates_reports(monkeypatch):
+    """upgrade(): create_table reports со всеми колонками (файл на диске по id)."""
+    m = _load("0021_reports.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    fake_op.create_table.assert_called_once()
+    args = fake_op.create_table.call_args.args
+    assert args[0] == "reports"
+    col_names = {c.name for c in args[1:] if hasattr(c, "name")}
+    assert {
+        "id", "kind", "filename", "row_count", "size_bytes",
+        "created_by_id", "created_by_fio", "created_at",
+    } <= col_names
+
+
+def test_0021_downgrade_drops_reports(monkeypatch):
+    """downgrade(): drop_table reports."""
+    m = _load("0021_reports.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    fake_op.drop_table.assert_called_once_with("reports")
