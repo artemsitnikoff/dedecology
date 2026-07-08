@@ -56,12 +56,22 @@ async def list_mno(
         description="Видимая область карты/гео «minLat,minLon,maxLat,maxLon» — вернуть "
         "только МНО этого кадра (ближайшие), как в /mno/points.",
     ),
+    lat: float | None = Query(
+        None,
+        description="Широта точки отсчёта для sort=distance (ближайшие площадки первыми).",
+    ),
+    lon: float | None = Query(
+        None,
+        description="Долгота точки отсчёта для sort=distance (ближайшие площадки первыми).",
+    ),
     session: AsyncSession = Depends(get_db),
     _actor=Depends(get_current_actor),
 ):
     """Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.
 
-    READ доступен и админу (веб), и волонтёру (мобильное приложение, карта площадок)."""
+    READ доступен и админу (веб), и волонтёру (мобильное приложение, карта площадок).
+    sort=distance + lat/lon — серверная сортировка по расстоянию (ближайшие первыми);
+    без lat/lon distance мягко откатывается на сортировку по имени."""
     return await mno_service.list_mno(
         session,
         search=search,
@@ -72,6 +82,8 @@ async def list_mno(
         page=page,
         page_size=page_size,
         bbox=bbox,
+        lat=lat,
+        lon=lon,
     )
 
 

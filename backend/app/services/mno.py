@@ -7,10 +7,11 @@
 """
 
 import math
+import re
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import asc, desc, func, or_, select
+from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import NotFoundError, ValidationError
@@ -52,16 +53,30 @@ _SORT_COLUMNS = {
 
 
 def _search_clause(search: str):
-    """ilike-OR по name/reg/city/address/coords/fgis_id."""
-    term = f"%{search.strip()}%"
-    return or_(
-        Mno.name.ilike(term),
-        Mno.reg.ilike(term),
-        Mno.city.ilike(term),
-        Mno.address.ilike(term),
-        Mno.coords.ilike(term),
-        Mno.fgis_id.ilike(term),
-    )
+    """Многословный поиск по name/reg/city/address/coords/fgis_id.
+
+    Запрос токенизируется по пробелам/знакам препинания; КАЖДЫЙ токен ищется ilike-OR
+    по всем полям, итог — AND (совпасть должны ВСЕ токены, каждый — в любом поле). Так
+    «Самарская Кинель» (или «Самарская область Кинель» без запятой) находит МНО, где
+    регион и город лежат в разных колонках. Один токен → прежнее поведение (обратная
+    совместимость). Пустой/только-разделители запрос → None (клауза не добавляется)."""
+    tokens = [t for t in re.split(r"[\s,.;:]+", search.strip()) if t]
+    if not tokens:
+        return None
+    per_token_or = []
+    for token in tokens:
+        term = f"%{token}%"
+        per_token_or.append(
+            or_(
+                Mno.name.ilike(term),
+                Mno.reg.ilike(term),
+                Mno.city.ilike(term),
+                Mno.address.ilike(term),
+                Mno.coords.ilike(term),
+                Mno.fgis_id.ilike(term),
+            )
+        )
+    return and_(*per_token_or)
 
 
 def _filters(
@@ -72,7 +87,9 @@ def _filters(
 ) -> list:
     filters: list = []
     if search and search.strip():
-        filters.append(_search_clause(search))
+        clause = _search_clause(search)
+        if clause is not None:
+            filters.append(clause)
     if region and region.strip():
         filters.append(Mno.region_code == region.strip())
     if synced is not None:
@@ -163,17 +180,34 @@ async def _query(
     offset: int | None = None,
     limit: int | None = None,
     bbox: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
 ) -> list[Mno]:
     """Ядро фильтра/сортировки: сырые строки Mno.
 
     offset/limit опциональны — None означает «весь набор» (используется экспортом).
+    sort='distance' (+ заданы lat/lon) — серверная сортировка по расстоянию до точки
+    (ближайшие первыми), МНО без числовых координат — в конец. Без lat/lon мягко
+    откатывается на дефолт (name asc), не 500.
     """
     filters = _filters(search, region, synced, bbox)
     stmt = select(Mno)
     if filters:
         stmt = stmt.where(*filters)
     direction = asc if order == "asc" else desc
-    if sort == "incidents":
+    if sort == "distance" and lat is not None and lon is not None:
+        # Ближайшие площадки к (lat, lon) — серверный ORDER BY по расстоянию, чтобы
+        # пагинация отдавала верную страницу (клиент больше не сортирует выданную
+        # страницу у себя). Эквидистантная аппроксимация без тригонометрии в SQL:
+        # долготу масштабируем питон-константой k=cos(lat), сравниваем квадрат
+        # расстояния (монотонно → порядок тот же, что у реального расстояния). Строки
+        # без числовых lat/lon (IS NULL) — всегда в КОНЕЦ (первый ключ сортировки).
+        k = math.cos(math.radians(lat))
+        dlat = Mno.lat - lat
+        dlon = (Mno.lon - lon) * k
+        dist_sq = dlat * dlat + dlon * dlon
+        stmt = stmt.order_by(Mno.lat.is_(None), asc(dist_sq), asc(Mno.id))
+    elif sort == "incidents":
         # Сортировка по числу обращений — по ЖИВОМУ COUNT инцидентов (incidents.mno_id),
         # а НЕ по статичной колонке Mno.incidents (та дрейфует и перекрывается на чтение
         # живым счётчиком, см. _incident_counts). Коррелированный скалярный подзапрос
@@ -207,12 +241,18 @@ async def list_mno(
     page: int = 1,
     page_size: int = 100,
     bbox: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
 ) -> Paginated[MnoListItem]:
     """Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.
 
     bbox («minLat,minLon,maxLat,maxLon») — видимая область карты/гео: список отдаёт только
     МНО текущего кадра (как /mno/points), чтобы приложение получало ближайшие площадки, а не
     весь реестр. Без bbox — прежнее поведение (весь отфильтрованный реестр постранично).
+
+    sort='distance' (+ lat/lon) — серверная сортировка по расстоянию до точки (ближайшие
+    первыми, NULL-координаты в конец): мобильный клиент больше НЕ сортирует страницу у себя
+    (что ломало пагинацию). Без lat/lon — мягкий фолбэк на name asc.
     """
     total = await _count(
         session, search=search, region=region, synced=synced, bbox=bbox
@@ -227,6 +267,8 @@ async def list_mno(
         offset=(page - 1) * page_size,
         limit=page_size,
         bbox=bbox,
+        lat=lat,
+        lon=lon,
     )
     region_names = await _region_names(session)
     counts = await _incident_counts(session, [m.id for m in rows])

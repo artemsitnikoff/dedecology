@@ -37,6 +37,7 @@ from ..core.security import (
 from ..models import Volunteer
 from ..schemas.volunteer import VolunteerRegister
 from . import smtp as smtp_service
+from .audit import audit
 from .smtp_templates import render_simple_email
 
 logger = logging.getLogger(__name__)
@@ -352,6 +353,27 @@ async def reset_password(session: AsyncSession, token: str, new_password: str) -
     volunteer.password_hash = get_password_hash(new_password)
     await session.flush()
     return volunteer
+
+
+async def change_own_password(
+    session: AsyncSession, volunteer: Volunteer, new_password: str
+) -> None:
+    """Смена собственного пароля волонтёром (мобильное приложение, POST /profile/password).
+
+    Пароль приходит плейнтекстом (или уже MD5-хешем от клиента — нам всё равно, bcrypt-им
+    как есть, консистентно с login). flush() здесь, commit() — в роутере. Аудит — системный
+    (actor_type='system', actor_user_id=None: действующего пользователя админки нет), как
+    у прочих волонтёрских действий."""
+    volunteer.password_hash = get_password_hash(new_password)
+    await session.flush()
+    await audit(
+        session,
+        action="password_reset",
+        entity_type="volunteer",
+        entity_id=volunteer.id,
+        actor_user_id=None,
+        actor_type="system",
+    )
 
 
 async def complete_onboarding(

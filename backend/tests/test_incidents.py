@@ -222,6 +222,50 @@ async def test_bulk_delete(client):
     assert gone.status_code == 404
 
 
+# --- #18 многословный поиск (токенизация, AND по токенам) ----------------------
+
+
+def test_search_clause_single_token_backward_compatible():
+    """Один токен → одна OR-группа ilike (прежнее поведение)."""
+    from app.services.incident import _search_clause
+
+    sql = str(_search_clause("Громов")).lower()
+    assert sql.count("like") == 6  # fio/region/city/street/coords/msg
+    assert " and " not in sql
+
+
+def test_search_clause_multiword_builds_and_of_or_groups():
+    """«Самарская Кинель» → AND из двух OR-групп (каждый токен по всем полям)."""
+    from app.services.incident import _search_clause
+
+    sql = str(_search_clause("Самарская Кинель")).lower()
+    assert " and " in sql
+    assert sql.count("like") == 12  # 6 полей × 2 токена
+
+
+def test_search_clause_ignores_commas_and_order():
+    """«Самарская область, Кинель» → 3 токена (AND); запятые/порядок не важны."""
+    from app.services.incident import _search_clause
+
+    sql = str(_search_clause("Самарская область, Кинель")).lower()
+    assert sql.count("like") == 18  # 6 полей × 3 токена
+
+
+def test_search_clause_blank_returns_none():
+    """Только разделители → None (клауза не добавляется в _base_filters)."""
+    from app.services.incident import _search_clause
+
+    assert _search_clause("   ") is None
+    assert _search_clause(" , ; ") is None
+
+
+def test_base_filters_multiword_search_single_and_clause():
+    """_base_filters(«Самарская Кинель») → одна клауза (AND-обёртка токенов)."""
+    filters = _base_filters("Самарская Кинель", None, None, None)
+    assert len(filters) == 1
+    assert " and " in str(filters[0]).lower()
+
+
 # --- Фильтр по региону (одиночный, ТОЧНОЕ совпадение) --------------------------
 
 

@@ -1,6 +1,7 @@
 """Инциденты: список+фильтры+сортировка, воронка, карточка, смена статуса (SPEC §3)."""
 
 import math
+import re
 from datetime import datetime, time, timezone
 from uuid import UUID
 
@@ -45,16 +46,30 @@ _SORT_COLUMNS = {
 
 
 def _search_clause(search: str):
-    """ilike-OR по fio/region/city/street/coords/msg."""
-    term = f"%{search.strip()}%"
-    return or_(
-        Incident.fio.ilike(term),
-        Incident.region.ilike(term),
-        Incident.city.ilike(term),
-        Incident.street.ilike(term),
-        Incident.coords.ilike(term),
-        Incident.msg.ilike(term),
-    )
+    """Многословный поиск по fio/region/city/street/coords/msg.
+
+    Запрос токенизируется по пробелам/знакам препинания; КАЖДЫЙ токен ищется ilike-OR
+    по всем полям, итог — AND (совпасть должны ВСЕ токены, каждый — в любом поле). Так
+    «Самарская Кинель» (или «Самарская область Кинель» без запятой) находит инцидент, где
+    регион и город лежат в разных колонках. Один токен → прежнее поведение (обратная
+    совместимость). Пустой/только-разделители запрос → None (клауза не добавляется)."""
+    tokens = [t for t in re.split(r"[\s,.;:]+", search.strip()) if t]
+    if not tokens:
+        return None
+    per_token_or = []
+    for token in tokens:
+        term = f"%{token}%"
+        per_token_or.append(
+            or_(
+                Incident.fio.ilike(term),
+                Incident.region.ilike(term),
+                Incident.city.ilike(term),
+                Incident.street.ilike(term),
+                Incident.coords.ilike(term),
+                Incident.msg.ilike(term),
+            )
+        )
+    return and_(*per_token_or)
 
 
 def _base_filters(
@@ -69,7 +84,9 @@ def _base_filters(
     """Фильтры, общие для списка и воронки (без статуса)."""
     filters: list = []
     if search and search.strip():
-        filters.append(_search_clause(search))
+        clause = _search_clause(search)
+        if clause is not None:
+            filters.append(clause)
     if source:
         filters.append(Incident.source.in_(source))
     # Регион — одиночный, ТОЧНОЕ совпадение (равенство, не ilike). Пусто → не фильтруем.

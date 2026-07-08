@@ -424,6 +424,120 @@ def test_filters_blank_region_ignored():
     assert _filters(None, "   ", None) == []
 
 
+# --- #18 многословный поиск (токенизация, AND по токенам) ----------------------
+
+
+def test_search_clause_single_token_backward_compatible():
+    """Один токен → одна OR-группа ilike (прежнее поведение)."""
+    clause = mno_service._search_clause("Бульварная")
+    sql = str(clause).lower()
+    # Ровно одна ilike-группа: несколько LIKE через OR, но без внешнего AND.
+    assert sql.count("like") == 6  # name/reg/city/address/coords/fgis_id
+    assert " and " not in sql
+
+
+def test_search_clause_multiword_builds_and_of_or_groups():
+    """«Самарская Кинель» → AND из двух OR-групп (каждый токен ищется по всем полям)."""
+    clause = mno_service._search_clause("Самарская Кинель")
+    sql = str(clause).lower()
+    assert " and " in sql  # токены объединены через AND
+    assert sql.count("like") == 12  # 6 полей × 2 токена
+
+
+def test_search_clause_ignores_commas_and_order():
+    """Запятые/порядок слов не важны: «Самарская область, Кинель» → 3 токена (AND)."""
+    clause = mno_service._search_clause("Самарская область, Кинель")
+    sql = str(clause).lower()
+    assert sql.count("like") == 18  # 6 полей × 3 токена
+
+
+def test_search_clause_blank_returns_none():
+    """Только разделители → None (клауза не добавляется в _filters)."""
+    assert mno_service._search_clause("   ") is None
+    assert mno_service._search_clause(" , ; ") is None
+
+
+def test_filters_multiword_search_single_and_clause():
+    """_filters(«Самарская Кинель») → одна клауза (AND-обёртка токенов), не падает."""
+    filters = _filters("Самарская Кинель", None, None)
+    assert len(filters) == 1
+    assert " and " in str(filters[0]).lower()
+
+
+# --- #17 серверная сортировка по расстоянию (sort=distance + lat/lon) ----------
+
+
+@pytest.mark.asyncio
+async def test_query_sort_distance_orders_by_distance_nulls_last():
+    """sort='distance' + lat/lon → ORDER BY (lat IS NULL, квадрат расстояния, id):
+    ближайшие первыми, МНО без числовых координат — в конец."""
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=rows_res)
+
+    await mno_service._query(
+        session,
+        search=None,
+        region=None,
+        synced=None,
+        sort="distance",
+        order="asc",
+        offset=0,
+        limit=100,
+        lat=53.2,
+        lon=50.16,
+    )
+
+    sql = str(session.execute.call_args.args[0]).lower()
+    assert "order by" in sql
+    # NULL-координаты уезжают в конец (первый ключ сортировки — mno.lat IS NULL).
+    assert "mno.lat is null" in sql
+    # Сортировка по квадрату расстояния использует обе координаты.
+    assert "mno.lat -" in sql
+    assert "mno.lon -" in sql
+
+
+@pytest.mark.asyncio
+async def test_query_sort_distance_without_latlon_falls_back_to_name():
+    """sort='distance' БЕЗ lat/lon → мягкий фолбэк на name asc (не 500, без distance-выражений)."""
+    rows_res = MagicMock()
+    rows_res.scalars.return_value.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=rows_res)
+
+    await mno_service._query(
+        session,
+        search=None,
+        region=None,
+        synced=None,
+        sort="distance",
+        order="asc",
+        offset=0,
+        limit=100,
+    )
+
+    sql = str(session.execute.call_args.args[0]).lower()
+    assert "order by mno.name asc" in sql
+    # Ни distance-выражения, ни NULLS-LAST-костыля — обычная сортировка по имени.
+    assert "mno.lat is null" not in sql
+
+
+@pytest.mark.asyncio
+async def test_list_mno_forwards_latlon_to_query(client):
+    """GET /mno?sort=distance&lat&lon → lat/lon доходят до сервиса list_mno."""
+    spy = AsyncMock(return_value=_page(items=[], total=0))
+    with patch("app.api.v1.mno.mno_service.list_mno", new=spy):
+        resp = await client.get(
+            "/api/v1/mno?sort=distance&lat=53.2&lon=50.16"
+        )
+    assert resp.status_code == 200
+    kw = spy.call_args.kwargs
+    assert kw["sort"] == "distance"
+    assert kw["lat"] == 53.2
+    assert kw["lon"] == 50.16
+
+
 # --- Заглушка синхронизации (юнит) ---------------------------------------------
 
 

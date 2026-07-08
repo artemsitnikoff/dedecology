@@ -7,8 +7,11 @@ import pytest
 
 from app.core.errors import ConflictError, ForbiddenError
 from app.core.security import get_password_hash, verify_password
-from app.models import User
+from app.deps import get_current_actor
+from app.main import app
+from app.models import User, Volunteer
 from app.schemas.user import UserCreate, UserListItem
+from app.services import volunteer as vol_service
 from app.services.user import create_user, delete_user, set_user_password
 
 
@@ -197,6 +200,78 @@ async def test_change_password(client):
 async def test_change_password_too_short_422(client):
     resp = await client.post("/api/v1/profile/password", json={"new_password": "abc"})
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_change_password_admin_uses_user_service(client):
+    """Admin-actor (User) → идёт в reset_own_password (ветка пользователя админки)."""
+    user_spy = AsyncMock(return_value=None)
+    vol_spy = AsyncMock(return_value=None)
+    with patch("app.api.v1.profile.reset_own_password", new=user_spy), patch(
+        "app.api.v1.profile.volunteer_change_own_password", new=vol_spy
+    ):
+        resp = await client.post(
+            "/api/v1/profile/password", json={"new_password": "newsecret"}
+        )
+    assert resp.status_code == 200
+    user_spy.assert_awaited_once()
+    vol_spy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_change_password_volunteer_uses_volunteer_service(client):
+    """Volunteer-actor → идёт в volunteer.change_own_password (тот же эндпоинт, другой сервис)."""
+    vol = Volunteer(email="vol@example.com", password_hash="x", is_active=True)
+    vol.id = uuid4()
+    app.dependency_overrides[get_current_actor] = lambda: vol
+    user_spy = AsyncMock(return_value=None)
+    vol_spy = AsyncMock(return_value=None)
+    try:
+        with patch("app.api.v1.profile.reset_own_password", new=user_spy), patch(
+            "app.api.v1.profile.volunteer_change_own_password", new=vol_spy
+        ):
+            resp = await client.post(
+                "/api/v1/profile/password", json={"new_password": "newsecret"}
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_actor, None)
+    assert resp.status_code == 200
+    assert "message" in resp.json()
+    vol_spy.assert_awaited_once()
+    # Волонтёру НЕ вызывается пользовательский сервис.
+    user_spy.assert_not_awaited()
+    # Первый позиционный аргумент после session — сам волонтёр.
+    assert vol_spy.call_args.args[1] is vol
+
+
+@pytest.mark.asyncio
+async def test_change_password_unauthenticated_401(client):
+    """Невалидный Bearer-токен → 401 (реальный get_current_actor, override снят)."""
+    app.dependency_overrides.pop(get_current_actor, None)
+    resp = await client.post(
+        "/api/v1/profile/password",
+        json={"new_password": "newsecret"},
+        headers={"Authorization": "Bearer garbage.token.value"},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "INVALID_CREDENTIALS"
+
+
+@pytest.mark.asyncio
+async def test_service_volunteer_change_own_password_hashes_and_audits():
+    """change_own_password реально хеширует новый пароль (bcrypt) и пишет системный аудит."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    session.add = MagicMock()
+    vol = Volunteer(email="vol@example.com", password_hash=get_password_hash("old-pass"))
+    vol.id = uuid4()
+
+    await vol_service.change_own_password(session, vol, "new-pass")
+
+    assert verify_password("new-pass", vol.password_hash) is True
+    assert verify_password("old-pass", vol.password_hash) is False
+    # Записан аудит (session.add вызван для AuditLog).
+    assert session.add.called
 
 
 # --- Сервисный слой: реальная логика (без живой БД, session подменён) ---
