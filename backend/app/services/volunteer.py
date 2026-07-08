@@ -9,6 +9,7 @@ HTTPException. Подтверждение почты — короткий 4-зн
 (публичный запрос И админ-триггер) — общий хелпер send_reset_email.
 """
 
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -35,7 +36,10 @@ from ..core.security import (
 )
 from ..models import Volunteer
 from ..schemas.volunteer import VolunteerRegister
-from .mailer import deliver_email
+from . import smtp as smtp_service
+from .smtp_templates import render_simple_email
+
+logger = logging.getLogger(__name__)
 
 # --- Подтверждение почты 4-значным кодом (OTP по письму) ---
 EMAIL_CODE_LENGTH = 4  # длина кода (знаков)
@@ -66,22 +70,65 @@ def _issue_email_code(volunteer: Volunteer) -> str:
     return code
 
 
-def send_email_code(volunteer: Volunteer) -> bool:
+async def _try_send(
+    session: AsyncSession,
+    to: str,
+    subject: str,
+    body_text: str,
+    body_html: str | None = None,
+) -> bool:
+    """Шлёт письмо через настроенный UI-SMTP; НИКОГДА не роняет вызывающий флоу.
+
+    Возвращает честный bool (как раньше deliver_email): True — письмо ушло; False — SMTP
+    не настроен (ValidationError) или отправка упала (AppError и пр.). При любом исключении
+    логируем и возвращаем False — тогда вызывающий кладёт код/ссылку в ОТВЕТ (без фейка
+    «письмо ушло»), пользователь не заперт.
+    """
+    try:
+        await smtp_service.send_email(
+            session, to=to, subject=subject, body_text=body_text, body_html=body_html
+        )
+        return True
+    except Exception:  # noqa: BLE001 — SMTP не настроен/сбой не должен ронять эндпоинт
+        logger.warning(
+            "email not sent (SMTP не настроен или сбой): to=%s subject=%r", to, subject
+        )
+        return False
+
+
+async def send_email_code(session: AsyncSession, volunteer: Volunteer) -> bool:
     """Выдаёт новый код подтверждения (см. _issue_email_code) и шлёт его письмом.
 
     ЕДИНЫЙ путь для регистрации и повторной отправки (resend) — логика кода/письма не
-    дублируется. Возвращает email_sent: deliver_email честно вернёт False, если SMTP не
-    настроен (или отправка упала) — тогда вызывающий кладёт код в ОТВЕТ (без фейка «письмо
-    ушло»), а сам код уже проставлен в volunteer.email_code.
+    дублируется. Письмо уходит через настроенный UI-SMTP (Настройки → Почта). Возвращает
+    email_sent: _try_send честно вернёт False, если SMTP не настроен (или отправка упала) —
+    тогда вызывающий кладёт код в ОТВЕТ (без фейка «письмо ушло»), а сам код уже проставлен
+    в volunteer.email_code.
     """
     code = _issue_email_code(volunteer)
-    return deliver_email(
-        volunteer.email,
-        subject="Код подтверждения ЭкоПульс",
-        body="Здравствуйте!\n\n"
+    body_text = (
+        "Здравствуйте!\n\n"
         f"Ваш код подтверждения адреса почты в ЭкоПульс: {code}\n\n"
         f"Код действует {EMAIL_CODE_TTL_MINUTES} минут. "
-        f"Если вы не регистрировались в ЭкоПульс — просто проигнорируйте это письмо.",
+        f"Если вы не регистрировались в ЭкоПульс — просто проигнорируйте это письмо."
+    )
+    # code — только цифры (0..9), экранировать не нужно.
+    body_html = render_simple_email(
+        "Код подтверждения",
+        "<p style=\"margin:0 0 12px;\">Ваш код подтверждения адреса почты в "
+        "<strong style=\"color:#1F9D57;\">«ЭкоПульс»</strong>:</p>"
+        "<p style=\"margin:0 0 12px;font-size:28px;font-weight:700;letter-spacing:4px;"
+        f"color:#0F1620;\">{code}</p>"
+        f"<p style=\"margin:0;\">Код действует {EMAIL_CODE_TTL_MINUTES} минут. "
+        "Если вы не регистрировались в ЭкоПульс — просто проигнорируйте это письмо.</p>",
+        preheader="Код подтверждения ЭкоПульс",
+    )
+    return await _try_send(
+        session,
+        volunteer.email,
+        "ЭкоПульс · код подтверждения",
+        body_text,
+        body_html,
     )
 
 
@@ -211,7 +258,7 @@ async def resend_email_code(
                 details={"resend_after": resend_after},
             )
 
-    email_sent = send_email_code(volunteer)
+    email_sent = await send_email_code(session, volunteer)
     await session.flush()
     return email_sent, False, volunteer
 
@@ -246,24 +293,48 @@ async def request_password_reset(session: AsyncSession, email: str) -> Volunteer
     return await get_by_email(session, email)
 
 
-def send_reset_email(volunteer: Volunteer) -> tuple[bool, str, str]:
+async def send_reset_email(
+    session: AsyncSession, volunteer: Volunteer
+) -> tuple[bool, str, str]:
     """Генерит reset-токен волонтёра и шлёт письмо со ссылкой сброса пароля.
 
     ЕДИНЫЙ код для публичного запроса (/volunteer/password/reset-request) и админ-триггера
-    (admin_reset_password) — логика токена/письма не дублируется. Возвращает
-    (email_sent, token, reset_url). deliver_email честно вернёт False, если SMTP не настроен
-    (или отправка упала) — тогда вызывающий кладёт token/url в ответ, без фейка «письмо ушло».
+    (admin_reset_password) — логика токена/письма не дублируется. Письмо уходит через
+    настроенный UI-SMTP (Настройки → Почта). Возвращает (email_sent, token, reset_url).
+    _try_send честно вернёт False, если SMTP не настроен (или отправка упала) — тогда
+    вызывающий кладёт token/url в ответ, без фейка «письмо ушло».
     """
     token = create_purpose_token(
         str(volunteer.id), PURPOSE_RESET_PASSWORD, RESET_PASSWORD_TOKEN_TTL
     )
     reset_url = f"{settings.APP_PUBLIC_URL}/reset?token={token}"
-    email_sent = deliver_email(
-        volunteer.email,
-        subject="ЭкоПульс — восстановление пароля",
-        body="Здравствуйте!\n\n"
+    body_text = (
+        "Здравствуйте!\n\n"
         f"Для смены пароля перейдите по ссылке:\n{reset_url}\n\n"
-        f"Если вы не запрашивали сброс пароля — просто проигнорируйте это письмо.",
+        f"Если вы не запрашивали сброс пароля — просто проигнорируйте это письмо."
+    )
+    # reset_url формируется кодом (JWT-токен, URL-safe) — не пользовательский ввод.
+    body_html = render_simple_email(
+        "Восстановление пароля",
+        "<p style=\"margin:0 0 16px;\">Вы запросили смену пароля в "
+        "<strong style=\"color:#1F9D57;\">«ЭкоПульс»</strong>. Нажмите кнопку ниже, "
+        "чтобы задать новый пароль:</p>"
+        f"<p style=\"margin:0 0 16px;\"><a href=\"{reset_url}\" "
+        "style=\"display:inline-block;padding:12px 22px;background:#1F9D57;color:#FFFFFF;"
+        "text-decoration:none;border-radius:10px;font-weight:600;\">Сменить пароль</a></p>"
+        "<p style=\"margin:0 0 6px;\">Если кнопка не работает — откройте ссылку вручную:</p>"
+        f"<p style=\"margin:0 0 16px;word-break:break-all;\"><a href=\"{reset_url}\" "
+        f"style=\"color:#1F9D57;\">{reset_url}</a></p>"
+        "<p style=\"margin:0;\">Если вы не запрашивали сброс пароля — просто "
+        "проигнорируйте это письмо.</p>",
+        preheader="Восстановление пароля ЭкоПульс",
+    )
+    email_sent = await _try_send(
+        session,
+        volunteer.email,
+        "ЭкоПульс · сброс пароля",
+        body_text,
+        body_html,
     )
     return email_sent, token, reset_url
 
@@ -330,5 +401,5 @@ async def admin_reset_password(
     reset_url): email нужен роутеру для ответа/тоста, т.к. на входе лишь id.
     """
     volunteer = await get_by_id(session, vol_id)
-    email_sent, token, reset_url = send_reset_email(volunteer)
+    email_sent, token, reset_url = await send_reset_email(session, volunteer)
     return volunteer.email, email_sent, token, reset_url

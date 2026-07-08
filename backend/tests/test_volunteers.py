@@ -3,7 +3,8 @@
 Покрывает: регистрацию (+дубль 409), подтверждение почты (валид/битый токен), логин
 (успех / непроверенная почта 403 / блок 403 / неверный пароль 401), сброс пароля
 (запрос+смена, токен-флоу), онбординг, изоляцию get_current_volunteer от admin-токена,
-админ-справочник (list/active/delete + 403 для не-admin) и mailer без SMTP (False → токен).
+админ-справочник (list/active/delete + 403 для не-admin) и отправку писем через UI-SMTP
+(SMTP не настроен → ValidationError → email_sent=false → код/токен в ответе).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,7 @@ from app.core.errors import (
     InvalidCredentialsError,
     InvalidTokenError,
     NotFoundError,
+    ValidationError,
 )
 from app.core.permissions import require_admin
 from app.core.security import (
@@ -89,7 +91,11 @@ async def test_register_returns_code_when_email_not_sent(client):
     """SMTP не настроен → email_sent=false и 4-значный код в ответе (честно, без фейка)."""
     vol = _volunteer(email_verified=False)
     # register замокан, но send_email_code — настоящий: он проставит vol.email_code.
-    with patch("app.api.v1.volunteer.register", new=AsyncMock(return_value=vol)):
+    # SMTP не настроен → smtp_service.send_email бросает ValidationError → _try_send=False.
+    with patch("app.api.v1.volunteer.register", new=AsyncMock(return_value=vol)), patch(
+        "app.services.volunteer.smtp_service.send_email",
+        new=AsyncMock(side_effect=ValidationError("SMTP не настроен")),
+    ):
         resp = await client.post(
             "/api/v1/volunteer/register",
             json={
@@ -316,8 +322,13 @@ async def test_login_wrong_password_401(client):
 async def test_reset_request_existing_returns_token(client):
     """Волонтёр найден, письмо не ушло (нет SMTP) → reset-токен/ссылка в ответе."""
     vol = _volunteer()
+    # request_password_reset замокан, но send_reset_email — настоящий (генерит токен/URL).
+    # SMTP не настроен → smtp_service.send_email бросает ValidationError → email_sent=False.
     with patch(
         "app.api.v1.volunteer.request_password_reset", new=AsyncMock(return_value=vol)
+    ), patch(
+        "app.services.volunteer.smtp_service.send_email",
+        new=AsyncMock(side_effect=ValidationError("SMTP не настроен")),
     ):
         resp = await client.post(
             "/api/v1/volunteer/password/reset-request", json={"email": "vol@example.com"}
@@ -641,7 +652,7 @@ async def test_admin_volunteers_forbidden_for_non_admin(client):
 
 
 # =========================================================================
-# Токены и mailer — реальная логика
+# Токены — реальная логика
 # =========================================================================
 
 
@@ -669,13 +680,6 @@ def test_token_claim_shapes_guarantee_isolation():
     assert admin_payload.get("typ") is None  # → get_current_volunteer отбракует
     assert vol_payload.get("typ") == "volunteer"
     assert vol_payload.get("type") is None  # → get_current_user отбракует
-
-
-def test_mailer_returns_false_without_smtp():
-    from app.services.mailer import deliver_email
-
-    # В тестовом окружении SMTP_* пусты → письмо не отправляется, честный False.
-    assert deliver_email("vol@example.com", "Тема", "Тело") is False
 
 
 # =========================================================================
@@ -882,7 +886,11 @@ async def test_service_resend_issues_new_code_after_cooldown():
         email_code_sent_at=old_sent,
         email_code_attempts=3,
     )
-    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+    # SMTP не настроен → send_email бросает ValidationError → _try_send → email_sent=False.
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)), patch(
+        "app.services.volunteer.smtp_service.send_email",
+        new=AsyncMock(side_effect=ValidationError("SMTP не настроен")),
+    ):
         email_sent, already_verified, returned = await vol_service.resend_email_code(
             session, vol.email
         )
@@ -932,7 +940,10 @@ async def test_service_verify_after_resend_succeeds():
     session.flush = AsyncMock()
     session.commit = AsyncMock()
     vol = _volunteer(email_verified=False, email_code_sent_at=None)
-    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)):
+    with patch("app.services.volunteer.get_by_email", new=AsyncMock(return_value=vol)), patch(
+        "app.services.volunteer.smtp_service.send_email",
+        new=AsyncMock(side_effect=ValidationError("SMTP не настроен")),
+    ):
         _, _, _ = await vol_service.resend_email_code(session, vol.email)
         fresh_code = vol.email_code
         assert fresh_code is not None
@@ -973,9 +984,14 @@ async def test_service_admin_reset_password_returns_token_without_smtp():
     original_hash = vol.password_hash
     session = _session_returning(vol)  # реальный get_by_id вернёт этого волонтёра
 
-    email, email_sent, token, reset_url = await vol_service.admin_reset_password(
-        session, vol.id
-    )
+    # SMTP не настроен → send_email бросает ValidationError → email_sent=False (честно).
+    with patch(
+        "app.services.volunteer.smtp_service.send_email",
+        new=AsyncMock(side_effect=ValidationError("SMTP не настроен")),
+    ):
+        email, email_sent, token, reset_url = await vol_service.admin_reset_password(
+            session, vol.id
+        )
 
     assert email == vol.email
     assert email_sent is False  # SMTP не настроен → письмо не ушло (честно)

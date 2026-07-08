@@ -2,10 +2,10 @@
 
 БЕЗ admin-гейта — это публичный/самообслуживаемый контур волонтёра: регистрация,
 подтверждение почты, вход, восстановление пароля, онбординг и профиль. Тонкий слой:
-валидация схемой → сервис/токены/mailer → схема ответа.
+валидация схемой → сервис/токены/SMTP → схема ответа.
 
-Письма — через плагинный mailer. Если письмо НЕ ушло (SMTP не настроен → deliver_email
-вернул False), секрет кладём в ОТВЕТ (email_sent=false): код подтверждения для регистрации/
+Письма — через настроенный SMTP (Настройки → Почта). Если письмо НЕ ушло (SMTP не настроен
+или отправка упала → email_sent=false), секрет кладём в ОТВЕТ: код подтверждения для регистрации/
 resend, токен-ссылку для сброса пароля — чтобы поток можно было завершить (тест/интеграция).
 Если ушло (True) — секрет в ответ НЕ кладём. Подтверждение почты — 4-значный код (OTP).
 """
@@ -68,7 +68,7 @@ async def register_volunteer(
     """
     volunteer = await register(session, data)
     # Код выдаётся и (по возможности) отправляется письмом; commit сохраняет его в БД.
-    sent = send_email_code(volunteer)
+    sent = await send_email_code(session, volunteer)
     await session.commit()
 
     return VolunteerRegisterResponse(
@@ -151,7 +151,7 @@ async def request_reset(
         return VolunteerResetRequestResponse(ok=True, email_sent=False)
 
     # Токен/письмо — общий хелпер (тот же код, что у админ-триггера).
-    email_sent, token, reset_url = send_reset_email(volunteer)
+    email_sent, token, reset_url = await send_reset_email(session, volunteer)
     return VolunteerResetRequestResponse(
         ok=True,
         email_sent=email_sent,
