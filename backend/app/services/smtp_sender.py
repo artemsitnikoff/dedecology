@@ -15,9 +15,16 @@ import ssl
 from email.message import EmailMessage
 
 from ..core.errors import AppError
+from . import smtp_log
 
 # Таймаут на соединение/операции SMTP (сек). Не висим бесконечно на мёртвом хосте.
 SMTP_TIMEOUT = 20
+
+
+def _fail(host: str, to: str, code: str, message: str, e: Exception) -> None:
+    """Логирует сбой в smtp.log (код + причина) и бросает AppError. Не возвращает."""
+    smtp_log.log_failure(host=host, to=to, code=code, reason=str(e))
+    raise AppError(code=code, message=message, status_code=400, details={"reason": str(e)})
 
 
 def _build_message(
@@ -86,58 +93,35 @@ async def send_via_smtp(
     """
     msg = _build_message(from_email, from_name, to, subject, body_text, body_html)
 
+    # Лог попытки (без пароля) — оператор видит в storage/logs/smtp.log что и куда шлём.
+    smtp_log.log_attempt(
+        host=host, port=port, encryption=encryption, username=username,
+        from_email=from_email, to=to,
+    )
+
     try:
         await asyncio.to_thread(
             _send_sync, host, port, encryption, username, password, msg
         )
     except smtplib.SMTPAuthenticationError as e:
-        raise AppError(
-            code="SMTP_AUTH_ERROR",
-            message="Не удалось авторизоваться на SMTP-сервере — проверьте логин и пароль",
-            status_code=400,
-            details={"reason": str(e)},
-        )
+        _fail(host, to, "SMTP_AUTH_ERROR",
+              "Не удалось авторизоваться на SMTP-сервере — проверьте логин и пароль", e)
     except smtplib.SMTPConnectError as e:
-        raise AppError(
-            code="SMTP_CONNECT_ERROR",
-            message="Не удалось подключиться к SMTP-серверу",
-            status_code=400,
-            details={"reason": str(e)},
-        )
+        _fail(host, to, "SMTP_CONNECT_ERROR", "Не удалось подключиться к SMTP-серверу", e)
     except smtplib.SMTPRecipientsRefused as e:
-        raise AppError(
-            code="SMTP_RECIPIENT_REFUSED",
-            message="SMTP-сервер отклонил адрес получателя",
-            status_code=400,
-            details={"reason": str(e)},
-        )
+        _fail(host, to, "SMTP_RECIPIENT_REFUSED", "SMTP-сервер отклонил адрес получателя", e)
     except smtplib.SMTPException as e:
         # Любая прочая SMTP-ошибка (sender refused, data error, disconnect и т.п.)
-        raise AppError(
-            code="SMTP_SEND_ERROR",
-            message="Ошибка SMTP при отправке письма",
-            status_code=400,
-            details={"reason": str(e)},
-        )
+        _fail(host, to, "SMTP_SEND_ERROR", "Ошибка SMTP при отправке письма", e)
     except ssl.SSLError as e:
         # SSLError — подкласс OSError, ловим до общего OSError
-        raise AppError(
-            code="SMTP_TLS_ERROR",
-            message="Ошибка TLS/SSL при подключении к SMTP-серверу (проверьте порт и режим шифрования)",
-            status_code=400,
-            details={"reason": str(e)},
-        )
+        _fail(host, to, "SMTP_TLS_ERROR",
+              "Ошибка TLS/SSL при подключении к SMTP-серверу (проверьте порт и режим шифрования)", e)
     except (socket.timeout, TimeoutError) as e:
-        raise AppError(
-            code="SMTP_TIMEOUT",
-            message="Таймаут подключения к SMTP-серверу (проверьте хост и порт)",
-            status_code=400,
-            details={"reason": str(e)},
-        )
+        _fail(host, to, "SMTP_TIMEOUT",
+              "Таймаут подключения к SMTP-серверу (проверьте хост и порт)", e)
     except (socket.gaierror, ConnectionError, OSError) as e:
-        raise AppError(
-            code="SMTP_CONNECT_ERROR",
-            message="Не удалось подключиться к SMTP-серверу (проверьте хост и порт)",
-            status_code=400,
-            details={"reason": str(e)},
-        )
+        _fail(host, to, "SMTP_CONNECT_ERROR",
+              "Не удалось подключиться к SMTP-серверу (проверьте хост и порт)", e)
+    else:
+        smtp_log.log_success(host=host, to=to)
