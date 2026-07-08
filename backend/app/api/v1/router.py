@@ -12,6 +12,7 @@ from .mno import router as mno_router
 from .profile import router as profile_router
 from .regions import fed_router as federal_districts_router
 from .regions import router as regions_router
+from .smtp import router as smtp_router
 from .users import router as users_router
 from .volunteer import router as volunteer_router
 from .volunteers import router as volunteers_router
@@ -38,6 +39,12 @@ api_router.include_router(
     dependencies=[Depends(require_admin)],
 )
 api_router.include_router(profile_router, prefix="/profile")
+# Настройки SMTP: раздел «Настройки», только admin — гвард на уровне роутера.
+api_router.include_router(
+    smtp_router,
+    prefix="/settings/smtp",
+    dependencies=[Depends(require_admin)],
+)
 # Интеграция ФГИС: раздел супер-админа (вне мобильного API) — гвард на уровне роутера.
 api_router.include_router(
     integration_router,

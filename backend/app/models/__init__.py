@@ -6,6 +6,7 @@ from .region import Region
 from .mno import Mno
 from .incident_type import IncidentType
 from .volunteer import Volunteer
+from .smtp import SmtpSettings
 
 __all__ = [
     "Base",
@@ -18,4 +19,5 @@ __all__ = [
     "Mno",
     "IncidentType",
     "Volunteer",
+    "SmtpSettings",
 ]

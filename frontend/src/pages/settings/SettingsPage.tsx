@@ -1,11 +1,14 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/store/authStore';
 import { useUsers } from '@/api/hooks/useUsers';
+import { useSmtpStatus } from '@/api/hooks/useSmtp';
 import { useUpdateProfile, useResetPassword } from '@/api/mutations/profile';
 import { useCreateUser, useDeleteUser, useSetUserPassword } from '@/api/mutations/users';
-import type { Role, UserStatus } from '@/api/aliases';
+import { useSmtpSaveConfig, useSmtpTest, useSmtpDisconnect } from '@/api/mutations/smtp';
+import type { Role, UserStatus, ApiError } from '@/api/aliases';
+import { formatDate } from '@/lib/format';
 import './Settings.css';
 
 /** Мета бейджа роли (цвета — токены). */
@@ -81,6 +84,109 @@ export function SettingsPage() {
           setBanner({ kind: 'error', text: 'Не удалось сменить пароль (минимум 6 символов).' }),
       }
     );
+  };
+
+  // ----- Почта (SMTP), admin only -----
+  const smtpStatusQuery = useSmtpStatus();
+  const smtp = smtpStatusQuery.data;
+  const smtpSave = useSmtpSaveConfig();
+  const smtpTest = useSmtpTest();
+  const smtpDisconnect = useSmtpDisconnect();
+
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState('');
+  const [smtpEncryption, setSmtpEncryption] = useState<'ssl' | 'tls' | 'none'>('ssl');
+  const [smtpUsername, setSmtpUsername] = useState('');
+  const [smtpPassword, setSmtpPassword] = useState('');
+  const [smtpFromEmail, setSmtpFromEmail] = useState('');
+  const [smtpFromName, setSmtpFromName] = useState('');
+  const [smtpTestTo, setSmtpTestTo] = useState('');
+
+  // Префилл формы из статуса — ПАРОЛЬ никогда не подставляем (write-only, сервер его и не пришлёт).
+  useEffect(() => {
+    if (!smtp) return;
+    setSmtpHost(smtp.host ?? '');
+    setSmtpPort(smtp.port != null ? String(smtp.port) : '');
+    setSmtpEncryption(smtp.encryption ?? 'ssl');
+    setSmtpUsername(smtp.username ?? '');
+    setSmtpFromEmail(smtp.from_email ?? '');
+    setSmtpFromName(smtp.from_name ?? '');
+  }, [smtp]);
+
+  const smtpBadge = !smtp?.configured
+    ? { label: 'Не настроено', bg: 'var(--ark-gray-100)', fg: 'var(--ark-gray-600)', dot: null as string | null }
+    : smtp.verified
+      ? { label: 'Проверено', bg: 'var(--ark-green-100)', fg: 'var(--ark-green-600)', dot: 'var(--ark-green-500)' }
+      : { label: 'Настроено, не проверено', bg: 'var(--ark-yellow-100)', fg: 'var(--ark-yellow-600)', dot: 'var(--ark-yellow-500)' };
+
+  const saveSmtp = () => {
+    const host = smtpHost.trim();
+    const fromEmail = smtpFromEmail.trim();
+    const portNum = parseInt(smtpPort, 10);
+    if (!host || !fromEmail || !Number.isFinite(portNum) || portNum <= 0) {
+      setBanner({ kind: 'error', text: 'Заполните хост, порт и email отправителя.' });
+      return;
+    }
+    smtpSave.mutate(
+      {
+        host,
+        port: portNum,
+        encryption: smtpEncryption,
+        username: smtpUsername.trim(),
+        password: smtpPassword,
+        from_email: fromEmail,
+        from_name: smtpFromName.trim(),
+      },
+      {
+        onSuccess: () => {
+          setSmtpPassword('');
+          setBanner({ kind: 'success', text: 'Настройки SMTP сохранены.' });
+        },
+        onError: (error) => {
+          const e = error as unknown as ApiError;
+          setBanner({ kind: 'error', text: e.error?.message || 'Не удалось сохранить настройки SMTP.' });
+        },
+      }
+    );
+  };
+
+  const sendSmtpTest = () => {
+    const to = smtpTestTo.trim();
+    if (!to) {
+      setBanner({ kind: 'error', text: 'Введите email для теста.' });
+      return;
+    }
+    smtpTest.mutate(
+      { to },
+      {
+        onSuccess: (res) =>
+          setBanner({ kind: 'success', text: `Тестовое письмо отправлено на ${res.sent_to}` }),
+        onError: (error) => {
+          const e = error as unknown as ApiError;
+          setBanner({ kind: 'error', text: e.error?.message || 'Не удалось отправить тестовое письмо.' });
+        },
+      }
+    );
+  };
+
+  const disconnectSmtp = () => {
+    smtpDisconnect.mutate(undefined, {
+      onSuccess: () => {
+        setSmtpHost('');
+        setSmtpPort('');
+        setSmtpEncryption('ssl');
+        setSmtpUsername('');
+        setSmtpPassword('');
+        setSmtpFromEmail('');
+        setSmtpFromName('');
+        setSmtpTestTo('');
+        setBanner({ kind: 'success', text: 'SMTP отключён.' });
+      },
+      onError: (error) => {
+        const e = error as unknown as ApiError;
+        setBanner({ kind: 'error', text: e.error?.message || 'Не удалось отключить SMTP.' });
+      },
+    });
   };
 
   // ----- Пользователи (admin only) -----
@@ -235,6 +341,161 @@ export function SettingsPage() {
             </button>
           </div>
         </div>
+
+        {/* Почта (SMTP) — только для admin */}
+        {isAdmin && (
+          <div className="de-set-card">
+            <div className="de-set-card-head">
+              <div className="de-set-card-title">Почта (SMTP)</div>
+              <span className="de-set-badge" style={{ background: smtpBadge.bg, color: smtpBadge.fg }}>
+                {smtpBadge.dot && <span className="de-set-badge-dot" style={{ background: smtpBadge.dot }} />}
+                {smtpBadge.label}
+              </span>
+            </div>
+            <div className="de-set-card-sub">
+              Настройте почтовый сервер для отправки писем (например, mail.yandex.ru).
+            </div>
+
+            {smtp?.last_test_error && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ color: 'var(--error-fg)', fontSize: 'var(--fs-12)' }}>
+                  Ошибка последнего теста: {smtp.last_test_error}
+                </div>
+                {smtp.last_test_at && (
+                  <div style={{ color: 'var(--fg-3)', fontSize: 'var(--fs-11)', marginTop: 2 }}>
+                    {formatDate(smtp.last_test_at)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="de-set-stack">
+              <div className="de-set-field">
+                <label className="de-set-field-label">Хост</label>
+                <input
+                  className="de-set-input"
+                  value={smtpHost}
+                  onChange={(e) => setSmtpHost(e.target.value)}
+                  placeholder="smtp.yandex.ru"
+                />
+              </div>
+              <div className="de-set-field">
+                <label className="de-set-field-label">Порт</label>
+                <input
+                  className="de-set-input"
+                  type="number"
+                  value={smtpPort}
+                  onChange={(e) => setSmtpPort(e.target.value)}
+                  placeholder="465"
+                />
+              </div>
+              <div className="de-set-field">
+                <label className="de-set-field-label">Шифрование</label>
+                <div className="de-set-access-chips">
+                  {(['ssl', 'tls', 'none'] as const).map((enc) => (
+                    <button
+                      key={enc}
+                      type="button"
+                      className={`de-set-chip ${smtpEncryption === enc ? 'active' : ''}`}
+                      onClick={() => setSmtpEncryption(enc)}
+                    >
+                      {enc === 'ssl' ? 'SSL' : enc === 'tls' ? 'STARTTLS' : 'Без'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="de-set-field">
+                <label className="de-set-field-label">Имя пользователя</label>
+                <input
+                  className="de-set-input"
+                  value={smtpUsername}
+                  onChange={(e) => setSmtpUsername(e.target.value)}
+                  placeholder="you@yandex.ru"
+                />
+              </div>
+              <div className="de-set-field">
+                <label className="de-set-field-label">Пароль</label>
+                <input
+                  className="de-set-input"
+                  type="password"
+                  value={smtpPassword}
+                  onChange={(e) => setSmtpPassword(e.target.value)}
+                  placeholder={
+                    smtp?.configured ? 'оставьте пустым, чтобы не менять' : 'пароль приложения Яндекс'
+                  }
+                />
+              </div>
+              <div className="de-set-field">
+                <label className="de-set-field-label">Email отправителя</label>
+                <input
+                  className="de-set-input"
+                  value={smtpFromEmail}
+                  onChange={(e) => setSmtpFromEmail(e.target.value)}
+                  placeholder="you@yandex.ru"
+                />
+              </div>
+              <div className="de-set-field">
+                <label className="de-set-field-label">Имя отправителя</label>
+                <input
+                  className="de-set-input"
+                  value={smtpFromName}
+                  onChange={(e) => setSmtpFromName(e.target.value)}
+                  placeholder="ЭкоПульс"
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="de-set-btn de-set-btn-primary"
+                onClick={saveSmtp}
+                disabled={smtpSave.isPending}
+              >
+                Сохранить настройки
+              </button>
+            </div>
+
+            {smtp?.configured && (
+              <>
+                <div className="de-set-divider" />
+                <div className="de-set-subhead">Тестовое письмо</div>
+                <div className="de-set-card-sub">
+                  Отправьте письмо на указанный адрес, чтобы проверить настройки.
+                </div>
+                <div className="de-set-pw-row">
+                  <div className="de-set-pw-field">
+                    <div className="de-set-field">
+                      <label className="de-set-field-label">Email для теста</label>
+                      <input
+                        className="de-set-input"
+                        value={smtpTestTo}
+                        onChange={(e) => setSmtpTestTo(e.target.value)}
+                        placeholder="you@example.com"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="de-set-btn de-set-btn-outline"
+                    onClick={sendSmtpTest}
+                    disabled={smtpTest.isPending}
+                  >
+                    Отправить тестовое письмо
+                  </button>
+                  <button
+                    type="button"
+                    className="de-set-btn de-set-btn-outline"
+                    onClick={disconnectSmtp}
+                    disabled={smtpDisconnect.isPending}
+                  >
+                    Отключить
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Пользователи — только для admin */}
         {isAdmin && (

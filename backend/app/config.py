@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
+
+    # Ключ Fernet для шифрования секретов, хранимых в БД (пароль SMTP и т.п.).
+    # Пустой → ключ детерминированно деривируется из JWT_SECRET (см. app/core/crypto.py),
+    # так что миграция/деплой работают без отдельной переменной. Задай явный
+    # base64-urlsafe 32-байтный ключ (`Fernet.generate_key()`), чтобы ротация JWT_SECRET
+    # НЕ обесценивала уже зашифрованные секреты.
+    FERNET_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14
 

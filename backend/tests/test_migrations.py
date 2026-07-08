@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0019():
-    """Цепочка ревизий консистентна: ровно один head, и это 0019 (0019→0018→…)."""
+def test_migration_chain_single_head_is_0020():
+    """Цепочка ревизий консистентна: ровно один head, и это 0020 (0020→0019→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0019"}
+    assert heads == {"0020"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -197,3 +197,41 @@ def test_0019_downgrade_drops_indexes_and_columns(monkeypatch):
         assert call.kwargs["table_name"] in ("mno", "incidents")
     dropped_col = {c.args for c in fake_op.drop_column.call_args_list}
     assert dropped_col == {("mno", "volunteer_id"), ("incidents", "volunteer_id")}
+
+
+def test_0020_revision_identifiers():
+    m = _load("0020_smtp_settings.py")
+    assert m.revision == "0020"
+    assert m.down_revision == "0019"
+
+
+def test_0020_upgrade_creates_smtp_settings(monkeypatch):
+    """upgrade(): create_table smtp_settings со всеми колонками (пароль — password_enc)."""
+    m = _load("0020_smtp_settings.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    fake_op.create_table.assert_called_once()
+    args = fake_op.create_table.call_args.args
+    assert args[0] == "smtp_settings"
+    col_names = {c.name for c in args[1:] if hasattr(c, "name")}
+    assert {
+        "id", "host", "port", "encryption", "username", "password_enc",
+        "from_email", "from_name", "status", "last_test_at", "last_test_ok",
+        "last_test_error", "created_at", "updated_at",
+    } <= col_names
+    # Пароль хранится только зашифрованным (password_enc), открытого поля нет.
+    assert "password" not in col_names
+
+
+def test_0020_downgrade_drops_smtp_settings(monkeypatch):
+    """downgrade(): drop_table smtp_settings."""
+    m = _load("0020_smtp_settings.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    fake_op.drop_table.assert_called_once_with("smtp_settings")
