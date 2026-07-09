@@ -82,8 +82,8 @@ type RowProps = {
   m: MnoListItem;
   selected: boolean;
   active: boolean;
-  /** Показать колонку «Создано» (раздел «Новые МНО»). */
-  showCreated: boolean;
+  /** Раздел «Новые МНО»: скрыть «Реестровый №» (у волонтёрских его нет) + показать «Создано». */
+  volunteerView: boolean;
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onIncidents: (id: string) => void;
@@ -92,7 +92,7 @@ const MnoRow = memo(function MnoRow({
   m,
   selected,
   active,
-  showCreated,
+  volunteerView,
   onToggle,
   onOpen,
   onIncidents,
@@ -111,7 +111,7 @@ const MnoRow = memo(function MnoRow({
       >
         <div className={`de-mno-check ${selected ? 'checked' : ''}`}>{selected && <CheckMark />}</div>
       </div>
-      <div className="de-mno-cell de-mno-c-reg">{m.reg}</div>
+      {!volunteerView && <div className="de-mno-cell de-mno-c-reg">{m.reg}</div>}
       <div className="de-mno-cell de-mno-c-name">{m.name}</div>
       <div className="de-mno-cell de-mno-c-region" title={m.region_name}>
         {m.region_name}
@@ -140,8 +140,8 @@ const MnoRow = memo(function MnoRow({
           <span className="de-mno-inc-zero">0</span>
         )}
       </div>
-      {showCreated && (
-        <div className="de-mno-cell de-mno-c-created">{formatDate(m.created_at) || '—'}</div>
+      {volunteerView && (
+        <div className="de-mno-cell de-mno-c-created">{formatDate(m.received_at) || '—'}</div>
       )}
       <div className="de-mno-cell de-mno-c-sync">
         {m.source === 'volunteer' ? (
@@ -513,7 +513,11 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
                   </div>
                 </div>
                 {(isVolunteer
-                  ? [...HEADS.slice(0, -1), CREATED_HEAD, HEADS[HEADS.length - 1]]
+                  ? (() => {
+                      // «Новые МНО»: без «Реестровый №» (у волонтёрских его нет), «Создано» перед «Синхрон.».
+                      const noReg = HEADS.filter((h) => h.key !== 'reg');
+                      return [...noReg.slice(0, -1), CREATED_HEAD, noReg[noReg.length - 1]];
+                    })()
                   : HEADS
                 ).map((h) => {
                   const on = !h.nosort && sortKey === h.key;
@@ -535,7 +539,7 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
                   m={m}
                   selected={selected.has(m.id)}
                   active={detailId === m.id}
-                  showCreated={isVolunteer}
+                  volunteerView={isVolunteer}
                   onToggle={toggleSel}
                   onOpen={setDetailId}
                   onIncidents={openIncidentsForMno}
@@ -772,7 +776,7 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
                         : 'Добавлено вручную',
                   ],
                   ['Обращений по МНО', String(data.incidents)],
-                  ['Дата создания', formatDate(data.created_at) || '—'],
+                  ['Дата создания', formatDate(data.received_at) || '—'],
                   // Комментарий — только у волонтёрских МНО и только если непуст (ФГИС/ручные не засоряем «—»).
                   ...(data.comment && data.comment.trim()
                     ? [['Комментарий', data.comment.trim()]]

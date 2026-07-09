@@ -155,7 +155,8 @@ def _to_list_item(
         synced=m.synced,
         sync_date=m.sync_date,
         incidents=m.incidents if incidents is None else incidents,
-        created_at=m.created_at,
+        # received_at = момент создания (Mno.created_at); имя поля — под мобильное приложение.
+        received_at=m.created_at,
     )
 
 
