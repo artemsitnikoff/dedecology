@@ -173,6 +173,8 @@ class PendingReport:
     msg_id: str = ""
     parsed: dict = field(default_factory=dict)
     candidates: list[dict] = field(default_factory=list)
+    # mid сообщения с картой OSM (метки 1/2/3) — чтобы удалить его при выборе площадки.
+    map_mid: str | None = None
     created_at: float = field(default_factory=time.time)
     finalized: bool = False
     # Идёт finalize по этому обращению (между тапом кнопки и ответом бэка). Синхронный

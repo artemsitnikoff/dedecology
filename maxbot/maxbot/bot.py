@@ -425,12 +425,16 @@ async def _send_report_prompt(
         return
 
     # 1) Карта — отдельным сообщением (без кнопок). Не критична: сбой/таймаут → без карты.
+    #    Запоминаем mid карты в report.map_mid — чтобы удалить её при выборе площадки.
     if point is not None:
         png = await fetch_map(point[0], point[1], map_query(point, candidates))
         if png:
             try:
-                await msg.answer(
+                sent = await msg.answer(
                     attachments=[InputMediaBuffer(buffer=png, filename="map.png")]
+                )
+                report.map_mid = getattr(
+                    getattr(getattr(sent, "message", None), "body", None), "mid", None
                 )
             except Exception:  # noqa: BLE001 — карта не критична
                 logger.debug("map message failed", exc_info=True)
@@ -602,6 +606,16 @@ async def _delete_callback_message(event: MessageCallback) -> None:
         logger.exception("delete_message не удалось mid=%s", mid)
 
 
+async def _delete_message_by_mid(bot, mid: str) -> None:
+    """Удалить сообщение по mid (напр. карту OSM) через переданный bot. Best-effort."""
+    if bot is None or not mid:
+        return
+    try:
+        await bot.delete_message(message_id=mid)
+    except Exception:  # noqa: BLE001
+        logger.exception("delete_message(by mid) не удалось mid=%s", mid)
+
+
 async def _answer_new(event: MessageCallback, text: str, markup=None) -> None:
     """Прислать НОВОЕ сообщение в чат колбэка (замена правки — send обычно быстрее edit)."""
     attachments = [markup] if markup is not None else None
@@ -645,13 +659,15 @@ async def _do_finalize(
     2×). Правки идут по порядку (⏳ → ✅). Успех → «✅ Спасибо»; IntakeError → просьба
     прислать фото заново (обращение НЕ создано)."""
     _spawn(_notify_callback(event, "Принято ✅"))
-    # Кнопки типа убираем УДАЛЕНИЕМ (быстро), а не правкой (~2.1с). Пока идёт finalize
-    # (загрузка фото + цитата, несколько секунд) — показываем индикатор активности.
+    # Кнопки типа убираем УДАЛЕНИЕМ (быстро), а не правкой (~2.1с).
     _spawn(_delete_callback_message(event))
     _bot = getattr(event, "bot", None)
     _chat = getattr(getattr(getattr(event, "message", None), "recipient", None), "chat_id", None)
     if _bot is not None and _chat is not None:
         _spawn(_bot.send_action(_chat, SenderAction.SENDING_PHOTO))
+    # Прогресс: finalize (загрузка фото + цитата) занимает несколько секунд — сразу пишем,
+    # что идёт отправка, чтобы пользователь видел процесс (по просьбе). Awaited → до finalize.
+    await _answer_new(event, "⏳ Идёт отправка инцидента…")
     try:
         result = await _finalize(report, mno_id, incident_type)
     except IntakeError:
@@ -891,6 +907,10 @@ def build_router() -> Router:
 
             report.chosen_mno_id = mno_id
             report.chosen_mno_label = mno_label
+            # Площадка выбрана → карта OSM (метки 1/2/3) больше не нужна: удаляем её сообщение.
+            if report.map_mid:
+                _spawn(_delete_message_by_mid(getattr(event, "bot", None), report.map_mid))
+                report.map_mid = None
 
             # Справочник типов берём из ПРЕДЗАГРУЖЕННОГО на старте (report.incident_types);
             # фолбэк на fetch (кэш) — только если предзагрузка не сработала.
