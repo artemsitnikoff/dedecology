@@ -618,6 +618,23 @@ async def _edit_callback_message(event: MessageCallback, text: str, markup=None)
         logger.exception("edit fallback answer не удалось")
 
 
+def _spawn(coro) -> None:
+    """Запустить корутину в ФОНЕ, проглотив/залогировав исключения (fire-and-forget).
+
+    Нужно, чтобы обработчик колбэка возвращался МГНОВЕННО и не ждал (небыстрые в этой
+    среде ~2-3с) вызовы к Максу — тост/правку/финализацию. Поллер maxapi последовательный:
+    пока обработчик ждёт, следующий апдейт (в т.ч. повторный тап) не принимается. Исключение
+    из create_task-задачи иначе «утекает» мимо try/except обработчика — тут гасим его."""
+
+    async def _run():
+        try:
+            await coro
+        except Exception:  # noqa: BLE001
+            logger.exception("background task failed")
+
+    asyncio.create_task(_run())
+
+
 async def _do_finalize(
     event: MessageCallback,
     report: PendingReport,
@@ -626,13 +643,13 @@ async def _do_finalize(
     mno_label: str,
     is_no_mno: bool,
 ) -> None:
-    """Финал обоих шагов: замок → «⏳» (снять клавиатуру) → finalize → подтверждение.
+    """Финал: «⏳» (снять клавиатуру) → finalize → подтверждение. Замок report.processing
+    ставит ВЫЗЫВАЮЩИЙ синхронно (в колбэке) — сюда входим уже под замком.
 
-    Мгновенно гасит клавиатуру и показывает прогресс (finalize ≈ загрузка фото + цитата),
-    ставит синхронный замок report.processing против двойного создания. Успех → «✅ Спасибо»
-    с площадкой и типом; IntakeError → просьба прислать фото заново (обращение НЕ создано)."""
-    report.processing = True
-    await _notify_callback(event, "Принято ✅")
+    Тост шлём ПАРАЛЛЕЛЬНО с правкой (оба — вызовы к Максу; последовательно складывались в
+    2×). Правки идут по порядку (⏳ → ✅). Успех → «✅ Спасибо»; IntakeError → просьба
+    прислать фото заново (обращение НЕ создано)."""
+    _spawn(_notify_callback(event, "Принято ✅"))
     await _edit_callback_message(event, "⏳ Отправляю обращение…")
     try:
         result = await _finalize(report, mno_id, incident_type)
@@ -838,12 +855,24 @@ def build_router() -> Router:
             if type_dec is not None:
                 _, code = type_dec
                 mno_id = report.chosen_mno_id or ""
-                await _do_finalize(
-                    event, report, mno_id, code, report.chosen_mno_label, mno_id == ""
+                # Замок ставим СИНХРОННО ДО фоновой финализации: повторный тап тут же
+                # ловится проверкой report.processing выше. Сам finalize — в фоне, чтобы
+                # обработчик вернулся мгновенно (не ждём ~2-3с вызовы к Максу).
+                report.processing = True
+                _STORE.put(report)
+                _spawn(
+                    _do_finalize(
+                        event, report, mno_id, code, report.chosen_mno_label, mno_id == ""
+                    )
                 )
                 return
 
             # === Шаг 1: выбрана площадка → спрашиваем тип инцидента ===
+            # Анти-дубль: площадка уже выбрана (идёт правка на выбор типа) → повторный тап
+            # по МНО-кнопкам просто подтверждаем тостом, не запускаем правку заново.
+            if report.awaiting_type:
+                await _notify_callback(event, _CB_PROCESSING)
+                return
             idx = mno_dec[1]
             if idx == NO_MNO:
                 mno_id = ""
@@ -862,18 +891,18 @@ def build_router() -> Router:
             report.chosen_mno_id = mno_id
             report.chosen_mno_label = mno_label
 
-            # Мгновенно: тост ДО любых сетевых вызовов — кнопки не «висят». Справочник
-            # типов берём из ПРЕДЗАГРУЖЕННОГО на старте (report.incident_types); фолбэк на
-            # fetch (кэш) — только если предзагрузка не сработала.
-            await _notify_callback(event, "Площадка выбрана")
+            # Справочник типов берём из ПРЕДЗАГРУЖЕННОГО на старте (report.incident_types);
+            # фолбэк на fetch (кэш) — только если предзагрузка не сработала.
             types = report.incident_types or await fetch_incident_types()
             if types:
                 report.incident_types = types
-                report.awaiting_type = True
+                report.awaiting_type = True  # замок шага 1 (анти-дубль выше)
                 _STORE.put(report)
-                # Правку (снять МНО-кнопки → показать клавиатуру типов) уводим в ФОН: тап уже
-                # подтверждён тостом, а поллер не ждёт (потенциально небыстрый) edit_message.
-                asyncio.create_task(
+                # Тост + правку (снять МНО-кнопки → клавиатура типов) пускаем ПАРАЛЛЕЛЬНО и в
+                # ФОНЕ: обработчик возвращается мгновенно (поллер свободен), а два вызова к
+                # Максу не складываются последовательно (иначе кнопки «висят» вдвое дольше).
+                _spawn(_notify_callback(event, "Площадка выбрана"))
+                _spawn(
                     _edit_callback_message(
                         event, _HDR_TYPE, markup=_build_type_keyboard(pid, types)
                     )
@@ -881,7 +910,9 @@ def build_router() -> Router:
                 return
 
             # Справочник типов недоступен → создаём сразу без типа (деградация).
-            await _do_finalize(event, report, mno_id, "", mno_label, idx == NO_MNO)
+            report.processing = True
+            _STORE.put(report)
+            _spawn(_do_finalize(event, report, mno_id, "", mno_label, idx == NO_MNO))
 
         except Exception:  # noqa: BLE001 — poller must never die on one bad callback
             logger.exception("unexpected error handling callback")
