@@ -1017,7 +1017,7 @@
 }
 .de-inc-drawer-photo {
   flex: 1;
-  height: 148px;
+  height: 180px;
   border-radius: 9px;
   overflow: hidden;
   border: 1px solid var(--border-1);
@@ -1025,16 +1025,19 @@
   background: var(--ark-gray-200);
   position: relative;
 }
-/* одиночное фото НЕ растягиваем на всю ширину карточки (220×156) */
+/* одиночное фото — «портретная» рамка повыше (часто грузят вертикальные фото) */
 .de-inc-drawer-photos.single .de-inc-drawer-photo {
-  flex: 0 0 220px;
-  max-width: 220px;
-  height: 156px;
+  flex: 0 0 210px;
+  max-width: 210px;
+  height: 250px;
 }
 .de-inc-drawer-photo-img {
   position: absolute;
   inset: 0;
-  background-size: cover;
+  /* contain (не cover): показываем фото ЦЕЛИКОМ, без обрезки вертикальных кадров —
+     ориентацию мы не знаем, поэтому вписываем в рамку с сохранением пропорций. */
+  background-size: contain;
+  background-repeat: no-repeat;
   background-position: center;
 }
 .de-inc-drawer-photo-label {
