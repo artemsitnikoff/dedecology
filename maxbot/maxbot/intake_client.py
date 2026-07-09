@@ -10,6 +10,7 @@ FastAPI-приложение. Вызывающий код (обработчик 
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 
@@ -256,13 +257,24 @@ async def fetch_map(lat: float, lon: float, pts: str) -> bytes | None:
     return content
 
 
+# Кэш справочника типов: он редко меняется, а на тапе по площадке нужен мгновенно.
+# TTL 5 минут; при ошибке НЕ кэшируем (следующий вызов попробует снова).
+_TYPES_CACHE: dict = {"at": 0.0, "data": []}
+_TYPES_TTL = 300.0
+
+
 async def fetch_incident_types() -> list[dict]:
     """Справочник типов инцидента [{code,label}] для кнопок выбора (шаг 2 диалога).
 
     GET {api_base}/intake/incident-types (публичный эндпоинт — тот же, что у формы).
-    При ЛЮБОЙ ошибке / не-2xx / неожиданном формате → [] (бот тогда пропускает шаг
-    выбора типа и создаёт обращение без типа — деградация, не фейл).
+    Кэшируется на _TYPES_TTL сек (справочник статичный) — чтобы шаг выбора типа
+    открывался без сетевого запроса. При ЛЮБОЙ ошибке / не-2xx / неожиданном формате
+    → [] (бот пропускает выбор типа и создаёт обращение без типа — деградация, не фейл).
     """
+    now = time.monotonic()
+    if _TYPES_CACHE["data"] and (now - _TYPES_CACHE["at"] < _TYPES_TTL):
+        return _TYPES_CACHE["data"]
+
     url = f"{settings.api_base}/intake/incident-types"
     try:
         async with httpx.AsyncClient(timeout=_NOTIFY_TIMEOUT) as client:
@@ -281,6 +293,9 @@ async def fetch_incident_types() -> list[dict]:
         for t in payload
         if isinstance(t, dict) and t.get("code")
     ]
+    if out:
+        _TYPES_CACHE["data"] = out
+        _TYPES_CACHE["at"] = now
     return out
 
 

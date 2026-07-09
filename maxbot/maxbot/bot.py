@@ -14,6 +14,7 @@ loop never dies.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -27,6 +28,7 @@ from maxapi.client.default import DefaultConnectionProperties
 from maxapi.enums.attachment import AttachmentType
 from maxapi.enums.intent import Intent
 from maxapi.enums.parse_mode import ParseMode
+from maxapi.enums.sender_action import SenderAction
 from maxapi.types import (
     CallbackButton,
     CommandStart,
@@ -257,6 +259,30 @@ async def _download_all(images: list[Image], mid) -> list[bytes]:
     return photos
 
 
+_ACK_UPLOADING = (
+    "⏳ Загружаем фотографию… Некоторые фото весят много — это может занять несколько секунд."
+)
+
+
+async def _ack_uploading(event: MessageCreated, msg: Message, chat_id) -> None:
+    """Мгновенная реакция на присланное фото: индикатор «крутилки» + текст.
+
+    Шлём ДО тяжёлых download/parse (фото может весить мегабайты, разбор адреса — секунды),
+    чтобы пользователь сразу видел активность и не думал, что бот завис. Индикатор
+    SENDING_PHOTO Макс показывает как «крутилку» отправки. Всё best-effort — сбой
+    уведомления НЕ должен сорвать основной приём обращения."""
+    bot = getattr(event, "bot", None)
+    if bot is not None and chat_id is not None:
+        try:
+            await bot.send_action(chat_id, SenderAction.SENDING_PHOTO)
+        except Exception:  # noqa: BLE001
+            logger.debug("send_action(sending_photo) failed", exc_info=True)
+    try:
+        await msg.answer(text=_ACK_UPLOADING)
+    except Exception:  # noqa: BLE001
+        logger.debug("ack uploading answer failed", exc_info=True)
+
+
 def _point_of(prep: dict) -> tuple[float, float] | None:
     """Достать (lat, lon) точки обращения из ответа /prepare; None — если нет."""
     pt = prep.get("point") if isinstance(prep, dict) else None
@@ -442,7 +468,19 @@ async def _start_report(
 ) -> None:
     """DM: фото+текст → prepare → карта+кнопки (или просьба прислать адрес)."""
     photo_time = _extract_photo_time(text)
-    prep = await prepare_max(text, photo_time=photo_time)  # IntakeError → внешний soft-reply
+    # Справочник типов инцидента тянем ПАРАЛЛЕЛЬНО с разбором адреса — чтобы на тапе по
+    # площадке (шаг 1) он уже был готов и клавиатура типов открывалась мгновенно, без
+    # 3-4с сетевого запроса в колбэке (жалоба с прода). Сбой fetch → [] (деградация).
+    types_task = asyncio.create_task(fetch_incident_types())
+    try:
+        prep = await prepare_max(text, photo_time=photo_time)  # IntakeError → внешний soft-reply
+    except BaseException:
+        types_task.cancel()
+        raise
+    try:
+        prefetched_types = await types_task
+    except Exception:  # noqa: BLE001
+        prefetched_types = []
     report = PendingReport(
         pending_id=new_pending_id(),
         chat_id=chat_id,
@@ -452,6 +490,7 @@ async def _start_report(
         msg_url=msg_url,
         msg_id=msg_id,
         parsed=(prep.get("parsed") or {}),
+        incident_types=prefetched_types,
     )
     if prep.get("status") == "need_address":
         report.awaiting_address = True
@@ -673,6 +712,8 @@ def build_router() -> Router:
 
             # 3) Новое обращение = ФОТО + непустой текст (адрес/описание).
             if images and text:
+                # Мгновенно подтверждаем приём фото (крутилка + текст) ДО скачивания/разбора.
+                await _ack_uploading(event, msg, chat_id)
                 photos = await _download_all(images, mid)
                 if photos:
                     msg_url = getattr(msg, "url", None) or ""
@@ -773,13 +814,16 @@ def build_router() -> Router:
             report.chosen_mno_id = mno_id
             report.chosen_mno_label = mno_label
 
-            types = await fetch_incident_types()
+            # Мгновенно: тост ДО любых сетевых вызовов — кнопки не «висят». Справочник
+            # типов берём из ПРЕДЗАГРУЖЕННОГО на старте (report.incident_types); фолбэк на
+            # fetch (кэш) — только если предзагрузка не сработала.
+            await _notify_callback(event, "Площадка выбрана")
+            types = report.incident_types or await fetch_incident_types()
             if types:
                 report.incident_types = types
                 report.awaiting_type = True
                 _STORE.put(report)
                 # Меняем сообщение на вопрос о типе + клавиатуру типов (карта/МНО-кнопки уходят).
-                await _notify_callback(event, "Площадка выбрана")
                 await _edit_callback_message(
                     event, _HDR_TYPE, markup=_build_type_keyboard(pid, types)
                 )
