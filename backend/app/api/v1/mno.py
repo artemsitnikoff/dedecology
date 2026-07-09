@@ -64,10 +64,15 @@ async def list_mno(
         None,
         description="Долгота точки отсчёта для sort=distance (ближайшие площадки первыми).",
     ),
+    source: str | None = Query(
+        None,
+        description="Фильтр происхождения: 'volunteer' — раздел «Новые МНО», 'fgis' — "
+        "основной реестр (ФГИС/ручные). Не задан — все.",
+    ),
     session: AsyncSession = Depends(get_db),
     _actor=Depends(get_current_actor),
 ):
-    """Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.
+    """Пагинированный реестр МНО с фильтрами region/synced/search/source + bbox + сортировкой.
 
     READ доступен и админу (веб), и волонтёру (мобильное приложение, карта площадок).
     sort=distance + lat/lon — серверная сортировка по расстоянию (ближайшие первыми);
@@ -84,6 +89,7 @@ async def list_mno(
         bbox=bbox,
         lat=lat,
         lon=lon,
+        source=source,
     )
 
 
@@ -95,6 +101,7 @@ async def list_mno_points(
     bbox: str | None = Query(
         None, description="Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)"
     ),
+    source: str | None = Query(None, description="Фильтр происхождения: 'volunteer' | 'fgis'."),
     session: AsyncSession = Depends(get_db),
     _actor=Depends(get_current_actor),
 ):
@@ -105,7 +112,7 @@ async def list_mno_points(
     FastAPI трактует «points» как UUID → 422.
     """
     return await mno_service.list_points(
-        session, search=search, region=region, synced=synced, bbox=bbox
+        session, search=search, region=region, synced=synced, bbox=bbox, source=source
     )
 
 

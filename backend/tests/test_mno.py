@@ -402,6 +402,18 @@ def test_filters_region_exact_match():
     assert "ilike" not in str(clause).lower()
 
 
+def test_filters_source_exact_match():
+    """source → равенство Mno.source == значение (раздел «Новые МНО» = 'volunteer')."""
+    filters = _filters(None, None, None, source="volunteer")
+    assert len(filters) == 1
+    clause = filters[0]
+    assert clause.operator is eq
+    assert clause.right.value == "volunteer"
+    # Пусто/None → фильтра источника нет.
+    assert _filters(None, None, None, source=None) == []
+    assert _filters(None, None, None, source="  ") == []
+
+
 def test_filters_synced_bool():
     assert len(_filters(None, None, True)) == 1
     assert len(_filters(None, None, False)) == 1

@@ -18,6 +18,8 @@ export interface MnoFilters {
   region?: string;
   /** Только синхронизированные (true) / только вручную (false); undefined — все. */
   synced?: boolean;
+  /** Происхождение: 'volunteer' — «Новые МНО», 'fgis' — основной реестр; undefined — все. */
+  source?: string;
   sort?: MnoSortKey;
   order?: SortOrder;
   /** Номер страницы (1-based). Не задан → сервер отдаёт первую. */
@@ -37,6 +39,7 @@ export function buildMnoParams(filters: MnoFilters): URLSearchParams {
   if (filters.search?.trim()) params.set('search', filters.search.trim());
   if (filters.region) params.set('region', filters.region);
   if (typeof filters.synced === 'boolean') params.set('synced', String(filters.synced));
+  if (filters.source) params.set('source', filters.source);
   if (filters.sort) params.set('sort', filters.sort);
   if (filters.order) params.set('order', filters.order);
   if (filters.page) params.set('page', String(filters.page));
@@ -71,7 +74,7 @@ export function useMno(filters: MnoFilters) {
  * в queryKey → смена кадра автоматически перезапрашивает точки.
  */
 export function useMnoPoints(
-  filters: Pick<MnoFilters, 'search' | 'region' | 'synced'> & { bbox?: string },
+  filters: Pick<MnoFilters, 'search' | 'region' | 'synced' | 'source'> & { bbox?: string },
   options?: { enabled?: boolean }
 ) {
   return useQuery({
@@ -81,6 +84,7 @@ export function useMnoPoints(
       if (filters.search?.trim()) params.set('search', filters.search.trim());
       if (filters.region) params.set('region', filters.region);
       if (typeof filters.synced === 'boolean') params.set('synced', String(filters.synced));
+      if (filters.source) params.set('source', filters.source);
       if (filters.bbox) params.set('bbox', filters.bbox);
       const qs = params.toString();
       const res = await api.get<MnoPointsResponse>(`/mno/points${qs ? `?${qs}` : ''}`);

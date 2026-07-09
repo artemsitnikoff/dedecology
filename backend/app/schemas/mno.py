@@ -27,6 +27,9 @@ class MnoListItem(ORMBase):
     synced: bool
     sync_date: Optional[datetime] = None
     incidents: int
+    # Дата создания записи МНО (фиксируется на бэке при вставке). Показывается как «дата
+    # создания» в разделе «Новые МНО» (волонтёрские). Optional — старые ответы/деталь.
+    created_at: Optional[datetime] = None
 
 
 class MnoDetail(MnoListItem):

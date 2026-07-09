@@ -84,6 +84,7 @@ def _filters(
     region: str | None,
     synced: bool | None,
     bbox: str | None = None,
+    source: str | None = None,
 ) -> list:
     filters: list = []
     if search and search.strip():
@@ -94,6 +95,10 @@ def _filters(
         filters.append(Mno.region_code == region.strip())
     if synced is not None:
         filters.append(Mno.synced.is_(synced))
+    # Происхождение: 'volunteer' — раздел «Новые МНО» (добавленные волонтёрами), 'fgis' —
+    # основной реестр (ФГИС/ручные). None — без фильтра (совместимость).
+    if source and source.strip():
+        filters.append(Mno.source == source.strip())
     # bbox («minLat,minLon,maxLat,maxLon») — видимая область карты/гео: отдаём только МНО
     # текущего кадра (числовые lat/lon по индексу ix_mno_lat_lon), как в list_points.
     # Невалидный/пустой bbox игнорируется (список ведёт себя как раньше).
@@ -150,6 +155,7 @@ def _to_list_item(
         synced=m.synced,
         sync_date=m.sync_date,
         incidents=m.incidents if incidents is None else incidents,
+        created_at=m.created_at,
     )
 
 
@@ -160,9 +166,10 @@ async def _count(
     region: str | None,
     synced: bool | None,
     bbox: str | None = None,
+    source: str | None = None,
 ) -> int:
     """COUNT(*) по тем же фильтрам, что и список (для пагинации/карты)."""
-    filters = _filters(search, region, synced, bbox)
+    filters = _filters(search, region, synced, bbox, source)
     stmt = select(func.count(Mno.id))
     if filters:
         stmt = stmt.where(*filters)
@@ -182,6 +189,7 @@ async def _query(
     bbox: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
+    source: str | None = None,
 ) -> list[Mno]:
     """Ядро фильтра/сортировки: сырые строки Mno.
 
@@ -190,7 +198,7 @@ async def _query(
     (ближайшие первыми), МНО без числовых координат — в конец. Без lat/lon мягко
     откатывается на дефолт (name asc), не 500.
     """
-    filters = _filters(search, region, synced, bbox)
+    filters = _filters(search, region, synced, bbox, source)
     stmt = select(Mno)
     if filters:
         stmt = stmt.where(*filters)
@@ -243,6 +251,7 @@ async def list_mno(
     bbox: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
+    source: str | None = None,
 ) -> Paginated[MnoListItem]:
     """Пагинированный реестр МНО с фильтрами region/synced/search + bbox + сортировкой.
 
@@ -255,7 +264,7 @@ async def list_mno(
     (что ломало пагинацию). Без lat/lon — мягкий фолбэк на name asc.
     """
     total = await _count(
-        session, search=search, region=region, synced=synced, bbox=bbox
+        session, search=search, region=region, synced=synced, bbox=bbox, source=source
     )
     rows = await _query(
         session,
@@ -269,6 +278,7 @@ async def list_mno(
         bbox=bbox,
         lat=lat,
         lon=lon,
+        source=source,
     )
     region_names = await _region_names(session)
     counts = await _incident_counts(session, [m.id for m in rows])
@@ -350,6 +360,7 @@ async def list_points(
     region: str | None = None,
     synced: bool | None = None,
     bbox: str | None = None,
+    source: str | None = None,
 ) -> MnoPointsResponse:
     """Лёгкие координаты МНО для карты: те же фильтры, без имён регионов.
 
@@ -360,7 +371,7 @@ async def list_points(
       - bbox не задан/битый → прежнее поведение: все МНО по фильтрам с непустыми coords.
     В обоих случаях points — первые MAX_POINTS строк; capped=True — total превысил лимит.
     """
-    filters = _filters(search, region, synced)
+    filters = _filters(search, region, synced, source=source)
     box = parse_bbox(bbox)
     if box is not None:
         min_lat, min_lon, max_lat, max_lon = box
@@ -371,7 +382,9 @@ async def list_points(
             await session.execute(select(func.count(Mno.id)).where(*filters))
         ).scalar_one()
     else:
-        total = await _count(session, search=search, region=region, synced=synced)
+        total = await _count(
+            session, search=search, region=region, synced=synced, source=source
+        )
         filters.append(Mno.coords != "")
     stmt = (
         select(Mno.id, Mno.coords, Mno.name)

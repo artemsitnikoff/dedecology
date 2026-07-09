@@ -537,6 +537,12 @@
   justify-content: center;
   gap: 3px;
 }
+/* Колонка «Создано» — только в разделе «Новые МНО». */
+.de-mno-c-created {
+  width: 110px;
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
 .de-mno-sync-date {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

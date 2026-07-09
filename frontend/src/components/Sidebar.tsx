@@ -45,6 +45,8 @@ export function Sidebar() {
     const path = location.pathname;
     if (path.startsWith('/incidents') || path === '/') return 'incidents';
     if (path.startsWith('/reports')) return 'reports';
+    // ВАЖНО: '/mno-new' проверяем ДО '/mno' (иначе startsWith('/mno') перехватит).
+    if (path.startsWith('/mno-new')) return 'mno-new';
     if (path.startsWith('/mno')) return 'mno';
     if (path.startsWith('/regions')) return 'regions';
     if (path.startsWith('/incident-types')) return 'incident-types';
@@ -61,6 +63,7 @@ export function Sidebar() {
     { id: 'incidents', label: 'Инциденты', icon: 'incidents', count: incidentsCount },
     { id: 'reports', label: 'Выгрузка УТКО', icon: 'download' },
     { id: 'mno', label: 'МНО', icon: 'pin', count: mnoCount },
+    { id: 'mno-new', label: 'Новые МНО', icon: 'pin' },
   ];
   // Справочники.
   const refNav: NavItem[] = [

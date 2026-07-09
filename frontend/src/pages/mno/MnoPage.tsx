@@ -32,7 +32,7 @@ function pageWindow(current: number, totalPages: number): Array<number | 'gap'> 
 }
 
 /** Заголовки таблицы МНО (порядок прототипа). coords/sync — без сортировки. */
-type HeadKey = MnoSortKey | 'coords' | 'incidents' | 'sync';
+type HeadKey = MnoSortKey | 'coords' | 'incidents' | 'sync' | 'created';
 interface Head {
   key: HeadKey;
   label: string;
@@ -49,6 +49,8 @@ const HEADS: Head[] = [
   { key: 'incidents', label: 'Обращ.', cellClass: 'de-mno-c-incidents' },
   { key: 'sync', label: 'Синхрон.', cellClass: 'de-mno-c-sync', nosort: true },
 ];
+// Колонка «Создано» — только в разделе «Новые МНО» (вставляется перед «Синхрон.»).
+const CREATED_HEAD: Head = { key: 'created', label: 'Создано', cellClass: 'de-mno-c-created', nosort: true };
 
 function CheckMark() {
   return (
@@ -80,6 +82,8 @@ type RowProps = {
   m: MnoListItem;
   selected: boolean;
   active: boolean;
+  /** Показать колонку «Создано» (раздел «Новые МНО»). */
+  showCreated: boolean;
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onIncidents: (id: string) => void;
@@ -88,6 +92,7 @@ const MnoRow = memo(function MnoRow({
   m,
   selected,
   active,
+  showCreated,
   onToggle,
   onOpen,
   onIncidents,
@@ -135,6 +140,9 @@ const MnoRow = memo(function MnoRow({
           <span className="de-mno-inc-zero">0</span>
         )}
       </div>
+      {showCreated && (
+        <div className="de-mno-cell de-mno-c-created">{formatDate(m.created_at) || '—'}</div>
+      )}
       <div className="de-mno-cell de-mno-c-sync">
         {m.source === 'volunteer' ? (
           // МНО добавлено волонтёром на форме — помечаем, чтобы эколог проверил (source из контракта).
@@ -160,7 +168,10 @@ const MnoRow = memo(function MnoRow({
 /* ============================================================
    Экран «МНО»
    ============================================================ */
-export function MnoPage() {
+/** sourceFilter='volunteer' → раздел «Новые МНО» (добавленные волонтёрами); undefined/'fgis' —
+ * основной реестр (ФГИС/ручные, БЕЗ волонтёрских). Один компонент, две страницы. */
+export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' } = {}) {
+  const isVolunteer = sourceFilter === 'volunteer';
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
@@ -232,10 +243,11 @@ export function MnoPage() {
       search: query || undefined,
       region: fRegion || undefined,
       synced: syncedFilter,
+      source: sourceFilter,
       sort: sortKey,
       order: sortDir,
     }),
-    [query, fRegion, syncedFilter, sortKey, sortDir]
+    [query, fRegion, syncedFilter, sourceFilter, sortKey, sortDir]
   );
   // Фильтры списка = базовые + текущая страница.
   const listFilters: MnoFilters = useMemo(
@@ -244,10 +256,16 @@ export function MnoPage() {
   );
 
   const listQuery = useMno(listFilters);
-  const allQuery = useMno({}); // нефильтрованный итог (дедуп с Sidebar)
+  const allQuery = useMno({ source: sourceFilter }); // итог по разделу (все/волонтёрские)
   // Точки карты — отдельный лёгкий запрос, только когда активен под-режим «Карта».
   const pointsQuery = useMnoPoints(
-    { search: query || undefined, region: fRegion || undefined, synced: syncedFilter, bbox: mapBbox },
+    {
+      search: query || undefined,
+      region: fRegion || undefined,
+      synced: syncedFilter,
+      source: sourceFilter,
+      bbox: mapBbox,
+    },
     { enabled: sub === 'map' }
   );
   const regionsQuery = useRegionsDirectory({});
@@ -266,7 +284,9 @@ export function MnoPage() {
   const isFiltered = filterCount > 0 || !!query;
   const counterText = isFiltered
     ? `Показано ${total} из ${grandTotal}`
-    : `${grandTotal} МНО · слой 5 ФГИС`;
+    : isVolunteer
+      ? `${grandTotal} МНО, добавленных волонтёрами`
+      : `${grandTotal} МНО · слой 5 ФГИС`;
 
   // Диапазон строк текущей страницы для подписи пагинатора («X–Y из N»).
   const rangeFrom = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -363,23 +383,28 @@ export function MnoPage() {
       {/* Шапка */}
       <div className="de-mno-header">
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <h1 className="de-mno-title">Места накопления отходов</h1>
+          <h1 className="de-mno-title">{isVolunteer ? 'Новые МНО' : 'Места накопления отходов'}</h1>
           <div className="de-mno-subtitle">{counterText}</div>
         </div>
         <div className="de-mno-spacer" />
-        <button
-          type="button"
-          className="de-mno-btn de-mno-btn-outline"
-          onClick={handleSyncAll}
-          disabled={syncMno.isPending}
-        >
-          <Icon name="refresh" size={15} className={syncMno.isPending ? 'de-spin' : ''} />
-          {syncMno.isPending ? 'Синхронизация…' : 'Синхронизировать с ФГИС'}
-        </button>
-        <button type="button" className="de-mno-btn de-mno-btn-primary" onClick={() => setAddOpen(true)}>
-          <Icon name="plus" size={15} />
-          Добавить МНО
-        </button>
+        {/* Синхронизация ФГИС / ручное добавление — только в основном реестре, не в «Новых МНО». */}
+        {!isVolunteer && (
+          <>
+            <button
+              type="button"
+              className="de-mno-btn de-mno-btn-outline"
+              onClick={handleSyncAll}
+              disabled={syncMno.isPending}
+            >
+              <Icon name="refresh" size={15} className={syncMno.isPending ? 'de-spin' : ''} />
+              {syncMno.isPending ? 'Синхронизация…' : 'Синхронизировать с ФГИС'}
+            </button>
+            <button type="button" className="de-mno-btn de-mno-btn-primary" onClick={() => setAddOpen(true)}>
+              <Icon name="plus" size={15} />
+              Добавить МНО
+            </button>
+          </>
+        )}
       </div>
 
       {/* Поиск + Список/Карта */}
@@ -487,7 +512,10 @@ export function MnoPage() {
                     {allSelected && <CheckMark />}
                   </div>
                 </div>
-                {HEADS.map((h) => {
+                {(isVolunteer
+                  ? [...HEADS.slice(0, -1), CREATED_HEAD, HEADS[HEADS.length - 1]]
+                  : HEADS
+                ).map((h) => {
                   const on = !h.nosort && sortKey === h.key;
                   return (
                     <div
@@ -507,6 +535,7 @@ export function MnoPage() {
                   m={m}
                   selected={selected.has(m.id)}
                   active={detailId === m.id}
+                  showCreated={isVolunteer}
                   onToggle={toggleSel}
                   onOpen={setDetailId}
                   onIncidents={openIncidentsForMno}
@@ -743,6 +772,7 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
                         : 'Добавлено вручную',
                   ],
                   ['Обращений по МНО', String(data.incidents)],
+                  ['Дата создания', formatDate(data.created_at) || '—'],
                   // Комментарий — только у волонтёрских МНО и только если непуст (ФГИС/ручные не засоряем «—»).
                   ...(data.comment && data.comment.trim()
                     ? [['Комментарий', data.comment.trim()]]

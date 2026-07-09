@@ -113,7 +113,8 @@ export default function App() {
         <Route index element={<Navigate to="/incidents" replace />} />
         <Route path="incidents" element={<IncidentsPage />} />
         <Route path="reports" element={<ReportsPage />} />
-        <Route path="mno" element={<MnoPage />} />
+        <Route path="mno" element={<MnoPage sourceFilter="fgis" />} />
+        <Route path="mno-new" element={<MnoPage sourceFilter="volunteer" />} />
         <Route path="regions" element={<RegionsPage />} />
         <Route path="incident-types" element={<IncidentTypesPage />} />
         <Route path="volunteers" element={<VolunteersPage />} />
