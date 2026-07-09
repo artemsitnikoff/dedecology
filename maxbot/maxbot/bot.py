@@ -580,7 +580,9 @@ async def _notify_callback(event: MessageCallback, text: str) -> None:
     bot = getattr(event, "bot", None)
     if bot is None:
         return
+    _t = time.monotonic()
     await bot.send_callback(callback_id=event.callback.callback_id, notification=text)
+    logger.info("timing send_callback=%.2fs", time.monotonic() - _t)
 
 
 async def _edit_callback_message(event: MessageCallback, text: str, markup=None) -> None:
@@ -597,12 +599,14 @@ async def _edit_callback_message(event: MessageCallback, text: str, markup=None)
     mid = getattr(body, "mid", None)
     if bot is not None and mid:
         try:
+            _t = time.monotonic()
             await bot.edit_message(
                 message_id=mid,
                 text=text,
                 attachments=attachments,
                 parse_mode=ParseMode.HTML,
             )
+            logger.info("timing edit_message=%.2fs mid=%s", time.monotonic() - _t, mid)
             return
         except Exception:  # noqa: BLE001 — не вышло отредактировать → фолбэк ниже
             logger.exception("edit_message не удалось mid=%s", mid)
@@ -658,6 +662,45 @@ async def _do_finalize(
         parts.append("")
         parts.append(html.escape(quote))
     await _edit_callback_message(event, "\n".join(parts))
+
+
+async def _process_new_report(
+    msg: Message,
+    *,
+    text: str,
+    images: list,
+    mid,
+    sender_name: str,
+    chat_id,
+    user_id,
+) -> None:
+    """Тяжёлая обработка нового обращения В ФОНЕ: скачивание фото + разбор + карта/кнопки.
+
+    Уводится в create_task, потому что поллер maxapi обрабатывает апдейты ПОСЛЕДОВАТЕЛЬНО
+    (await handle) — пока идёт download+prepare (несколько секунд), бот не может принять
+    другие сообщения/тапы. Фоновая задача освобождает поллер → бот отзывчив. Свой
+    try/except: исключение из фоновой задачи поллер не увидит, гасим здесь (soft-reply)."""
+    try:
+        photos = await _download_all(images, mid)
+        if not photos:
+            logger.info("no photos downloaded mid=%s", mid)
+            return
+        msg_url = getattr(msg, "url", None) or ""
+        await _start_report(
+            msg,
+            text=text,
+            photos=photos,
+            sender_name=sender_name,
+            msg_id=str(mid),
+            msg_url=msg_url,
+            chat_id=chat_id,
+            user_id=user_id,
+        )
+    except (AppError, IntakeError):
+        await _safe_reply(msg)
+    except Exception:  # noqa: BLE001 — фоновая задача не должна падать «в никуда»
+        logger.exception("bg _process_new_report failed mid=%s", mid)
+        await _safe_reply(msg)
 
 
 def build_router() -> Router:
@@ -718,29 +761,28 @@ def build_router() -> Router:
 
             # 3) Новое обращение = ФОТО + непустой текст (адрес/описание).
             if images and text:
-                # Мгновенно подтверждаем приём фото (крутилка + текст) ДО скачивания/разбора.
+                # Мгновенно подтверждаем приём фото ДО скачивания/разбора, а саму тяжёлую
+                # обработку уводим в ФОН — чтобы поллер не блокировался на несколько секунд.
                 await _ack_uploading(event, msg, chat_id)
-                photos = await _download_all(images, mid)
-                if photos:
-                    msg_url = getattr(msg, "url", None) or ""
-                    logger.info(
-                        "max msg url=%r chat_id=%s seq=%s mid=%s",
-                        getattr(msg, "url", None),
-                        chat_id,
-                        getattr(body, "seq", None),
-                        mid,
-                    )
-                    await _start_report(
+                logger.info(
+                    "max msg url=%r chat_id=%s seq=%s mid=%s",
+                    getattr(msg, "url", None),
+                    chat_id,
+                    getattr(body, "seq", None),
+                    mid,
+                )
+                asyncio.create_task(
+                    _process_new_report(
                         msg,
                         text=text,
-                        photos=photos,
+                        images=images,
+                        mid=mid,
                         sender_name=sender_name,
-                        msg_id=str(mid),
-                        msg_url=msg_url,
                         chat_id=chat_id,
                         user_id=user_id,
                     )
-                    return
+                )
+                return
 
             # Невалидно (нет фото / пустой текст) — молчим.
             logger.info("ignored message mid=%s (нет фото или пустой текст)", mid)
@@ -829,9 +871,12 @@ def build_router() -> Router:
                 report.incident_types = types
                 report.awaiting_type = True
                 _STORE.put(report)
-                # Меняем сообщение на вопрос о типе + клавиатуру типов (карта/МНО-кнопки уходят).
-                await _edit_callback_message(
-                    event, _HDR_TYPE, markup=_build_type_keyboard(pid, types)
+                # Правку (снять МНО-кнопки → показать клавиатуру типов) уводим в ФОН: тап уже
+                # подтверждён тостом, а поллер не ждёт (потенциально небыстрый) edit_message.
+                asyncio.create_task(
+                    _edit_callback_message(
+                        event, _HDR_TYPE, markup=_build_type_keyboard(pid, types)
+                    )
                 )
                 return
 
