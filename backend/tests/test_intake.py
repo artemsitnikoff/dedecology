@@ -2145,55 +2145,8 @@ async def test_ai_parse_incident_empty_text_skips_cli():
     cli.assert_not_awaited()
 
 
-# --------------------------------------------------------------------------- #
-# Мотивирующая цитата о природе: nature_quote (claude CLI + фолбэк)            #
-# --------------------------------------------------------------------------- #
-
-
-@pytest.mark.asyncio
-async def test_nature_quote_uses_valid_cli_result():
-    """CLI вернул валидную цитату («…» — Автор) → используется (схлопнута в одну строку)."""
-    from app.services import quotes as quotes_service
-
-    with patch(
-        "app.services.quotes.claude_cli_complete",
-        new=AsyncMock(return_value="  «Берегите природу — она одна.»\n  — Иван Петров  "),
-    ):
-        q = await quotes_service.nature_quote()
-    assert q == "«Берегите природу — она одна.» — Иван Петров"
-
-
-@pytest.mark.asyncio
-async def test_nature_quote_refusal_falls_back_to_list():
-    """CLI отказался («Я не могу придумывать…») → фолбэк на список, отказ НЕ попадает в ответ."""
-    from app.services import quotes as quotes_service
-
-    refusal = "Я не могу придумывать цитаты и приписывать их реальным людям."
-    with patch("app.services.quotes.claude_cli_complete", new=AsyncMock(return_value=refusal)):
-        q = await quotes_service.nature_quote()
-    assert q in quotes_service._QUOTES
-    assert "не могу" not in q.lower()
-
-
-@pytest.mark.asyncio
-async def test_nature_quote_none_falls_back_to_list():
-    """CLI недоступен (None) → непустая подлинная цитата из выверенного списка."""
-    from app.services import quotes as quotes_service
-
-    with patch("app.services.quotes.claude_cli_complete", new=AsyncMock(return_value=None)):
-        q = await quotes_service.nature_quote()
-    assert q in quotes_service._QUOTES
-
-
-def test_clean_quote_validation():
-    """_clean_quote: валидную пропускает, отказ/прозу/слишком длинное — отбрасывает (None)."""
-    from app.services.quotes import _clean_quote
-
-    assert _clean_quote("  «Цитата.»\n — Автор  ") == "«Цитата.» — Автор"
-    assert _clean_quote("Я не могу придумывать цитаты.") is None
-    assert _clean_quote("Просто текст без кавычек и автора") is None
-    assert _clean_quote(None) is None
-    assert _clean_quote("«" + "д" * 400 + "» — Автор") is None
+# Цитата теперь берётся СЛУЧАЙНО из таблицы quotes (claude CLI убран) — тесты пула
+# и выборки/фолбэка живут в tests/test_quotes.py.
 
 
 # --------------------------------------------------------------------------- #
@@ -2677,12 +2630,12 @@ async def test_max_finalize_route_creates_and_quotes(client, monkeypatch):
     fake_incident = Incident(source="max", status="new")
     fake_incident.id = uuid4()
     create = AsyncMock(return_value=fake_incident)
-    fill_quote = AsyncMock()
+    quote = AsyncMock(return_value="«цитата» — Автор")
     mno_id = str(uuid4())
     with patch(
         "app.api.v1.intake.intake_service.create_incident_from_max_selected",
         new=create,
-    ), patch("app.api.v1.intake._fill_quote_bg", new=fill_quote):
+    ), patch("app.api.v1.intake.quotes_service.nature_quote", new=quote):
         resp = await client.post(
             "/api/v1/intake/max/finalize",
             headers={"X-Intake-Token": "secret-token"},
@@ -2704,10 +2657,10 @@ async def test_max_finalize_route_creates_and_quotes(client, monkeypatch):
     body = resp.json()
     assert body["ok"] is True
     assert body["incident_id"] == str(fake_incident.id)
-    # Ответ боту НЕ ждёт медленную цитату (claude CLI ~15-20с) → quote=None сразу;
-    # цитата дописывается в ФОНЕ (_fill_quote_bg запланирован с id созданного инцидента).
-    assert body["quote"] is None
-    fill_quote.assert_called_once_with(fake_incident.id)
+    # Цитата теперь быстрая (случайная из БД) → берётся синхронно и возвращается + пишется
+    # на инцидент 2-м коммитом.
+    assert body["quote"] == "«цитата» — Автор"
+    assert fake_incident.quote == "«цитата» — Автор"
     create.assert_awaited_once()
     kwargs = create.call_args.kwargs
     assert kwargs["region"] == "Самарская область"

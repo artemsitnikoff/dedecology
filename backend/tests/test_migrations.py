@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0021():
-    """Цепочка ревизий консистентна: ровно один head, и это 0021 (0021→0020→…)."""
+def test_migration_chain_single_head_is_0022():
+    """Цепочка ревизий консистентна: ровно один head, и это 0022 (0022→0021→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0021"}
+    assert heads == {"0022"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 

@@ -8,6 +8,7 @@ from .incident_type import IncidentType
 from .volunteer import Volunteer
 from .smtp import SmtpSettings
 from .report import Report
+from .quote import Quote
 
 __all__ = [
     "Base",
@@ -22,4 +23,5 @@ __all__ = [
     "Volunteer",
     "SmtpSettings",
     "Report",
+    "Quote",
 ]

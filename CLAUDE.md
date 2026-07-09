@@ -84,7 +84,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   ОТДЕЛЬНЫЙ канал от env-mailer писем волонтёрам (SMTP_* env → verify/reset); каналы независимы.
 - Миграции: `0001_initial` (сначала `CREATE EXTENSION pgcrypto`) · `0002` notified_at+quote ·
   `0003` msg_url · `0004` is_superadmin (бэкфилл = старейший admin = pulse@reo.ru) · `0005` comment ·
-  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at · `0014` incidents.mno_reg · `0015` volunteers.email_code · `0016` incidents.mno_id · `0017` mno.source (МНО от волонтёра) · `0018` mno.comment+photo_urls · `0019` incidents/mno.volunteer_id (авторство) · `0020` smtp_settings · `0021` reports.
+  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at · `0014` incidents.mno_reg · `0015` volunteers.email_code · `0016` incidents.mno_id · `0017` mno.source (МНО от волонтёра) · `0018` mno.comment+photo_urls · `0019` incidents/mno.volunteer_id (авторство) · `0020` smtp_settings · `0021` reports · `0022` quotes (+ сид пула ~301 из services/quotes_data.py).
 
 ## 5. API (`/api/v1`, конверт ошибок `{error:{code,message,details}}`)
 - **auth:** `POST /auth/login` → `{access_token,token_type}` + HttpOnly refresh-cookie (path
@@ -208,7 +208,9 @@ npm run dev            # дев-сервер :5173 (нужен бэк на VITE_
 ресайз), **Макс-бот** (`maxbot/`, long-polling, фото+адрес → инцидент, цитата, уведомления в группу;
 в группе бот молчит на не-фото — принимает только фото+подпись), **AI-разбор адреса** (claude `-p`
 sonnet) + бесплатный геокод через Подсказки, супер-админ + ручные пароли (инвайт убран), фильтр
-региона, поле «Комментарий», ссылки на фото в .xlsx, мотивирующие цитаты (рандомизация промпта),
+региона, поле «Комментарий», ссылки на фото в .xlsx, мотивирующие эко-цитаты (СЛУЧАЙНАЯ из таблицы
+`quotes` — пул ~301 в `services/quotes_data.py`, сид миграцией 0022; медленный claude CLI для цитат
+УБРАН, `nature_quote()` читает `ORDER BY random()`, фолбэк на код-список),
 бэкап-скрипты, домен+HTTPS, **раздел «Интеграция ФГИС УТКО»** (только супер-админ, `/integration`):
 живой краулер карты `public-api.utko.mnr.gov.ru` (слой 5) — синхронизация справочника субъектов РФ
 (`filters/regions`) и МНО (фильтр→плитка с дроблением кластеров→батч-детали `sidebar/cluster` +

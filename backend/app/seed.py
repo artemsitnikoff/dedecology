@@ -16,6 +16,7 @@ from .core.security import get_password_hash
 from .database import AsyncSessionLocal
 from .models import Incident, Mno, Region, User
 from .services.geo import parse_latlon
+from .services.quotes import seed_quotes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -240,6 +241,7 @@ async def main() -> None:
             await seed_incidents(session)
             await seed_regions(session)
             await seed_mno(session)
+            await seed_quotes(session)
             await session.commit()
             logger.info("Сид завершён.")
         except Exception:

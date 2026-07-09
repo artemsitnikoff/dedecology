@@ -7,7 +7,6 @@
 недокументирован, разбираем толерантно.
 """
 
-import asyncio
 import hmac
 import logging
 import re
@@ -20,9 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config import settings
 from ...core.errors import AppError, ForbiddenError, NotFoundError, ValidationError
-from ...database import AsyncSessionLocal, get_db
+from ...database import get_db
 from ...deps import get_optional_volunteer
-from ...models import Incident, Volunteer
+from ...models import Volunteer
 from ...services.geo import parse_latlon
 from ...schemas.incident import (
     MarkNotified,
@@ -404,28 +403,12 @@ async def max_finalize(
         incident_type=incident_type,
     )
     await session.commit()
-    # Цитата — через claude CLI, ~15-20с (замер с прода). НЕ блокируем ответ боту: инцидент
-    # уже создан, а цитату дописываем в ФОНЕ на инцидент отдельной сессией. Бот показывает
-    # подтверждение сразу. Best-effort: сбой генерации не влияет на созданное обращение.
-    asyncio.create_task(_fill_quote_bg(incident.id))
-    return {"ok": True, "incident_id": str(incident.id), "quote": None}
-
-
-async def _fill_quote_bg(incident_id) -> None:
-    """Фоново генерит мотивирующую цитату (медленный claude CLI) и дописывает на инцидент.
-
-    Своя сессия (сессия запроса уже закрыта). Любой сбой гасим — цитата необязательна."""
-    try:
-        quote = await quotes_service.nature_quote()
-        if not quote:
-            return
-        async with AsyncSessionLocal() as bg_session:
-            incident = await bg_session.get(Incident, incident_id)
-            if incident is not None:
-                incident.quote = quote
-                await bg_session.commit()
-    except Exception:  # noqa: BLE001 — фоновая цитата не должна ничего ронять
-        logger.exception("bg quote generation failed incident=%s", incident_id)
+    # Цитата теперь БЫСТРАЯ — случайная строка из таблицы quotes (claude CLI убран),
+    # поэтому берём её синхронно и сразу отдаём боту (он показывает её в «✅ Спасибо»).
+    quote = await quotes_service.nature_quote()
+    incident.quote = quote
+    await session.commit()
+    return {"ok": True, "incident_id": str(incident.id), "quote": quote}
 
 
 def _parse_map_pts(pts: str) -> list[tuple[float, float]]:
