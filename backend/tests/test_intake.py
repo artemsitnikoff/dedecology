@@ -2677,12 +2677,12 @@ async def test_max_finalize_route_creates_and_quotes(client, monkeypatch):
     fake_incident = Incident(source="max", status="new")
     fake_incident.id = uuid4()
     create = AsyncMock(return_value=fake_incident)
-    quote = AsyncMock(return_value="«цитата» — Автор")
+    fill_quote = AsyncMock()
     mno_id = str(uuid4())
     with patch(
         "app.api.v1.intake.intake_service.create_incident_from_max_selected",
         new=create,
-    ), patch("app.api.v1.intake.quotes_service.nature_quote", new=quote):
+    ), patch("app.api.v1.intake._fill_quote_bg", new=fill_quote):
         resp = await client.post(
             "/api/v1/intake/max/finalize",
             headers={"X-Intake-Token": "secret-token"},
@@ -2704,9 +2704,10 @@ async def test_max_finalize_route_creates_and_quotes(client, monkeypatch):
     body = resp.json()
     assert body["ok"] is True
     assert body["incident_id"] == str(fake_incident.id)
-    assert body["quote"] == "«цитата» — Автор"
-    # цитата сохранена на инциденте 2-м коммитом
-    assert fake_incident.quote == "«цитата» — Автор"
+    # Ответ боту НЕ ждёт медленную цитату (claude CLI ~15-20с) → quote=None сразу;
+    # цитата дописывается в ФОНЕ (_fill_quote_bg запланирован с id созданного инцидента).
+    assert body["quote"] is None
+    fill_quote.assert_called_once_with(fake_incident.id)
     create.assert_awaited_once()
     kwargs = create.call_args.kwargs
     assert kwargs["region"] == "Самарская область"
