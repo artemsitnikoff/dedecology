@@ -8,11 +8,13 @@ from openpyxl import load_workbook
 from app.models import Incident
 from app.services.export import build_xlsx
 
-# 0-based индексы колонок («Комментарий» добавлен после «Координаты» → сдвиг
-# «Ссылка на фото»/«Ссылка на сообщение» на +1).
+# 0-based индексы колонок. Столбец «Ссылка на фото» заменён на 3 столбца «Фото 1/2/3»
+# (формула =IMAGE(url)) → «Ссылка на сообщение»/«Поступило» сдвинуты на +2.
 _COMMENT_COL = 8  # «Комментарий» (сразу после «Координаты»)
-_PHOTO_LINK_COL = 12  # «Ссылка на фото»
-_MSG_LINK_COL = 13  # «Ссылка на сообщение»
+_PHOTO1_COL = 12  # «Фото 1»
+_PHOTO2_COL = 13  # «Фото 2»
+_PHOTO3_COL = 14  # «Фото 3»
+_MSG_LINK_COL = 15  # «Ссылка на сообщение»
 
 
 def _incident(**kw) -> Incident:
@@ -58,15 +60,15 @@ def test_export_blank_msg_url_writes_empty_not_mid_link():
     assert "mid.ffffdead" not in (cells[0] or "")
 
 
-def _photo_cells(rows: list[Incident], base_url: str = "") -> list:
-    """Значения колонки «Ссылка на фото» (без строки заголовков)."""
+def _photo_cell(rows: list[Incident], col: int, base_url: str = "") -> object:
+    """Значение указанного столбца «Фото N» первой строки данных."""
     wb = load_workbook(BytesIO(build_xlsx(rows, base_url)))
     ws = wb.active
-    return [row[_PHOTO_LINK_COL].value for row in ws.iter_rows(min_row=2)]
+    return next(ws.iter_rows(min_row=2))[col].value
 
 
-def test_export_photo_links_absolute_url():
-    """Относительные photo_urls → абсолютные URL с base_url, по одному на строку."""
+def test_export_photo_image_formula_absolute_url():
+    """Столбцы «Фото 1/2/3» — формула =IMAGE(абсолютный URL); нет фото → пусто."""
     inc = _incident(
         photos=2,
         photo_urls=[
@@ -74,23 +76,28 @@ def test_export_photo_links_absolute_url():
             "/api/v1/intake/photo/abc/1.jpg",
         ],
     )
-    cell = _photo_cells([inc], base_url="https://ecopulse.reo.ru")[0]
-    assert "https://ecopulse.reo.ru/api/v1/intake/photo/abc/0.jpg" in cell
-    assert "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1.jpg" in cell
+    c1 = _photo_cell([inc], _PHOTO1_COL, "https://ecopulse.reo.ru")
+    c2 = _photo_cell([inc], _PHOTO2_COL, "https://ecopulse.reo.ru")
+    c3 = _photo_cell([inc], _PHOTO3_COL, "https://ecopulse.reo.ru")
+    assert "IMAGE(" in c1 and "https://ecopulse.reo.ru/api/v1/intake/photo/abc/0.jpg" in c1
+    assert "IMAGE(" in c2 and "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1.jpg" in c2
+    assert c3 in (None, "")  # третьего фото нет → пустая ячейка
 
 
-def test_export_photo_links_skip_placeholder():
-    """Плейсхолдеры демо-сида (placeholder://…) в ссылку не попадают."""
+def test_export_photo_skip_placeholder():
+    """Плейсхолдеры демо-сида (placeholder://…) → пустая ячейка (нет файла — нет IMAGE)."""
     inc = _incident(photos=1, photo_urls=["placeholder://incident-photo/1"])
-    assert _photo_cells([inc], base_url="https://ecopulse.reo.ru")[0] in (None, "")
+    assert _photo_cell([inc], _PHOTO1_COL, "https://ecopulse.reo.ru") in (None, "")
 
 
-def test_export_has_photo_link_header():
-    """Заголовок «Ссылка на фото» на месте, перед «Ссылка на сообщение»."""
+def test_export_has_photo_headers():
+    """Заголовки «Фото 1/2/3» на месте, перед «Ссылка на сообщение»."""
     wb = load_workbook(BytesIO(build_xlsx([])))
     ws = wb.active
     headers = [c.value for c in next(ws.iter_rows(max_row=1))]
-    assert headers[_PHOTO_LINK_COL] == "Ссылка на фото"
+    assert headers[_PHOTO1_COL] == "Фото 1"
+    assert headers[_PHOTO2_COL] == "Фото 2"
+    assert headers[_PHOTO3_COL] == "Фото 3"
     assert headers[_MSG_LINK_COL] == "Ссылка на сообщение"
 
 
