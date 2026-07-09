@@ -59,7 +59,7 @@ export function Sidebar() {
   // Основная навигация (до группы «Справочники»).
   const mainNav: NavItem[] = [
     { id: 'incidents', label: 'Инциденты', icon: 'incidents', count: incidentsCount },
-    { id: 'reports', label: 'Отчёты', icon: 'download' },
+    { id: 'reports', label: 'Выгрузка УТКО', icon: 'download' },
     { id: 'mno', label: 'МНО', icon: 'pin', count: mnoCount },
   ];
   // Справочники.

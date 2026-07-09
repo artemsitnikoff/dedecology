@@ -353,7 +353,7 @@ export function IncidentsPage() {
       order: filters.order,
     };
     createReport.mutate(body, {
-      onSuccess: () => showToast('Отчёт сформирован — доступен в разделе «Отчёты».'),
+      onSuccess: () => showToast('Выгрузка сформирована — доступна в разделе «Выгрузка УТКО».'),
       onError: (err) => showToast(reportErrorMessage(err, 'Не удалось сформировать отчёт.')),
     });
   }, [createReport, filters, reportErrorMessage, showToast]);
@@ -365,7 +365,7 @@ export function IncidentsPage() {
       { ids },
       {
         onSuccess: () => {
-          showToast('Отчёт сформирован — доступен в разделе «Отчёты».');
+          showToast('Выгрузка сформирована — доступна в разделе «Выгрузка УТКО».');
           clearSelection();
         },
         onError: (err) => showToast(reportErrorMessage(err, 'Не удалось сформировать отчёт.')),
@@ -412,7 +412,7 @@ export function IncidentsPage() {
           disabled={total === 0 || createReport.isPending}
         >
           <Icon name="download" size={15} />
-          {createReport.isPending ? 'Формирование…' : 'Сформировать отчёт'}
+          {createReport.isPending ? 'Выгрузка…' : 'Выгрузить в УТКО'}
         </button>
       </div>
 
@@ -519,7 +519,7 @@ export function IncidentsPage() {
                 disabled={createReport.isPending}
               >
                 <Icon name="download" size={14} />
-                {createReport.isPending ? 'Формирование…' : 'Сформировать отчёт'}
+                {createReport.isPending ? 'Выгрузка…' : 'Выгрузить в УТКО'}
               </button>
               <button
                 type="button"

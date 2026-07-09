@@ -193,7 +193,7 @@ async def test_create_by_filters_writes_file_and_row(tmp_path, monkeypatch):
         "app.services.report.incident_service.list_by_ids",
         new=AsyncMock(side_effect=AssertionError("не должен вызываться по фильтру")),
     ), patch(
-        "app.services.report.build_xlsx", return_value=b"xlsxbytes"
+        "app.services.report.build_utko_xlsx", return_value=b"xlsxbytes"
     ), patch(
         "app.services.report.audit", new=AsyncMock()
     ):
@@ -238,7 +238,7 @@ async def test_create_by_ids_uses_list_by_ids_and_suffix(tmp_path, monkeypatch):
         "app.services.report.incident_service.list_for_export",
         new=AsyncMock(side_effect=AssertionError("не должен вызываться по ids")),
     ), patch(
-        "app.services.report.build_xlsx", return_value=b"xlsx"
+        "app.services.report.build_utko_xlsx", return_value=b"xlsx"
     ), patch(
         "app.services.report.audit", new=AsyncMock()
     ):

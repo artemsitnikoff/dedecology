@@ -195,7 +195,7 @@ export function ReportsPage() {
       {/* Шапка */}
       <div className="de-rep-header">
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <h1 className="de-rep-title">Отчёты</h1>
+          <h1 className="de-rep-title">Выгрузка УТКО</h1>
           <div className="de-rep-subtitle">{total} отчётов</div>
         </div>
       </div>
@@ -231,8 +231,8 @@ export function ReportsPage() {
         ) : (
           <div className="de-rep-empty">
             <div className="de-rep-empty-mark">💚</div>
-            <h3>Отчётов пока нет</h3>
-            <p>Отчётов пока нет — сформируйте на странице «Инциденты».</p>
+            <h3>Выгрузок пока нет</h3>
+            <p>Выгрузок пока нет — сформируйте на странице «Инциденты» кнопкой «Выгрузить в УТКО».</p>
           </div>
         )}
       </div>

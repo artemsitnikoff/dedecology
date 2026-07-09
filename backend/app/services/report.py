@@ -23,7 +23,7 @@ from ..schemas.report import ReportCreateRequest, ReportListItem
 from ..services import incident as incident_service
 from ..services import incident_type as incident_type_service
 from ..services.audit import audit
-from ..services.export import build_xlsx
+from ..services.utko_export import build_utko_xlsx
 
 
 def _reports_dir() -> Path:
@@ -61,7 +61,7 @@ async def create_incidents_report(
         )
 
     type_labels = await incident_type_service.labels_map(session)
-    content = build_xlsx(rows, base_url, type_labels)
+    content = build_utko_xlsx(rows, base_url, type_labels)
 
     # Формирование отчёта = выгрузка: включённые в него обращения СРАЗУ переходят в
     # статус «Выгружен» (по требованию). Файл собран ВЫШЕ — в нём статусы на момент
@@ -76,9 +76,9 @@ async def create_incidents_report(
 
     now = datetime.now(timezone.utc)
     if req.ids:
-        filename = f"Обращения_ЭкоПульс_{now:%Y-%m-%d_%H-%M}_выбранные.xlsx"
+        filename = f"Выгрузка_УТКО_{now:%Y-%m-%d_%H-%M}_выбранные.xlsx"
     else:
-        filename = f"Обращения_ЭкоПульс_{now:%Y-%m-%d_%H-%M}.xlsx"
+        filename = f"Выгрузка_УТКО_{now:%Y-%m-%d_%H-%M}.xlsx"
 
     report = Report(
         kind="incidents",
