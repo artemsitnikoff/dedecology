@@ -260,7 +260,7 @@ async def _download_all(images: list[Image], mid) -> list[bytes]:
 
 
 _ACK_UPLOADING = (
-    "⏳ Загружаем фотографию… Некоторые фото весят много — это может занять несколько секунд."
+    "Фотография принята в обработку. Формируем обращение — это займёт несколько секунд."
 )
 
 
@@ -410,30 +410,36 @@ def _type_label(types: list[dict], code: str) -> str:
 async def _send_report_prompt(
     msg: Message, report: PendingReport, point: tuple[float, float] | None
 ) -> None:
-    """Показать карту + список кандидатов + инлайн-кнопки выбора (одно сообщение)."""
+    """Показать карту (отдельным сообщением) + список кандидатов с инлайн-кнопками.
+
+    ВАЖНО: карту шлём ОТДЕЛЬНЫМ сообщением, а кнопки — ТЕКСТОВЫМ сообщением без картинки.
+    Тогда правки сообщения с кнопками на тапе (убрать кнопки → спросить тип → подтвердить)
+    мгновенны: правка сообщения С КАРТИНКОЙ у Макса медленная/капризная — из-за неё кнопки
+    «висели» по несколько секунд."""
     candidates = report.candidates
     markup = _build_keyboard(report.pending_id, candidates)
 
-    if candidates:
-        # Пустая строка между пунктами — список читается легче (по просьбе с прода).
-        body = "\n\n".join(
-            _candidate_line(i + 1, c) for i, c in enumerate(candidates)
-        )
-        text = f"{_HDR_PICK}\n\n{body}"
-        png = None
-        if point is not None:
-            png = await fetch_map(point[0], point[1], map_query(point, candidates))
-        attachments = []
-        if png:
-            attachments.append(InputMediaBuffer(buffer=png, filename="map.png"))
-        attachments.append(markup)
-        # parse_mode=HTML — жирные номера/реестровые № в списке (_candidate_line).
-        await msg.answer(
-            text=text, attachments=attachments, parse_mode=ParseMode.HTML
-        )
-    else:
+    if not candidates:
         # Кандидатов нет — карту не рисуем, только предложение отправить без привязки.
         await msg.answer(text=_NO_MNO_NEARBY, attachments=[markup])
+        return
+
+    # 1) Карта — отдельным сообщением (без кнопок). Не критична: сбой/таймаут → без карты.
+    if point is not None:
+        png = await fetch_map(point[0], point[1], map_query(point, candidates))
+        if png:
+            try:
+                await msg.answer(
+                    attachments=[InputMediaBuffer(buffer=png, filename="map.png")]
+                )
+            except Exception:  # noqa: BLE001 — карта не критична
+                logger.debug("map message failed", exc_info=True)
+
+    # 2) Список + кнопки — ТЕКСТОВОЕ сообщение (пустая строка между пунктами для читаемости).
+    body = "\n\n".join(_candidate_line(i + 1, c) for i, c in enumerate(candidates))
+    text = f"{_HDR_PICK}\n\n{body}"
+    # parse_mode=HTML — жирные номера/реестровые № в списке (_candidate_line).
+    await msg.answer(text=text, attachments=[markup], parse_mode=ParseMode.HTML)
 
 
 async def _finalize(report: PendingReport, mno_id: str, incident_type: str = "") -> dict:

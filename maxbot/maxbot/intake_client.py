@@ -28,6 +28,10 @@ _NOTIFY_TIMEOUT = httpx.Timeout(15.0, connect=10.0)
 # Скачивание фото для пересылки в групповой чат — потоково, с потолком размера.
 _PHOTO_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
+# Карта — НЕ критична (деградируем до текста): короткий таймаут, чтобы медленный
+# рендер OSM не задерживал показ списка площадок с кнопками.
+_MAP_TIMEOUT = httpx.Timeout(7.0, connect=4.0)
+
 
 async def push_incident(
     text: str,
@@ -244,7 +248,7 @@ async def fetch_map(lat: float, lon: float, pts: str) -> bytes | None:
     headers = {"X-Intake-Token": settings.INTAKE_TOKEN}
     params = {"lat": lat, "lon": lon, "pts": pts}
     try:
-        async with httpx.AsyncClient(timeout=_NOTIFY_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=_MAP_TIMEOUT) as client:
             resp = await client.get(url, params=params, headers=headers)
         resp.raise_for_status()
     except httpx.HTTPError as exc:
