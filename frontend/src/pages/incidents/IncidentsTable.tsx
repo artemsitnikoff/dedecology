@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { Link } from 'react-router-dom';
 import { STATUS, SOURCE } from '@/lib/status';
 import { formatDate, formatTime, fullAddr } from '@/lib/format';
 import { thumbUrl } from '@/lib/photo';
@@ -7,11 +8,11 @@ import type { SortKey, SortOrder } from '@/api/hooks/useIncidents';
 
 /** Описание колонки заголовка. */
 type Head = {
-  key: SortKey | 'coords';
+  key: SortKey | 'coords' | 'type' | 'mno';
   label: string;
   /** Класс ячейки заголовка (ширина/flex задаётся в CSS на парных cell-классах). */
   thClass: string;
-  /** Не сортируется (Координаты). */
+  /** Не сортируется (Координаты · Тип · МНО). */
   nosort?: boolean;
 };
 
@@ -25,6 +26,8 @@ const HEADS: Head[] = [
   { key: 'city', label: 'Город', thClass: 'de-inc-cell-city' },
   { key: 'address', label: 'Адрес', thClass: 'de-inc-cell-address' },
   { key: 'coords', label: 'Координаты', thClass: 'de-inc-cell-coords', nosort: true },
+  { key: 'type', label: 'Тип инцидента', thClass: 'de-inc-cell-type', nosort: true },
+  { key: 'mno', label: 'МНО', thClass: 'de-inc-cell-mno', nosort: true },
   { key: 'status', label: 'Статус', thClass: 'de-inc-cell-status' },
   { key: 'source', label: 'Источник', thClass: 'de-inc-cell-source' },
 ];
@@ -52,10 +55,12 @@ type RowProps = {
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onPhoto: (id: string) => void;
+  /** Карта код→подпись типа инцидента (стабильная ссылка из родителя). */
+  typeLabels: Record<string, string>;
 };
 
 /** Строка таблицы — мемоизирована, чтобы не перерисовывать весь список при выделении одной. */
-const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, onPhoto }: RowProps) {
+const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, onPhoto, typeLabels }: RowProps) {
   const statusMeta = STATUS[d.status];
   const sourceMeta = SOURCE[d.source];
   // Превью в строке — уменьшенная версия (thumb) для быстрой загрузки списка.
@@ -118,6 +123,28 @@ const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, o
         {d.street}
       </div>
       <div className="de-inc-cell de-inc-cell-coords de-inc-mono">{d.coords}</div>
+      {/* Тип инцидента — подпись по коду из справочника (после «Координаты»). */}
+      <div
+        className="de-inc-cell de-inc-cell-type"
+        title={d.incident_type ? typeLabels[d.incident_type] || d.incident_type : ''}
+      >
+        {d.incident_type ? typeLabels[d.incident_type] || d.incident_type : '—'}
+      </div>
+      {/* МНО — ссылка на карточку площадки (реестровый №), клик не открывает drawer строки. */}
+      <div className="de-inc-cell de-inc-cell-mno">
+        {d.mno_id ? (
+          <Link
+            className="de-inc-mno-link"
+            to={`/mno?open=${d.mno_id}`}
+            title="Открыть карточку МНО"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {d.mno_reg || 'Открыть'}
+          </Link>
+        ) : (
+          <span className="de-inc-mno-empty">—</span>
+        )}
+      </div>
       <div className="de-inc-cell de-inc-cell-status">
         <span
           className="de-inc-pill"
@@ -147,6 +174,8 @@ type Props = {
   onToggleSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onPhoto: (id: string) => void;
+  /** Карта код→подпись типа инцидента для колонки «Тип» (стабильная ссылка). */
+  typeLabels: Record<string, string>;
 };
 
 /**
@@ -173,6 +202,7 @@ export function IncidentsTable({
   onToggleSelect,
   onOpen,
   onPhoto,
+  typeLabels,
 }: Props) {
   const frozenOn = sort === 'date';
   return (
@@ -217,6 +247,7 @@ export function IncidentsTable({
           onToggle={onToggleSelect}
           onOpen={onOpen}
           onPhoto={onPhoto}
+          typeLabels={typeLabels}
         />
       ))}
     </div>

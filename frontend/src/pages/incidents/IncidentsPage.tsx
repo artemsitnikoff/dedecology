@@ -209,6 +209,13 @@ export function IncidentsPage() {
   const funnelQuery = useFunnelCounts(filters);
   const regionsQuery = useRegions();
   const incidentTypesQuery = useIncidentTypes();
+  // Карта код→подпись типа инцидента для колонки «Тип» в таблице (стабильная ссылка —
+  // чтобы memo строк не сбрасывался). Инцидент хранит код, подпись резолвим из справочника.
+  const typeLabels = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const t of incidentTypesQuery.data ?? []) m[t.code] = t.label;
+    return m;
+  }, [incidentTypesQuery.data]);
   // Нефильтрованный общий итог («из N») — те же пустые фильтры, что и в Sidebar
   // (один queryKey → дедуп). all = grand total по всем обращениям.
   const grandTotalQuery = useFunnelCounts({});
@@ -562,6 +569,7 @@ export function IncidentsPage() {
               onToggleSelect={toggleSelect}
               onOpen={openDetail}
               onPhoto={openPhoto}
+              typeLabels={typeLabels}
             />
           ) : (
             <div className="de-inc-empty">
