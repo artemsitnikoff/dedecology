@@ -12,7 +12,7 @@ import './report-form.css';
 // без авторизации, без сайдбара (standalone). Дизайн адаптирован из публичного
 // опроса Глафиры: центрированная карточка на мягком фоне + бренд-шапка.
 
-const MAX_PHOTOS = 3;
+const MAX_PHOTOS = 6;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10 МБ
 const ACCEPTED = /\.(jpe?g|png|webp)$/i;
 
@@ -487,7 +487,7 @@ export default function ReportFormPage() {
 
               {/* Фото */}
               <div className="de-rf-field">
-                <span className="de-rf-label">Фото площадки (до 3, до 10 МБ)</span>
+                <span className="de-rf-label">Фото площадки (до 6, до 10 МБ)</span>
                 <input
                   type="file"
                   className="de-rf-file"
@@ -495,7 +495,7 @@ export default function ReportFormPage() {
                   multiple
                   onChange={(e) => handleFiles(e.target.files, e.target)}
                 />
-                <span className="de-rf-hint">Можно добавлять по одной, до 3</span>
+                <span className="de-rf-hint">Можно добавлять по одной, до 6</span>
                 {photoError && <span className="de-rf-inline-err">{photoError}</span>}
                 {previews.length > 0 && (
                   <div className="de-rf-thumbs">

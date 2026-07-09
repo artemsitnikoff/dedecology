@@ -169,7 +169,7 @@ def create_bot() -> Bot:
     return Bot(token=token, default_connection=default_connection)
 
 
-def _all_images(msg: Message, limit: int = 3) -> list[Image]:
+def _all_images(msg: Message, limit: int = 6) -> list[Image]:
     """Return up to `limit` IMAGE attachments of the message (в сообщении Макса
     их может быть несколько — забираем все, как массив фоток в админке)."""
     if not msg.body or not msg.body.attachments:

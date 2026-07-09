@@ -26,7 +26,7 @@ from .intake_client import download_photo, fetch_pending, mark_notified
 logger = logging.getLogger("dedecology.maxbot")
 
 # Максимум фото на одно обращение в групповом сообщении.
-_MAX_PHOTOS = 3
+_MAX_PHOTOS = 6
 
 
 def _format_photo_time(photo_time: str | None) -> str | None:

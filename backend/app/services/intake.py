@@ -34,7 +34,7 @@ from .incident_type import code_exists
 
 logger = logging.getLogger(__name__)
 
-_MAX_PHOTOS = 3
+_MAX_PHOTOS = 6
 _MAX_PHOTO_BYTES = 10 * 1024 * 1024  # 10 MB (лимит исходного загружаемого файла)
 _PHOTO_CHUNK = 64 * 1024
 
@@ -188,7 +188,7 @@ def _parse_photo_urls(value) -> list[str]:
         url = _clean_str(item)
         if url.startswith(("http://", "https://")):
             urls.append(url)
-    return urls[:3]
+    return urls[:_MAX_PHOTOS]
 
 
 async def create_incident_from_form(
@@ -215,7 +215,7 @@ async def create_incident_from_form(
     bins = _parse_bins(params.get("bins"))
     photo_time = _parse_photo_time(params.get("photo_time"))
     photo_urls = _parse_photo_urls(params.get("photos"))
-    photos = max(0, min(3, len(photo_urls)))
+    photos = max(0, min(_MAX_PHOTOS, len(photo_urls)))
     # Числовые lat/lon для bbox-фильтра карты (NULL, если coords пусты/невалидны).
     lat, lon = parse_latlon(coords)
 

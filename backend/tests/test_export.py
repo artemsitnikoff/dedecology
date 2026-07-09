@@ -17,7 +17,7 @@ _COMMENT_COL = 10  # «Комментарий»
 _PHOTO1_COL = 14  # «Фото 1»
 _PHOTO2_COL = 15  # «Фото 2»
 _PHOTO3_COL = 16  # «Фото 3»
-_MSG_LINK_COL = 17  # «Ссылка на сообщение»
+_MSG_LINK_COL = 20  # «Ссылка на сообщение» (после Фото 1..6)
 
 
 def _incident(**kw) -> Incident:

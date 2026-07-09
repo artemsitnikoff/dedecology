@@ -805,9 +805,9 @@ async def test_public_form_honeypot_drops(client):
 
 @pytest.mark.asyncio
 async def test_public_form_too_many_photos_400(client):
-    """>3 фото → 400 VALIDATION_ERROR (реальный сервис, проверка до записи БД)."""
+    """>6 фото → 400 VALIDATION_ERROR (реальный сервис, проверка до записи БД)."""
     files = [
-        ("photos", (f"{i}.jpg", BytesIO(_FAKE_IMG), "image/jpeg")) for i in range(4)
+        ("photos", (f"{i}.jpg", BytesIO(_FAKE_IMG), "image/jpeg")) for i in range(7)
     ]
     resp = await client.post(
         "/api/v1/intake/form",
