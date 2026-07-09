@@ -1,5 +1,6 @@
 """Тесты серверного .xlsx-экспорта — офлайн, без БД (build_xlsx над Incident)."""
 
+import zipfile
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -60,15 +61,18 @@ def test_export_blank_msg_url_writes_empty_not_mid_link():
     assert "mid.ffffdead" not in (cells[0] or "")
 
 
-def _photo_cell(rows: list[Incident], col: int, base_url: str = "") -> object:
-    """Значение указанного столбца «Фото N» первой строки данных."""
+def _photo_cell(rows: list[Incident], col: int, base_url: str = ""):
+    """Ячейка указанного столбца «Фото N» первой строки данных (для hyperlink/value)."""
     wb = load_workbook(BytesIO(build_xlsx(rows, base_url)))
     ws = wb.active
-    return next(ws.iter_rows(min_row=2))[col].value
+    return next(ws.iter_rows(min_row=2))[col]
 
 
-def test_export_photo_image_formula_absolute_url():
-    """Столбцы «Фото 1/2/3» — формула =IMAGE(абсолютный URL); нет фото → пусто."""
+def test_export_photo_cell_has_hyperlink_to_full():
+    """Столбцы «Фото 1/2/3» — гиперссылка на ПОЛНЫЙ URL фото (клик → скачать); нет фото → пусто.
+
+    Файла на диске в тесте нет → картинка не встраивается, ячейка = кликабельный текст
+    «Открыть фото» с гиперссылкой (в проде вместо текста будет встроенная миниатюра)."""
     inc = _incident(
         photos=2,
         photo_urls=[
@@ -79,15 +83,39 @@ def test_export_photo_image_formula_absolute_url():
     c1 = _photo_cell([inc], _PHOTO1_COL, "https://ecopulse.reo.ru")
     c2 = _photo_cell([inc], _PHOTO2_COL, "https://ecopulse.reo.ru")
     c3 = _photo_cell([inc], _PHOTO3_COL, "https://ecopulse.reo.ru")
-    assert "IMAGE(" in c1 and "https://ecopulse.reo.ru/api/v1/intake/photo/abc/0.jpg" in c1
-    assert "IMAGE(" in c2 and "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1.jpg" in c2
-    assert c3 in (None, "")  # третьего фото нет → пустая ячейка
+    assert c1.hyperlink.target == "https://ecopulse.reo.ru/api/v1/intake/photo/abc/0.jpg"
+    assert c2.hyperlink.target == "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1.jpg"
+    assert c1.value == "Открыть фото"  # без файла — текстовая ссылка
+    assert c3.hyperlink is None and c3.value in (None, "")  # третьего фото нет
+
+
+def test_export_embeds_thumb_and_keeps_link(tmp_path, monkeypatch):
+    """Есть миниатюра на диске → картинка ВСТРОЕНА в файл (xl/media/*) + ячейка с гиперссылкой."""
+    from PIL import Image as PILImage
+
+    monkeypatch.setattr("app.services.export.settings.STORAGE_DIR", str(tmp_path))
+    inc_id = "abc123"
+    photo_dir = tmp_path / "incidents" / inc_id
+    photo_dir.mkdir(parents=True)
+    PILImage.new("RGB", (120, 90), "green").save(photo_dir / "0_thumb.jpg")
+
+    inc = _incident(photos=1, photo_urls=[f"/api/v1/intake/photo/{inc_id}/0.jpg"])
+    data = build_xlsx([inc], "https://ecopulse.reo.ru")
+
+    # Картинка реально встроена в книгу (медиа внутри xlsx-архива).
+    with zipfile.ZipFile(BytesIO(data)) as z:
+        assert any(n.startswith("xl/media/") for n in z.namelist())
+    # Гиперссылка на полное фото сохранена на ячейке «Фото 1».
+    wb = load_workbook(BytesIO(data))
+    cell = next(wb.active.iter_rows(min_row=2))[_PHOTO1_COL]
+    assert cell.hyperlink.target == f"https://ecopulse.reo.ru/api/v1/intake/photo/{inc_id}/0.jpg"
 
 
 def test_export_photo_skip_placeholder():
-    """Плейсхолдеры демо-сида (placeholder://…) → пустая ячейка (нет файла — нет IMAGE)."""
+    """Плейсхолдеры демо-сида (placeholder://…) → пустая ячейка (нет URL — нет ссылки/картинки)."""
     inc = _incident(photos=1, photo_urls=["placeholder://incident-photo/1"])
-    assert _photo_cell([inc], _PHOTO1_COL, "https://ecopulse.reo.ru") in (None, "")
+    c = _photo_cell([inc], _PHOTO1_COL, "https://ecopulse.reo.ru")
+    assert c.hyperlink is None and c.value in (None, "")
 
 
 def test_export_has_photo_headers():

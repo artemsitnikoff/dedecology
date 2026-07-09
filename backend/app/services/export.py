@@ -1,13 +1,28 @@
 """Серверный экспорт инцидентов в .xlsx (openpyxl). 17 колонок: порядок ТЗ §7 + комментарий +
-3 столбца «Фото 1/2/3» (формула =IMAGE(url) — картинка по URL прямо в ячейке, Excel 365/Online)."""
+3 столбца «Фото 1/2/3». В каждый столбец ВСТРАИВАЕТСЯ превью фото (миниатюра с диска) — видно
+в ЛЮБОМ Excel/МойОфис/Р7/LibreOffice, без интернета и без макросов; ячейка при этом несёт
+гиперссылку на ПОЛНОЕ фото (клик → скачать полноразмерное, нужен интернет)."""
 
+import logging
 from io import BytesIO
+from pathlib import Path
 from typing import Iterable
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
 
+from ..config import settings
 from ..models import Incident
+
+logger = logging.getLogger(__name__)
+
+# Превью фото в ячейке: максимальная сторона миниатюры (px), высота строки (pt) и ширина
+# столбцов «Фото» — с запасом, чтобы картинка была видна, а по краю ячейки работала
+# гиперссылка (клик → полное фото).
+_IMG_MAX_PX = 90
+_ROW_HEIGHT_PT = 74  # ≈ 98px — вмещает картинку 90px + поле
+_PHOTO_COL_WIDTH = 14  # ≈ 100px
 
 # Лейблы — зеркало data.js STATUS/SOURCE
 _STATUS_LABELS = {
@@ -90,20 +105,32 @@ def _abs_photo_url(inc: Incident, base_url: str, idx: int) -> str:
     return ""
 
 
-def _photo_image_cell(inc: Incident, base_url: str, idx: int):
-    """Ячейка столбца «Фото N»: формула =IMAGE(url) — Excel 365/Online показывает картинку
-    по URL прямо в ячейке. Нет фото → пустая ячейка.
+def _photo_thumb_path(inc: Incident, idx: int) -> Path | None:
+    """Путь к файлу-миниатюре фото №idx на диске (или None).
 
-    Префикс `_xlfn.` ОБЯЗАТЕЛЕН: IMAGE введена в Excel 2022, в формате xlsx новые функции
-    хранятся как `_xlfn.IMAGE`, иначе Excel покажет #ИМЯ?/@IMAGE. В Excel 2019/2021 и
-    МойОфис/Р7 функция не поддерживается (там будет #ИМЯ? — по выбору пользователя).
+    photo_urls[idx] = /api/v1/intake/photo/{id}/{i}.jpg → на диске лежит миниатюра
+    {STORAGE_DIR}/incidents/{id}/{i}_thumb.jpg (её и встраиваем — она лёгкая). Если
+    миниатюры нет — пробуем полный {i}.jpg. Плейсхолдеры сида (placeholder://…) и
+    отсутствующие файлы → None (встраивать нечего, останется текстовая гиперссылка).
     """
-    url = _abs_photo_url(inc, base_url, idx)
-    if not url:
-        return ""
-    # URL кавычек не содержит; на всякий случай убираем, чтобы не порвать формулу.
-    safe = url.replace('"', "")
-    return f'=_xlfn.IMAGE("{safe}","Фото {idx + 1}")'
+    urls = inc.photo_urls or []
+    if idx >= len(urls):
+        return None
+    u = urls[idx]
+    if not isinstance(u, str) or "/intake/photo/" not in u:
+        return None
+    tail = u.split("/intake/photo/", 1)[1]  # {id}/{i}.jpg
+    parts = tail.split("/")
+    if len(parts) < 2:
+        return None
+    ident, filename = parts[-2], parts[-1]
+    stem = filename.rsplit(".", 1)[0]
+    base = Path(settings.STORAGE_DIR) / "incidents" / ident
+    thumb = base / f"{stem}_thumb.jpg"
+    if thumb.exists():
+        return thumb
+    full = base / filename
+    return full if full.exists() else None
 
 
 def _received(inc: Incident) -> str:
@@ -126,20 +153,55 @@ def _row(inc: Incident, base_url: str) -> list:
         _photo_date(inc),
         _photo_time(inc),
         inc.photos,
-        _photo_image_cell(inc, base_url, 0),
-        _photo_image_cell(inc, base_url, 1),
-        _photo_image_cell(inc, base_url, 2),
+        # Столбцы «Фото 1/2/3» наполняются в build_xlsx (встраивание картинки +
+        # гиперссылка на ячейке) — здесь плейсхолдеры, чтобы не сбить порядок колонок.
+        "",
+        "",
+        "",
         _message_link(inc),
         _received(inc),
     ]
+
+
+def _place_photo(ws, inc: Incident, base_url: str, row_idx: int, idx: int, col: int) -> bool:
+    """Ставит в ячейку (row_idx, col) превью фото №idx + гиперссылку на полное фото.
+
+    Возвращает True, если что-то положено (для подъёма высоты строки). Ссылка на ячейке
+    работает в любом Excel (клик по краю ячейки → скачать полное фото по URL). Встроенная
+    картинка (миниатюра с диска) видна и БЕЗ интернета; битый/отсутствующий файл — не рушит
+    экспорт, останется одна текстовая гиперссылка «Открыть фото».
+    """
+    url = _abs_photo_url(inc, base_url, idx)
+    if not url:
+        return False
+    cell = ws.cell(row=row_idx, column=col)
+    cell.hyperlink = url  # клик → полноразмерное фото (нужен интернет)
+    thumb = _photo_thumb_path(inc, idx)
+    if thumb is not None:
+        try:
+            img = XLImage(str(thumb))
+            longest = max(img.width or _IMG_MAX_PX, img.height or _IMG_MAX_PX)
+            scale = _IMG_MAX_PX / longest
+            if scale < 1:
+                img.width = int(img.width * scale)
+                img.height = int(img.height * scale)
+            img.anchor = f"{get_column_letter(col)}{row_idx}"
+            ws.add_image(img)
+            return True
+        except Exception:  # noqa: BLE001 — битый файл не должен ронять весь отчёт
+            logger.warning("export: не удалось встроить фото %s", thumb, exc_info=True)
+    # Картинки нет — оставляем кликабельный текст, чтобы фото всё равно можно было открыть.
+    cell.value = "Открыть фото"
+    return True
 
 
 def build_xlsx(rows: Iterable[Incident], base_url: str = "") -> bytes:
     """Строит .xlsx (bytes) из инцидентов. 17 колонок, первая строка — заголовки.
 
     base_url (схема+домен, напр. https://ecopulse.reo.ru) — для абсолютных URL фото.
-    Столбцы «Фото 1/2/3» несут формулу =IMAGE(url): Excel 365/Online рисует картинку в
-    ячейке. Под превью расширяем эти столбцы и поднимаем высоту строк, где есть фото.
+    Столбцы «Фото 1/2/3»: в ячейку ВСТРАИВАЕТСЯ миниатюра (видна в любом Excel/МойОфис,
+    без интернета) + гиперссылка на полное фото (клик → скачать, нужен интернет). Строки
+    с фото делаем выше, столбцы «Фото» шире — под превью.
     """
     wb = Workbook()
     ws = wb.active
@@ -150,13 +212,15 @@ def build_xlsx(rows: Iterable[Incident], base_url: str = "") -> bytes:
     for inc in rows:
         row_idx += 1
         ws.append(_row(inc, base_url))
-        # Строку с ≥1 фото делаем выше — чтобы превью =IMAGE было видно, а не в «щёлку».
-        if any(_abs_photo_url(inc, base_url, i) for i in range(3)):
-            ws.row_dimensions[row_idx].height = 80
+        has_photo = False
+        for i, col in enumerate(_PHOTO_COLS):
+            if _place_photo(ws, inc, base_url, row_idx, i, col):
+                has_photo = True
+        if has_photo:
+            ws.row_dimensions[row_idx].height = _ROW_HEIGHT_PT
 
-    # Ширина 3 столбцов «Фото» под квадратное превью (≈80px).
     for col in _PHOTO_COLS:
-        ws.column_dimensions[get_column_letter(col)].width = 14
+        ws.column_dimensions[get_column_letter(col)].width = _PHOTO_COL_WIDTH
 
     buffer = BytesIO()
     wb.save(buffer)
