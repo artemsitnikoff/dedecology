@@ -585,37 +585,32 @@ async def _notify_callback(event: MessageCallback, text: str) -> None:
     logger.info("timing send_callback=%.2fs", time.monotonic() - _t)
 
 
-async def _edit_callback_message(event: MessageCallback, text: str, markup=None) -> None:
-    """Отредактировать сообщение с кнопками: заменить текст и вложения.
-
-    markup=None → attachments НЕ передаём, edit_message шлёт `attachments: []` (см.
-    исходник maxapi 0.9.4 EditMessage) → клавиатура и карта УБИРАЮТСЯ. markup задан →
-    ставим новую клавиатуру (шаг 2: вопрос о типе). Зовём сразу по тапу, чтобы кнопки
-    не оставались жать до ответа бэка. Бот/mid недоступны или edit не прошёл → фолбэк
-    отдельным сообщением."""
-    attachments = [markup] if markup is not None else None
+async def _delete_callback_message(event: MessageCallback) -> None:
+    """Удалить сообщение с кнопками (замер: edit_message ≈2.1с — медленно). Удаление
+    обычно быстрее правки, поэтому кнопки исчезают почти сразу, а следующий шаг шлём
+    отдельным сообщением. Best-effort: сбой не критичен (тогда останется старое сообщение)."""
     bot = getattr(event, "bot", None)
     body = getattr(getattr(event, "message", None), "body", None)
     mid = getattr(body, "mid", None)
-    if bot is not None and mid:
-        try:
-            _t = time.monotonic()
-            await bot.edit_message(
-                message_id=mid,
-                text=text,
-                attachments=attachments,
-                parse_mode=ParseMode.HTML,
-            )
-            logger.info("timing edit_message=%.2fs mid=%s", time.monotonic() - _t, mid)
-            return
-        except Exception:  # noqa: BLE001 — не вышло отредактировать → фолбэк ниже
-            logger.exception("edit_message не удалось mid=%s", mid)
+    if bot is None or not mid:
+        return
+    try:
+        _t = time.monotonic()
+        await bot.delete_message(message_id=mid)
+        logger.info("timing delete_message=%.2fs mid=%s", time.monotonic() - _t, mid)
+    except Exception:  # noqa: BLE001
+        logger.exception("delete_message не удалось mid=%s", mid)
+
+
+async def _answer_new(event: MessageCallback, text: str, markup=None) -> None:
+    """Прислать НОВОЕ сообщение в чат колбэка (замена правки — send обычно быстрее edit)."""
+    attachments = [markup] if markup is not None else None
     try:
         await event.message.answer(
             text=text, attachments=attachments, parse_mode=ParseMode.HTML
         )
     except Exception:  # noqa: BLE001
-        logger.exception("edit fallback answer не удалось")
+        logger.exception("answer_new не удалось")
 
 
 def _spawn(coro) -> None:
@@ -650,12 +645,18 @@ async def _do_finalize(
     2×). Правки идут по порядку (⏳ → ✅). Успех → «✅ Спасибо»; IntakeError → просьба
     прислать фото заново (обращение НЕ создано)."""
     _spawn(_notify_callback(event, "Принято ✅"))
-    await _edit_callback_message(event, "⏳ Отправляю обращение…")
+    # Кнопки типа убираем УДАЛЕНИЕМ (быстро), а не правкой (~2.1с). Пока идёт finalize
+    # (загрузка фото + цитата, несколько секунд) — показываем индикатор активности.
+    _spawn(_delete_callback_message(event))
+    _bot = getattr(event, "bot", None)
+    _chat = getattr(getattr(getattr(event, "message", None), "recipient", None), "chat_id", None)
+    if _bot is not None and _chat is not None:
+        _spawn(_bot.send_action(_chat, SenderAction.SENDING_PHOTO))
     try:
         result = await _finalize(report, mno_id, incident_type)
     except IntakeError:
         report.processing = False
-        await _edit_callback_message(
+        await _answer_new(
             event,
             "❌ Не удалось отправить. Пришлите, пожалуйста, фото площадки заново.",
         )
@@ -678,7 +679,7 @@ async def _do_finalize(
     if quote:
         parts.append("")
         parts.append(html.escape(quote))
-    await _edit_callback_message(event, "\n".join(parts))
+    await _answer_new(event, "\n".join(parts))
 
 
 async def _process_new_report(
@@ -902,10 +903,11 @@ def build_router() -> Router:
                 # ФОНЕ: обработчик возвращается мгновенно (поллер свободен), а два вызова к
                 # Максу не складываются последовательно (иначе кнопки «висят» вдвое дольше).
                 _spawn(_notify_callback(event, "Площадка выбрана"))
+                # Кнопки убираем УДАЛЕНИЕМ (быстрее правки ~2.1с), а выбор типа шлём НОВЫМ
+                # сообщением. Оба в фоне и параллельно → обработчик возвращается мгновенно.
+                _spawn(_delete_callback_message(event))
                 _spawn(
-                    _edit_callback_message(
-                        event, _HDR_TYPE, markup=_build_type_keyboard(pid, types)
-                    )
+                    _answer_new(event, _HDR_TYPE, markup=_build_type_keyboard(pid, types))
                 )
                 return
 
