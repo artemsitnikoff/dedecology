@@ -28,11 +28,6 @@ function pageWindow(current: number, totalPages: number): Array<number | 'gap'> 
   return out;
 }
 
-/** Подпись типа отчёта — резолвится по kind; неизвестный kind показываем как есть (честно). */
-function kindLabel(kind: string): string {
-  return kind === 'incidents' ? 'Обращения' : kind;
-}
-
 /** Байты → человекочитаемый размер (Б/КБ/МБ). */
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
@@ -73,7 +68,6 @@ function ReportRow({
         <span className="de-rep-mono">{formatDate(r.created_at) || '—'}</span>
         <span className="de-rep-mono de-rep-time">{formatTime(r.created_at)}</span>
       </div>
-      <div className="de-rep-cell de-rep-c-kind">{kindLabel(r.kind)}</div>
       <div className="de-rep-cell de-rep-c-rows">
         <span className="de-rep-mono">{r.row_count}</span>
       </div>
@@ -216,7 +210,6 @@ export function ReportsPage() {
           <div className="de-rep-table">
             <div className="de-rep-thead">
               <div className="de-rep-th de-rep-c-date">Дата и время</div>
-              <div className="de-rep-th de-rep-c-kind">Тип</div>
               <div className="de-rep-th de-rep-c-rows">Строк</div>
               <div className="de-rep-th de-rep-c-size">Размер</div>
               <div className="de-rep-th de-rep-c-author">Сформировал</div>

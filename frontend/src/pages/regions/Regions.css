@@ -132,11 +132,13 @@
   height: 32px;
   border: 1px solid var(--border-1);
   border-radius: 7px;
-  padding: 0 10px;
+  padding: 0 28px 0 10px;
   font: inherit;
   font-size: var(--fs-13);
   color: var(--fg-1);
-  background: var(--bg-1);
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-1) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239AA3AE' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
   outline: none;
   min-width: 210px;
   cursor: pointer;

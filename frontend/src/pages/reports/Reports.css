@@ -172,11 +172,6 @@
   font-size: 11px;
   color: var(--fg-3);
 }
-.de-rep-c-kind {
-  width: 140px;
-  font-size: var(--fs-13);
-  color: var(--fg-1);
-}
 .de-rep-c-rows {
   width: 100px;
   font-size: var(--fs-13);
