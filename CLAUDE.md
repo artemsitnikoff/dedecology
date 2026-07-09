@@ -60,7 +60,9 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   защищённый главный админ `pulse@reo.ru`: нельзя удалить/разжаловать/сбросить ему пароль чужими
   руками), status `active|invited` (новых юзеров создаём сразу `active` — инвайт/temp_password убран),
   is_active, failed_login_attempts, locked_until, created_at/updated_at.
-- **incidents:** id, source `max|form`, status `new|found|none|exported` (деф. `new`), fio, region,
+- **incidents:** id, source `max|form|app` (`app` — мобильное приложение волонтёра: тот же POST
+  /intake/form, но с volunteer-токеном → volunteer_id проставлен; аноним без токена → `form`),
+  status `new|found|none|exported` (деф. `new`), fio, region,
   city, street, coords (текст «lat, lon»), **comment** (прочая НЕ-адресная инфа: «Радар №…» / ФИО из
   текста / описание проблемы — AI кладёт сюда, чтобы не терять), photo_time (фотофиксация, ключ
   сортировки/периода), photos (1..3), photo_urls (JSONB list), msg (id сообщения Макса, nullable),
@@ -84,7 +86,7 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   ОТДЕЛЬНЫЙ канал от env-mailer писем волонтёрам (SMTP_* env → verify/reset); каналы независимы.
 - Миграции: `0001_initial` (сначала `CREATE EXTENSION pgcrypto`) · `0002` notified_at+quote ·
   `0003` msg_url · `0004` is_superadmin (бэкфилл = старейший admin = pulse@reo.ru) · `0005` comment ·
-  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at · `0014` incidents.mno_reg · `0015` volunteers.email_code · `0016` incidents.mno_id · `0017` mno.source (МНО от волонтёра) · `0018` mno.comment+photo_urls · `0019` incidents/mno.volunteer_id (авторство) · `0020` smtp_settings · `0021` reports · `0022` quotes (+ сид пула ~301 из services/quotes_data.py).
+  `0006` regions+mno · `0007` индекс `ix_mno_fgis_id` (upsert МНО по fgis_id) · `0008` mno.address→TEXT · `0009` lat/lon+индекс · `0010` incidents.incident_type · `0011` incident_types · `0012` volunteers · `0013` volunteers.last_seen_at · `0014` incidents.mno_reg · `0015` volunteers.email_code · `0016` incidents.mno_id · `0017` mno.source (МНО от волонтёра) · `0018` mno.comment+photo_urls · `0019` incidents/mno.volunteer_id (авторство) · `0020` smtp_settings · `0021` reports · `0022` quotes (+ сид пула ~301 из services/quotes_data.py) · `0023` incidents.source +`app`.
 
 ## 5. API (`/api/v1`, конверт ошибок `{error:{code,message,details}}`)
 - **auth:** `POST /auth/login` → `{access_token,token_type}` + HttpOnly refresh-cookie (path
@@ -92,7 +94,8 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
 - **incidents:** `GET /incidents` (фильтры search/source[]/status[]/**region**/date_from/date_to + sort
   `date|time|region|city|address|status|source` + order + page/page_size → `Paginated[IncidentListItem]`).
   **Поиск (search)** — многословный: токенизируется по пробелам/пунктуации, каждый токен ilike-OR по
-  полям, итог AND (порядок слов и запятые не важны; то же в `mno._search_clause`);
+  полям fio/region/city/street/coords/**mno_reg**/msg (поиск по реестровому № МНО), итог AND (порядок
+  слов и запятые не важны; то же в `mno._search_clause`);
   `GET /incidents/funnel` (честят search/source/**region**/period БЕЗ status); `GET /incidents/regions`
   (DISTINCT регионы → дропдаун фильтра); `GET /incidents/export` (.xlsx по фильтру, **полные** URL фото) +
   `POST /incidents/export {ids}`; `POST /incidents/bulk-status {ids,status}`; `POST /incidents/bulk-delete
@@ -129,8 +132,9 @@ nginx :80 → host :8080, build-arg `VITE_API_BASE_URL`.
   `{sent_to,last_test_at}` (реальная отправка smtplib; сервис коммитит исход теста САМ — и успех, и
   ошибку в last_test_error); `POST /settings/smtp/disconnect` → `{message}`. Ядро отправки —
   `services/smtp.send_email` (переиспользуемо под будущие оповещения).
-- **.xlsx-выгрузка** — 17 колонок: Заявитель · Источник · Статус · Регион · Город/н.п. · Адрес(улица) ·
-  Полный адрес · Координаты · **Комментарий** · Дата фотофиксации(ДД.ММ.ГГГГ) · Время(ЧЧ:ММ) · Кол-во
+- **.xlsx-выгрузка** — 19 колонок: Заявитель · Источник · Статус · Регион · Город/н.п. · Адрес(улица) ·
+  Полный адрес · Координаты · **Тип инцидента**(лейбл из БД-справочника) · **Реестровый № МНО** ·
+  **Комментарий** · Дата фотофиксации(ДД.ММ.ГГГГ) · Время(ЧЧ:ММ) · Кол-во
   фото · **Фото 1 · Фото 2 · Фото 3** · Ссылка на сообщение(Макс) · Поступило. Столбцы «Фото 1/2/3» —
   в ячейку ВСТРАИВАЕТСЯ миниатюра (`{i}_thumb.jpg` с диска через `openpyxl.drawing.image.Image`) — видна
   в ЛЮБОМ Excel/МойОфис/Р7, без интернета и макросов; ячейка несёт гиперссылку на полное фото (клик →

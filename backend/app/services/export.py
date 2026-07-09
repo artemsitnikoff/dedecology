@@ -14,6 +14,7 @@ from openpyxl.utils import get_column_letter
 
 from ..config import settings
 from ..models import Incident
+from .incident_types import incident_type_label as _static_type_label
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,11 @@ _STATUS_LABELS = {
 _SOURCE_LABELS = {
     "max": "Макс",
     "form": "Яндекс форма",
+    "app": "Мобильное приложение",
 }
 
-# Заголовки в точном порядке (ТЗ §7 / прототип toCsv)
+# Заголовки в точном порядке. «Тип инцидента» + «Реестровый № МНО» — после «Координаты»
+# (как в таблице инцидентов: Координаты · Тип · МНО).
 _HEADERS = [
     "Заявитель",
     "Источник",
@@ -46,6 +49,8 @@ _HEADERS = [
     "Адрес (улица)",
     "Полный адрес",
     "Координаты",
+    "Тип инцидента",
+    "Реестровый № МНО",
     "Комментарий",
     "Дата фотофиксации",
     "Время фотофиксации",
@@ -57,9 +62,9 @@ _HEADERS = [
     "Поступило",
 ]
 
-# 1-based номера столбцов «Фото 1/2/3» (для ширины колонок в build_xlsx). Совпадают с
-# позицией в _HEADERS: … Кол-во фото(12) · Фото1(13) · Фото2(14) · Фото3(15) · …
-_PHOTO_COLS = (13, 14, 15)
+# 1-based номера столбцов «Фото 1/2/3» (для ширины колонок). Позиция в _HEADERS:
+# … Кол-во фото(14) · Фото1(15) · Фото2(16) · Фото3(17) · …
+_PHOTO_COLS = (15, 16, 17)
 
 
 def _full_addr(inc: Incident) -> str:
@@ -139,7 +144,18 @@ def _received(inc: Incident) -> str:
     return inc.received_at.strftime("%Y-%m-%d %H:%M")
 
 
-def _row(inc: Incident, base_url: str) -> list:
+def _type_label(inc: Incident, type_labels: dict | None) -> str:
+    """Подпись типа инцидента: по коду из переданной карты (DB-справочник), фолбэк —
+    статический справочник; неизвестный/пустой код → '' (или сам код)."""
+    code = inc.incident_type
+    if not code:
+        return ""
+    if type_labels and code in type_labels:
+        return type_labels[code]
+    return _static_type_label(code) or code
+
+
+def _row(inc: Incident, base_url: str, type_labels: dict | None) -> list:
     return [
         inc.fio,
         _SOURCE_LABELS.get(inc.source, inc.source),
@@ -149,6 +165,8 @@ def _row(inc: Incident, base_url: str) -> list:
         inc.street,
         _full_addr(inc),
         inc.coords,
+        _type_label(inc, type_labels),
+        inc.mno_reg or "",
         inc.comment or "",
         _photo_date(inc),
         _photo_time(inc),
@@ -195,10 +213,16 @@ def _place_photo(ws, inc: Incident, base_url: str, row_idx: int, idx: int, col: 
     return True
 
 
-def build_xlsx(rows: Iterable[Incident], base_url: str = "") -> bytes:
-    """Строит .xlsx (bytes) из инцидентов. 17 колонок, первая строка — заголовки.
+def build_xlsx(
+    rows: Iterable[Incident],
+    base_url: str = "",
+    type_labels: dict | None = None,
+) -> bytes:
+    """Строит .xlsx (bytes) из инцидентов. 19 колонок, первая строка — заголовки.
 
     base_url (схема+домен, напр. https://ecopulse.reo.ru) — для абсолютных URL фото.
+    type_labels — карта код→подпись типа инцидента из БД-справочника (для колонки «Тип
+    инцидента»); None → фолбэк на статический справочник.
     Столбцы «Фото 1/2/3»: в ячейку ВСТРАИВАЕТСЯ миниатюра (видна в любом Excel/МойОфис,
     без интернета) + гиперссылка на полное фото (клик → скачать, нужен интернет). Строки
     с фото делаем выше, столбцы «Фото» шире — под превью.
@@ -211,7 +235,7 @@ def build_xlsx(rows: Iterable[Incident], base_url: str = "") -> bytes:
     row_idx = 1
     for inc in rows:
         row_idx += 1
-        ws.append(_row(inc, base_url))
+        ws.append(_row(inc, base_url, type_labels))
         has_photo = False
         for i, col in enumerate(_PHOTO_COLS):
             if _place_photo(ws, inc, base_url, row_idx, i, col):

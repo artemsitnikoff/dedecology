@@ -28,6 +28,12 @@ async def list_types(session: AsyncSession) -> list[IncidentType]:
     return list(result.scalars().all())
 
 
+async def labels_map(session: AsyncSession) -> dict[str, str]:
+    """code → label по всему справочнику из БД (для подписи типа в .xlsx-экспорте)."""
+    result = await session.execute(select(IncidentType.code, IncidentType.label))
+    return {code: label for code, label in result.all()}
+
+
 async def code_exists(session: AsyncSession, code: str) -> bool:
     """True, если тип с таким кодом есть в справочнике (пустой код → False)."""
     code = (code or "").strip()

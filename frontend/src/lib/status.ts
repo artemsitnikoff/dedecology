@@ -68,4 +68,9 @@ export const SOURCE: Record<Source, SourceMeta> = {
     bg: 'var(--ark-yellow-100)',
     fg: 'var(--ark-yellow-600)',
   },
+  app: {
+    label: 'Приложение',
+    bg: 'var(--ark-blue-100)',
+    fg: 'var(--ark-blue-600)',
+  },
 };

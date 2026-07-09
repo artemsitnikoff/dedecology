@@ -28,6 +28,7 @@ from ...schemas.incident import (
     IncidentStatusUpdate,
 )
 from ...services import incident as incident_service
+from ...services import incident_type as incident_type_service
 from ...services.export import build_xlsx
 
 router = APIRouter()
@@ -194,7 +195,10 @@ async def export_incidents_get(
         sort=sort,
         order=order,
     )
-    return _xlsx_response(build_xlsx(rows, _public_base(request)), "Инциденты_ЭкоПульс.xlsx")
+    type_labels = await incident_type_service.labels_map(session)
+    return _xlsx_response(
+        build_xlsx(rows, _public_base(request), type_labels), "Инциденты_ЭкоПульс.xlsx"
+    )
 
 
 @router.post("/export", tags=["Экспорт (вне мобильного API)"])
@@ -206,8 +210,10 @@ async def export_incidents_post(
 ):
     """Экспорт выбранных инцидентов в .xlsx."""
     rows = await incident_service.list_by_ids(session, payload.ids)
+    type_labels = await incident_type_service.labels_map(session)
     return _xlsx_response(
-        build_xlsx(rows, _public_base(request)), "Инциденты_ЭкоПульс_выбранные.xlsx"
+        build_xlsx(rows, _public_base(request), type_labels),
+        "Инциденты_ЭкоПульс_выбранные.xlsx",
     )
 
 

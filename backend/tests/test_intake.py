@@ -1017,7 +1017,7 @@ async def test_public_service_uses_explicit_address(fake_session):
         bins="no",
         photo_files=[],
     )
-    assert incident.source == "form"
+    assert incident.source == "form"  # без volunteer_id — анонимная веб-форма
     assert incident.region == "Самарская область"
     assert incident.city == "г. Самара"
     assert incident.street == "ул. Мира, 5"
@@ -1025,6 +1025,28 @@ async def test_public_service_uses_explicit_address(fake_session):
     assert incident.photo_time is not None and incident.photo_time.tzinfo is not None
     assert incident.photos == 0
     assert incident.photo_urls == []
+
+
+@pytest.mark.asyncio
+async def test_public_service_volunteer_token_sets_source_app(fake_session):
+    """С volunteer_id (мобильное приложение) source='app'; volunteer_id пишется в инцидент."""
+    fake_session.add = MagicMock()
+    vol_id = uuid4()
+    incident = await create_incident_from_public_form(
+        fake_session,
+        fio="Волонтёр",
+        full_address="Самарская область, г. Самара, ул. Мира, 5",
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Мира, 5",
+        coords="53.1, 50.2",
+        photo_time="",
+        bins="",
+        photo_files=[],
+        volunteer_id=vol_id,
+    )
+    assert incident.source == "app"
+    assert incident.volunteer_id == vol_id
 
 
 @pytest.mark.asyncio

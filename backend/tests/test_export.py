@@ -9,13 +9,15 @@ from openpyxl import load_workbook
 from app.models import Incident
 from app.services.export import build_xlsx
 
-# 0-based индексы колонок. Столбец «Ссылка на фото» заменён на 3 столбца «Фото 1/2/3»
-# (формула =IMAGE(url)) → «Ссылка на сообщение»/«Поступило» сдвинуты на +2.
-_COMMENT_COL = 8  # «Комментарий» (сразу после «Координаты»)
-_PHOTO1_COL = 12  # «Фото 1»
-_PHOTO2_COL = 13  # «Фото 2»
-_PHOTO3_COL = 14  # «Фото 3»
-_MSG_LINK_COL = 15  # «Ссылка на сообщение»
+# 0-based индексы колонок. После «Координаты»(7) добавлены «Тип инцидента»(8) и
+# «Реестровый № МНО»(9) → «Комментарий» и далее сдвинуты на +2.
+_TYPE_COL = 8  # «Тип инцидента»
+_MNO_REG_COL = 9  # «Реестровый № МНО»
+_COMMENT_COL = 10  # «Комментарий»
+_PHOTO1_COL = 14  # «Фото 1»
+_PHOTO2_COL = 15  # «Фото 2»
+_PHOTO3_COL = 16  # «Фото 3»
+_MSG_LINK_COL = 17  # «Ссылка на сообщение»
 
 
 def _incident(**kw) -> Incident:
@@ -137,12 +139,29 @@ def _comment_cells(rows: list[Incident]) -> list:
 
 
 def test_export_has_comment_header():
-    """Заголовок «Комментарий» на месте — сразу после «Координаты»."""
+    """Заголовок «Комментарий» на месте — после «Реестровый № МНО»."""
     wb = load_workbook(BytesIO(build_xlsx([])))
     ws = wb.active
     headers = [c.value for c in next(ws.iter_rows(max_row=1))]
     assert headers[_COMMENT_COL] == "Комментарий"
-    assert headers[_COMMENT_COL - 1] == "Координаты"
+    assert headers[_COMMENT_COL - 1] == "Реестровый № МНО"
+
+
+def test_export_type_and_mno_reg_columns():
+    """Колонки «Тип инцидента» (по type_labels) и «Реестровый № МНО» (mno_reg) — после «Координаты»."""
+    wb = load_workbook(BytesIO(build_xlsx([])))
+    headers = [c.value for c in next(wb.active.iter_rows(max_row=1))]
+    assert headers[_TYPE_COL] == "Тип инцидента"
+    assert headers[_MNO_REG_COL] == "Реестровый № МНО"
+    assert headers[_TYPE_COL - 1] == "Координаты"
+
+    inc = _incident(incident_type="fire", mno_reg="63-04-001162")
+    wb2 = load_workbook(
+        BytesIO(build_xlsx([inc], type_labels={"fire": "Возгорание в контейнере"}))
+    )
+    row = next(wb2.active.iter_rows(min_row=2))
+    assert row[_TYPE_COL].value == "Возгорание в контейнере"
+    assert row[_MNO_REG_COL].value == "63-04-001162"
 
 
 def test_export_writes_comment_value():

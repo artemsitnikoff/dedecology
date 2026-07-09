@@ -184,6 +184,9 @@ async def test_create_by_filters_writes_file_and_row(tmp_path, monkeypatch):
     ]
 
     with patch(
+        "app.services.report.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
+    ), patch(
         "app.services.report.incident_service.list_for_export",
         new=AsyncMock(return_value=fake_rows),
     ) as m_export, patch(
@@ -226,6 +229,9 @@ async def test_create_by_ids_uses_list_by_ids_and_suffix(tmp_path, monkeypatch):
 
     ids_row = SimpleNamespace(status="new")
     with patch(
+        "app.services.report.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
+    ), patch(
         "app.services.report.incident_service.list_by_ids",
         new=AsyncMock(return_value=[ids_row]),
     ) as m_ids, patch(

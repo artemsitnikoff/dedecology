@@ -732,8 +732,13 @@ async def create_incident_from_public_form(
     # Числовые lat/lon для bbox-фильтра карты (NULL, если coords пусты/невалидны).
     lat, lon = parse_latlon(coords)
 
+    # Источник: с volunteer-токеном (get_optional_volunteer проставил volunteer_id) —
+    # это МОБИЛЬНОЕ ПРИЛОЖЕНИЕ волонтёра → source='app'; без токена — анонимная веб-форма
+    # → source='form'. Тот же эндпоинт /intake/form, различаем по наличию авторизации.
+    source = "app" if volunteer_id is not None else "form"
+
     incident = Incident(
-        source="form",
+        source=source,
         status="new",
         fio=fio or "",
         region=region,
@@ -769,7 +774,7 @@ async def create_incident_from_public_form(
         action="intake_public_form",
         entity_type="incident",
         entity_id=incident.id,
-        after={"source": "form", "fio": fio, "full_address": full_address},
+        after={"source": source, "fio": fio, "full_address": full_address},
         actor_user_id=actor_user_id,
         actor_type="system",
     )

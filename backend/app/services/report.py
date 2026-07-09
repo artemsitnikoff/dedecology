@@ -21,6 +21,7 @@ from ..models import Report, User
 from ..schemas.base import Paginated
 from ..schemas.report import ReportCreateRequest, ReportListItem
 from ..services import incident as incident_service
+from ..services import incident_type as incident_type_service
 from ..services.audit import audit
 from ..services.export import build_xlsx
 
@@ -59,7 +60,8 @@ async def create_incidents_report(
             order=req.order,
         )
 
-    content = build_xlsx(rows, base_url)
+    type_labels = await incident_type_service.labels_map(session)
+    content = build_xlsx(rows, base_url, type_labels)
 
     # Формирование отчёта = выгрузка: включённые в него обращения СРАЗУ переходят в
     # статус «Выгружен» (по требованию). Файл собран ВЫШЕ — в нём статусы на момент

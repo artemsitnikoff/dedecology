@@ -46,7 +46,7 @@ _SORT_COLUMNS = {
 
 
 def _search_clause(search: str):
-    """Многословный поиск по fio/region/city/street/coords/msg.
+    """Многословный поиск по fio/region/city/street/coords/mno_reg/msg.
 
     Запрос токенизируется по пробелам/знакам препинания; КАЖДЫЙ токен ищется ilike-OR
     по всем полям, итог — AND (совпасть должны ВСЕ токены, каждый — в любом поле). Так
@@ -66,6 +66,7 @@ def _search_clause(search: str):
                 Incident.city.ilike(term),
                 Incident.street.ilike(term),
                 Incident.coords.ilike(term),
+                Incident.mno_reg.ilike(term),  # поиск по реестровому № МНО
                 Incident.msg.ilike(term),
             )
         )

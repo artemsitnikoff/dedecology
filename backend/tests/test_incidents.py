@@ -107,6 +107,9 @@ async def test_export_get_returns_xlsx(client):
         "app.api.v1.incidents.incident_service.list_for_export",
         new=AsyncMock(return_value=[]),
     ), patch(
+        "app.api.v1.incidents.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
+    ), patch(
         "app.api.v1.incidents.build_xlsx", return_value=b"PK\x03\x04xlsxbytes"
     ):
         resp = await client.get("/api/v1/incidents/export")
@@ -128,6 +131,9 @@ async def test_export_post_selected(client):
     with patch(
         "app.api.v1.incidents.incident_service.list_by_ids",
         new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.api.v1.incidents.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
     ), patch(
         "app.api.v1.incidents.build_xlsx", return_value=b"xlsx-selected"
     ):
@@ -230,7 +236,7 @@ def test_search_clause_single_token_backward_compatible():
     from app.services.incident import _search_clause
 
     sql = str(_search_clause("Громов")).lower()
-    assert sql.count("like") == 6  # fio/region/city/street/coords/msg
+    assert sql.count("like") == 7  # fio/region/city/street/coords/mno_reg/msg
     assert " and " not in sql
 
 
@@ -240,7 +246,7 @@ def test_search_clause_multiword_builds_and_of_or_groups():
 
     sql = str(_search_clause("Самарская Кинель")).lower()
     assert " and " in sql
-    assert sql.count("like") == 12  # 6 полей × 2 токена
+    assert sql.count("like") == 14  # 7 полей × 2 токена
 
 
 def test_search_clause_ignores_commas_and_order():
@@ -248,7 +254,7 @@ def test_search_clause_ignores_commas_and_order():
     from app.services.incident import _search_clause
 
     sql = str(_search_clause("Самарская область, Кинель")).lower()
-    assert sql.count("like") == 18  # 6 полей × 3 токена
+    assert sql.count("like") == 21  # 7 полей × 3 токена
 
 
 def test_search_clause_blank_returns_none():
@@ -424,6 +430,9 @@ async def test_export_forwards_region(client):
     spy = AsyncMock(return_value=[])
     with patch(
         "app.api.v1.incidents.incident_service.list_for_export", new=spy
+    ), patch(
+        "app.api.v1.incidents.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
     ), patch("app.api.v1.incidents.build_xlsx", return_value=b"xlsx"):
         resp = await client.get("/api/v1/incidents/export?region=Самарская область")
     assert resp.status_code == 200
