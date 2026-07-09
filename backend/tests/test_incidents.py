@@ -41,6 +41,12 @@ def _list_item(**kw):
     return IncidentListItem(**base)
 
 
+def test_incident_list_item_accepts_source_app():
+    """source='app' (мобильное приложение) валиден в схеме — иначе список 500-ит на таких строках."""
+    for src in ("max", "form", "app"):
+        assert _list_item(source=src).source == src
+
+
 def _detail(**kw):
     base = dict(
         id=uuid4(),
