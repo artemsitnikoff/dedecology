@@ -28,7 +28,15 @@ async def list_volunteers(
 ):
     """Список волонтёров (новые сверху) для справочника «Волонтёры»."""
     volunteers = await volunteer_service.list_all(session)
-    return [VolunteerListItem.model_validate(v) for v in volunteers]
+    counts = await volunteer_service.incidents_counts_map(
+        session, [v.id for v in volunteers]
+    )
+    return [
+        VolunteerListItem.model_validate(v).model_copy(
+            update={"incidents_count": counts.get(v.id, 0)}
+        )
+        for v in volunteers
+    ]
 
 
 @router.patch("/{volunteer_id}/active", response_model=VolunteerListItem, tags=[_TAG])

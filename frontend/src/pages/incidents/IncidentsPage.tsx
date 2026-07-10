@@ -67,6 +67,8 @@ export function IncidentsPage() {
   const incidentType = searchParams.get('incident_type') ?? '';
   // Диплинк из карточки МНО: /incidents?mno_id=<id> — показать обращения одного объекта ТКО.
   const mnoId = searchParams.get('mno_id') ?? '';
+  // Диплинк из карточки волонтёра: /incidents?volunteer_id=<id> — обращения одного волонтёра.
+  const volunteerId = searchParams.get('volunteer_id') ?? '';
   const status = parseStatus(searchParams.get('status'));
   const dateFrom = searchParams.get('date_from') ?? '';
   const dateTo = searchParams.get('date_to') ?? '';
@@ -80,13 +82,14 @@ export function IncidentsPage() {
       region: region || undefined,
       incident_type: incidentType || undefined,
       mno_id: mnoId || undefined,
+      volunteer_id: volunteerId || undefined,
       status: status ?? undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       sort,
       order,
     }),
-    [search, sources, region, incidentType, mnoId, status, dateFrom, dateTo, sort, order]
+    [search, sources, region, incidentType, mnoId, volunteerId, status, dateFrom, dateTo, sort, order]
   );
 
   // Стабильная ссылка на searchParams для use в колбэках без пересоздания.
@@ -206,6 +209,14 @@ export function IncidentsPage() {
   const clearMnoFilter = useCallback(() => {
     patchParams((p) => {
       p.delete('mno_id');
+      p.delete('page');
+    });
+  }, [patchParams]);
+
+  /** Снять привязку к волонтёру (баннер) — убрать volunteer_id из URL, страница на 1. */
+  const clearVolunteerFilter = useCallback(() => {
+    patchParams((p) => {
+      p.delete('volunteer_id');
       p.delete('page');
     });
   }, [patchParams]);
@@ -331,7 +342,7 @@ export function IncidentsPage() {
     (status ? 1 : 0) +
     (dateFrom || dateTo ? 1 : 0);
   const hasFilters = filterCount > 0;
-  const isFiltered = hasFilters || !!search || !!mnoId;
+  const isFiltered = hasFilters || !!search || !!mnoId || !!volunteerId;
 
   const grandTotal = grandTotalQuery.data?.all ?? total;
   const counterText = isFiltered
@@ -497,6 +508,18 @@ export function IncidentsPage() {
           <Icon name="pin" size={15} color="var(--de-brand)" />
           <span className="de-inc-mno-banner-txt">Обращения по объекту ТКО</span>
           <button type="button" className="de-inc-mno-banner-reset" onClick={clearMnoFilter}>
+            <Icon name="x" size={13} />
+            Сбросить
+          </button>
+        </div>
+      )}
+
+      {/* Баннер привязки к волонтёру: показываем только обращения выбранного волонтёра */}
+      {volunteerId && (
+        <div className="de-inc-mno-banner">
+          <Icon name="user" size={15} color="var(--de-brand)" />
+          <span className="de-inc-mno-banner-txt">Обращения волонтёра</span>
+          <button type="button" className="de-inc-mno-banner-reset" onClick={clearVolunteerFilter}>
             <Icon name="x" size={13} />
             Сбросить
           </button>

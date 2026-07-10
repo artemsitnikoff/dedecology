@@ -609,7 +609,12 @@ async def test_my_reports_clamps_pagination(client):
 @pytest.mark.asyncio
 async def test_admin_list_volunteers(client):
     vol = _volunteer(phone="+79990001122")
-    with patch("app.services.volunteer.list_all", new=AsyncMock(return_value=[vol])):
+    with patch(
+        "app.services.volunteer.list_all", new=AsyncMock(return_value=[vol])
+    ), patch(
+        "app.api.v1.volunteers.volunteer_service.incidents_counts_map",
+        new=AsyncMock(return_value={vol.id: 5}),
+    ):
         resp = await client.get("/api/v1/volunteers")
     assert resp.status_code == 200
     body = resp.json()
@@ -622,6 +627,43 @@ async def test_admin_list_volunteers(client):
     assert "last_seen_at" in body[0]
     assert body[0]["last_seen_at"] is None
     assert "fio" not in body[0]  # поле «Заявитель» у волонтёра убрано
+    # Кол-во обращений волонтёра — из GROUP BY (incidents_counts_map).
+    assert body[0]["incidents_count"] == 5
+
+
+@pytest.mark.asyncio
+async def test_admin_list_volunteers_zero_count_when_no_incidents(client):
+    """Волонтёр без обращений (нет в counts-map) → incidents_count=0 (а не отсутствует)."""
+    vol = _volunteer()
+    with patch(
+        "app.services.volunteer.list_all", new=AsyncMock(return_value=[vol])
+    ), patch(
+        "app.api.v1.volunteers.volunteer_service.incidents_counts_map",
+        new=AsyncMock(return_value={}),
+    ):
+        resp = await client.get("/api/v1/volunteers")
+    assert resp.status_code == 200
+    assert resp.json()[0]["incidents_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_incidents_counts_map_groups_by_volunteer():
+    """incidents_counts_map: пустой список id → {} без запроса; иначе GROUP BY → {id: count}."""
+    session = AsyncMock()
+    # Пустой список — БД не трогаем.
+    assert await vol_service.incidents_counts_map(session, []) == {}
+    session.execute.assert_not_called()
+
+    vid1, vid2 = uuid4(), uuid4()
+    result = MagicMock()
+    result.all.return_value = [(vid1, 3), (vid2, 1)]
+    session.execute = AsyncMock(return_value=result)
+    counts = await vol_service.incidents_counts_map(session, [vid1, vid2, None, vid1])
+    assert counts == {vid1: 3, vid2: 1}
+    # GROUP BY по volunteer_id действительно в запросе.
+    sql = str(session.execute.call_args.args[0]).lower()
+    assert "group by" in sql
+    assert "volunteer_id" in sql
 
 
 @pytest.mark.asyncio

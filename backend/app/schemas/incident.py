@@ -24,6 +24,9 @@ class IncidentListItem(ORMBase):
     # Источник связанного МНО ('fgis' | 'volunteer') — фронт выбирает раздел карточки
     # (/mno vs /mno-new). None — МНО не привязано или удалено. Проставляется сервисом.
     mno_source: str | None = None
+    volunteer_id: UUID | None = None
+    # Логин (email) волонтёра-автора (source='app'); None — аноним/форма/удалён. Резолвится сервисом.
+    volunteer_login: str | None = None
     comment: str | None = None
     incident_type: str | None = None
     photo_time: Optional[datetime]
@@ -48,6 +51,9 @@ class IncidentDetail(ORMBase):
     mno_id: UUID | None = None
     # Источник связанного МНО ('fgis' | 'volunteer') — см. IncidentListItem.mno_source.
     mno_source: str | None = None
+    volunteer_id: UUID | None = None
+    # Логин (email) волонтёра-автора (source='app'); None — аноним/форма/удалён. Резолвится сервисом.
+    volunteer_login: str | None = None
     comment: str | None = None
     incident_type: str | None = None
     photo_time: Optional[datetime]

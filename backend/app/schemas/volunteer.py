@@ -143,3 +143,5 @@ class VolunteerListItem(ORMBase):
     is_active: bool
     last_seen_at: datetime | None
     created_at: datetime
+    # Кол-во обращений этого волонтёра (source='app'); проставляет роутер из GROUP BY.
+    incidents_count: int = 0

@@ -77,6 +77,7 @@ async def list_incidents(
     region: str | None = Query(None),
     incident_type: str | None = Query(None),
     mno_id: str | None = Query(None),
+    volunteer_id: str | None = Query(None),
     sort: str = Query("date"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
@@ -88,6 +89,7 @@ async def list_incidents(
 
     mno_id — фильтр «инциденты этого МНО» (клик по счётчику обращений в карточке МНО):
     ТОЧНОЕ совпадение по ссылке incidents.mno_id; невалидный UUID игнорируется.
+    volunteer_id — фильтр «обращения этого волонтёра» (ТОЧНОЕ совпадение по UUID; невалидный игнор).
     """
     return await incident_service.list_incidents(
         session,
@@ -99,6 +101,7 @@ async def list_incidents(
         region=region,
         incident_type=incident_type,
         mno_id=mno_id,
+        volunteer_id=volunteer_id,
         sort=sort,
         order=order,
         page=page,
@@ -113,10 +116,11 @@ async def get_funnel(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     region: str | None = Query(None),
+    volunteer_id: str | None = Query(None),
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Счётчики чипов воронки (honor search/source/period/region, НЕ status)."""
+    """Счётчики чипов воронки (honor search/source/period/region/volunteer_id, НЕ status)."""
     return await incident_service.funnel_counts(
         session,
         search=search,
@@ -124,6 +128,7 @@ async def get_funnel(
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
         region=region,
+        volunteer_id=volunteer_id,
     )
 
 
@@ -255,6 +260,9 @@ async def get_incident(
     incident = await incident_service.get_incident(session, incident_id)
     detail = IncidentDetail.model_validate(incident)
     detail.mno_source = await incident_service.get_mno_source(session, incident.mno_id)
+    detail.volunteer_login = await incident_service.get_volunteer_login(
+        session, incident.volunteer_id
+    )
     return detail
 
 
@@ -274,4 +282,7 @@ async def update_incident_status(
     await session.commit()
     detail = IncidentDetail.model_validate(incident)
     detail.mno_source = await incident_service.get_mno_source(session, incident.mno_id)
+    detail.volunteer_login = await incident_service.get_volunteer_login(
+        session, incident.volunteer_id
+    )
     return detail

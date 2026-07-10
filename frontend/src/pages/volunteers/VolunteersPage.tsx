@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate, formatTime } from '@/lib/format';
@@ -40,6 +41,7 @@ type RowProps = {
   v: Volunteer;
   isAdmin: boolean;
   busy: boolean;
+  onOpen: (id: string) => void;
   onToggleActive: (v: Volunteer) => void;
   onDelete: (v: Volunteer) => void;
   onResetPassword: (v: Volunteer) => void;
@@ -48,12 +50,13 @@ const VolunteerRow = memo(function VolunteerRow({
   v,
   isAdmin,
   busy,
+  onOpen,
   onToggleActive,
   onDelete,
   onResetPassword,
 }: RowProps) {
   return (
-    <div className="de-vol-row">
+    <div className="de-vol-row de-vol-row-clickable" onClick={() => onOpen(v.id)}>
       <div className="de-vol-cell de-vol-c-email" title={v.email}>
         {v.email}
       </div>
@@ -81,7 +84,7 @@ const VolunteerRow = memo(function VolunteerRow({
       <div className="de-vol-cell de-vol-c-seen">{fmtDateTime(v.last_seen_at)}</div>
       <div className="de-vol-cell de-vol-c-date">{formatDate(v.created_at) || '—'}</div>
       {isAdmin && (
-        <div className="de-vol-cell de-vol-c-actions">
+        <div className="de-vol-cell de-vol-c-actions" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
             className="de-vol-row-btn"
@@ -123,6 +126,11 @@ export function VolunteersPage() {
   const isAdmin = role === 'admin';
 
   const { message, showToast } = useToast();
+  const navigate = useNavigate();
+  // ЧПУ-карточка волонтёра: id в пути (/volunteers/<id>) — открывается по клику на строку
+  // и по диплинку из карточки инцидента (поле «Волонтёр»). Splat-параметр (*) = id.
+  const routeParams = useParams();
+  const openId = routeParams['*'] || null;
 
   const listQuery = useVolunteers();
   const setActive = useSetVolunteerActive();
@@ -130,6 +138,11 @@ export function VolunteersPage() {
   const resetPassword = useResetVolunteerPassword();
 
   const volunteers = useMemo(() => listQuery.data ?? [], [listQuery.data]);
+  // Открытый в карточке волонтёр (по id из URL) — берём из уже загруженного списка.
+  const openVolunteer = useMemo(
+    () => (openId ? volunteers.find((v) => v.id === openId) ?? null : null),
+    [openId, volunteers]
+  );
 
   // Подтверждение удаления — целевой волонтёр или null.
   const [toDelete, setToDelete] = useState<Volunteer | null>(null);
@@ -246,6 +259,7 @@ export function VolunteersPage() {
                 v={v}
                 isAdmin={isAdmin}
                 busy={rowBusy}
+                onOpen={(id) => navigate(`/volunteers/${id}`)}
                 onToggleActive={handleToggleActive}
                 onDelete={setToDelete}
                 onResetPassword={setToReset}
@@ -275,7 +289,76 @@ export function VolunteersPage() {
         />
       )}
 
+      {openVolunteer && (
+        <VolunteerCard
+          v={openVolunteer}
+          onClose={() => navigate('/volunteers')}
+          onIncidents={() => navigate(`/incidents?volunteer_id=${openVolunteer.id}`)}
+        />
+      )}
+
       <Toast message={message} />
+    </div>
+  );
+}
+
+/* ---------- Карточка волонтёра (все данные + обращения) ---------- */
+type VolunteerCardProps = {
+  v: Volunteer;
+  onClose: () => void;
+  /** Переход к списку обращений этого волонтёра (/incidents?volunteer_id=<id>). */
+  onIncidents: () => void;
+};
+function VolunteerCard({ v, onClose, onIncidents }: VolunteerCardProps) {
+  const fields: Array<[string, React.ReactNode]> = [
+    ['Email', v.email],
+    ['Телефон', v.phone || '—'],
+    ['Почта подтверждена', v.email_verified ? 'Да' : 'Нет'],
+    ['Статус', v.is_active ? 'Активен' : 'Заблокирован'],
+    ['Последняя авторизация', fmtDateTime(v.last_seen_at)],
+    ['Дата регистрации', formatDate(v.created_at) || '—'],
+    ['Обращений создано', String(v.incidents_count)],
+  ];
+  return (
+    <div className="de-vol-modal-overlay" onClick={onClose}>
+      <div className="de-vol-modal de-vol-card" onClick={(e) => e.stopPropagation()}>
+        <div className="de-vol-modal-head">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2 className="de-vol-card-title" title={v.email}>
+              {v.email}
+            </h2>
+            <div className="de-vol-modal-head-sub">Карточка волонтёра</div>
+          </div>
+          <button type="button" className="de-vol-modal-close" aria-label="Закрыть" onClick={onClose}>
+            <Icon name="x" size={17} />
+          </button>
+        </div>
+        <div className="de-vol-modal-body">
+          <div className="de-vol-card-fields">
+            {fields.map(([k, val]) => (
+              <div key={k} className="de-vol-card-field">
+                <div className="de-vol-card-field-key">{k}</div>
+                <div className="de-vol-card-field-val">{val}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="de-vol-modal-foot">
+          <button type="button" className="de-vol-modal-cancel" onClick={onClose}>
+            Закрыть
+          </button>
+          <button
+            type="button"
+            className="de-vol-modal-submit"
+            disabled={v.incidents_count === 0}
+            onClick={onIncidents}
+            title={v.incidents_count === 0 ? 'У волонтёра нет обращений' : 'Открыть обращения волонтёра'}
+          >
+            <Icon name="incidents" size={15} />
+            Обращения волонтёра ({v.incidents_count})
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

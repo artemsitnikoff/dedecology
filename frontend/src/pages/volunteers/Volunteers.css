@@ -93,6 +93,9 @@
 .de-vol-row:hover {
   background: var(--bg-panel-2);
 }
+.de-vol-row-clickable {
+  cursor: pointer;
+}
 
 .de-vol-cell {
   padding: 0 12px;
@@ -432,4 +435,50 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ---------- Карточка волонтёра (все данные + переход к обращениям) ---------- */
+.de-vol-card {
+  width: 460px;
+}
+.de-vol-card-title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.de-vol-card-fields {
+  display: flex;
+  flex-direction: column;
+}
+.de-vol-card-field {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border-2);
+}
+.de-vol-card-field:last-child {
+  border-bottom: 0;
+}
+.de-vol-card-field-key {
+  flex: none;
+  width: 190px;
+  font-size: var(--fs-12);
+  color: var(--fg-3);
+}
+.de-vol-card-field-val {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+/* Кнопка «Обращения волонтёра» в подвале карточки — с иконкой. */
+.de-vol-card .de-vol-modal-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }

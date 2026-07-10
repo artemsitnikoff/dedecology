@@ -190,6 +190,24 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
               )}
             </div>
           </div>
+          {/* Волонтёр — если обращение из приложения (есть volunteer_id), email автора
+              кликабелен → карточка волонтёра (/volunteers/<id>). Иначе поле не показываем. */}
+          {d.volunteer_id && (
+            <div className="de-inc-field">
+              <div className="de-inc-field-key">Волонтёр</div>
+              <div className="de-inc-field-val">
+                <button
+                  type="button"
+                  className="de-inc-mno-link"
+                  onClick={() => navigate(`/volunteers/${d.volunteer_id}`)}
+                  title="Открыть карточку волонтёра"
+                >
+                  <Icon name="user" size={13} />
+                  {d.volunteer_login || 'Открыть карточку'}
+                </button>
+              </div>
+            </div>
+          )}
           {/* Комментарий — поле показываем ВСЕГДА (пустое = «—»); многострочный текст переносится. */}
           <div className="de-inc-field">
             <div className="de-inc-field-key">Комментарий</div>

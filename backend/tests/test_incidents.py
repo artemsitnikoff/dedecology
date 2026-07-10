@@ -450,6 +450,73 @@ async def test_get_mno_source_resolves_and_handles_missing():
     assert await incident_service.get_mno_source(session, uuid4()) == "volunteer"
 
 
+# --- Волонтёр-автор на инциденте (volunteer_login) + фильтр volunteer_id -----
+
+
+@pytest.mark.asyncio
+async def test_detail_carries_volunteer_login(client):
+    """Карточка отдаёт volunteer_login — логин волонтёра-автора (source='app')."""
+    detail = _detail(source="app", volunteer_id=uuid4())
+    with patch(
+        "app.api.v1.incidents.incident_service.get_incident",
+        new=AsyncMock(return_value=detail),
+    ), patch(
+        "app.api.v1.incidents.incident_service.get_volunteer_login",
+        new=AsyncMock(return_value="vol@example.com"),
+    ):
+        resp = await client.get(f"/api/v1/incidents/{detail.id}")
+    assert resp.status_code == 200
+    assert resp.json()["volunteer_login"] == "vol@example.com"
+
+
+@pytest.mark.asyncio
+async def test_get_volunteer_login_resolves_and_handles_missing():
+    """get_volunteer_login: None для пустого id/удалённого волонтёра, иначе Volunteer.email."""
+    session = MagicMock()
+    # Пустой id → без обращения к БД.
+    assert await incident_service.get_volunteer_login(session, None) is None
+    # Нет такого волонтёра → None.
+    session.get = AsyncMock(return_value=None)
+    assert await incident_service.get_volunteer_login(session, uuid4()) is None
+    # Есть волонтёр → его email.
+    vol = MagicMock()
+    vol.email = "vol@example.com"
+    session.get = AsyncMock(return_value=vol)
+    assert await incident_service.get_volunteer_login(session, uuid4()) == "vol@example.com"
+
+
+def test_base_filters_volunteer_id_valid_uuid():
+    """Валидный volunteer_id → равенство Incident.volunteer_id == UUID (пред-статусный фильтр)."""
+    vid = uuid4()
+    filters = _base_filters(None, None, None, None, volunteer_id=str(vid))
+    assert len(filters) == 1
+    clause = filters[0]
+    assert clause.operator is eq
+    assert clause.right.value == vid
+
+
+def test_base_filters_volunteer_id_invalid_or_blank_no_filter():
+    """Пусто/пробелы/None/не-UUID → фильтр по волонтёру НЕ добавляется (не роняем запрос)."""
+    assert _base_filters(None, None, None, None, volunteer_id=None) == []
+    assert _base_filters(None, None, None, None, volunteer_id="") == []
+    assert _base_filters(None, None, None, None, volunteer_id="   ") == []
+    assert _base_filters(None, None, None, None, volunteer_id="not-a-uuid") == []
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_volunteer_id(client):
+    """GET /incidents?volunteer_id=... пробрасывает id в сервис («обращения этого волонтёра»)."""
+    vid = str(uuid4())
+    page = Paginated[IncidentListItem](
+        items=[_list_item()], total=1, page=1, page_size=100, pages=1
+    )
+    spy = AsyncMock(return_value=page)
+    with patch("app.api.v1.incidents.incident_service.list_incidents", new=spy):
+        resp = await client.get(f"/api/v1/incidents?volunteer_id={vid}")
+    assert resp.status_code == 200
+    assert spy.call_args.kwargs["volunteer_id"] == vid
+
+
 @pytest.mark.asyncio
 async def test_funnel_forwards_region(client):
     """GET /incidents/funnel?region=... пробрасывает region (влияет на счётчики)."""

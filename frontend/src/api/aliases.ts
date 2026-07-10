@@ -112,6 +112,10 @@ export interface Incident {
   mno_id: string | null;
   /** Источник связанного МНО ('fgis'|'volunteer') — выбор раздела карточки (/mno vs /mno-new). */
   mno_source: string | null;
+  /** UUID волонтёра-автора (source='app'); null — аноним/форма. Ссылка на карточку волонтёра. */
+  volunteer_id: string | null;
+  /** Логин (email) волонтёра-автора; null — нет волонтёра. */
+  volunteer_login: string | null;
   /** ISO-строка — «поступило». */
   received_at: string;
   created_at: string;
@@ -145,6 +149,10 @@ export interface IncidentListItem {
   mno_id: string | null;
   /** Источник связанного МНО ('fgis'|'volunteer') — выбор раздела карточки (/mno vs /mno-new). */
   mno_source: string | null;
+  /** UUID волонтёра-автора (source='app'); null — аноним/форма. Ссылка на карточку волонтёра. */
+  volunteer_id: string | null;
+  /** Логин (email) волонтёра-автора; null — нет волонтёра. */
+  volunteer_login: string | null;
   received_at: string;
 }
 
@@ -238,6 +246,8 @@ export interface Volunteer {
   last_seen_at: string | null;
   /** ISO-строка — момент регистрации. */
   created_at: string;
+  /** Кол-во обращений, созданных этим волонтёром (source='app'). */
+  incidents_count: number;
 }
 
 /**

@@ -9,7 +9,7 @@ from sqlalchemy import and_, asc, case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import NotFoundError, ValidationError
-from ..models import Incident, Mno
+from ..models import Incident, Mno, Volunteer
 from ..schemas.base import Paginated
 from ..schemas.incident import (
     FunnelCounts,
@@ -81,6 +81,7 @@ def _base_filters(
     region: str | None = None,
     incident_type: str | None = None,
     mno_id: str | None = None,
+    volunteer_id: str | None = None,
 ) -> list:
     """Фильтры, общие для списка и воронки (без статуса)."""
     filters: list = []
@@ -101,6 +102,13 @@ def _base_filters(
     if mno_id and mno_id.strip():
         try:
             filters.append(Incident.mno_id == UUID(mno_id.strip()))
+        except (ValueError, AttributeError, TypeError):
+            pass
+    # Волонтёр — ТОЧНОЕ совпадение по volunteer_id (питает список «обращения этого
+    # волонтёра»). Значение парсим как UUID: пусто/мусор → фильтр НЕ добавляется.
+    if volunteer_id and volunteer_id.strip():
+        try:
+            filters.append(Incident.volunteer_id == UUID(volunteer_id.strip()))
         except (ValueError, AttributeError, TypeError):
             pass
     # Период по photo_time (НЕ received_at), включительно
@@ -126,6 +134,7 @@ async def list_incidents(
     region: str | None = None,
     incident_type: str | None = None,
     mno_id: str | None = None,
+    volunteer_id: str | None = None,
     sort: str = "date",
     order: str = "desc",
     page: int = 1,
@@ -142,6 +151,7 @@ async def list_incidents(
         region=region,
         incident_type=incident_type,
         mno_id=mno_id,
+        volunteer_id=volunteer_id,
         sort=sort,
         order=order,
         offset=(page - 1) * page_size,
@@ -150,11 +160,13 @@ async def list_incidents(
     )
     items, total = rows
     src_map = await _mno_source_map(session, [i.mno_id for i in items])
+    vol_map = await _volunteer_logins_map(session, [i.volunteer_id for i in items])
     pages = math.ceil(total / page_size) if total > 0 else 0
 
     def _to_item(i: Incident) -> IncidentListItem:
         item = IncidentListItem.model_validate(i)
         item.mno_source = src_map.get(i.mno_id)
+        item.volunteer_login = vol_map.get(i.volunteer_id)
         return item
 
     return Paginated[IncidentListItem](
@@ -222,9 +234,10 @@ async def _query_incidents(
     region: str | None = None,
     incident_type: str | None = None,
     mno_id: str | None = None,
+    volunteer_id: str | None = None,
 ):
     filters = _base_filters(
-        search, source, date_from, date_to, region, incident_type, mno_id
+        search, source, date_from, date_to, region, incident_type, mno_id, volunteer_id
     )
     if status:
         filters.append(Incident.status.in_(status))
@@ -336,10 +349,13 @@ async def funnel_counts(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     region: str | None = None,
+    volunteer_id: str | None = None,
 ) -> FunnelCounts:
-    """Счётчики чипов воронки. Honor search/source/period/region, НО игнорируют status —
-    каждый чип показывает свой потенциальный объём."""
-    filters = _base_filters(search, source, date_from, date_to, region)
+    """Счётчики чипов воронки. Honor search/source/period/region/volunteer_id, НО игнорируют
+    status — каждый чип показывает свой потенциальный объём."""
+    filters = _base_filters(
+        search, source, date_from, date_to, region, volunteer_id=volunteer_id
+    )
     where_clause = and_(*filters) if filters else None
 
     stmt = select(Incident.status, func.count(Incident.id)).group_by(Incident.status)
@@ -459,6 +475,26 @@ async def get_mno_source(session: AsyncSession, mno_id) -> str | None:
         return None
     mno = await session.get(Mno, mno_id)
     return mno.source if mno else None
+
+
+async def _volunteer_logins_map(session: AsyncSession, volunteer_ids) -> dict:
+    """{volunteer_id: email} для непустых id — логин волонтёра-автора в строке списка.
+    Один запрос на всю страницу (зеркалит _mno_source_map)."""
+    ids = {vid for vid in volunteer_ids if vid}
+    if not ids:
+        return {}
+    result = await session.execute(
+        select(Volunteer.id, Volunteer.email).where(Volunteer.id.in_(ids))
+    )
+    return {vid: email for vid, email in result.all()}
+
+
+async def get_volunteer_login(session: AsyncSession, volunteer_id) -> str | None:
+    """Логин (email) волонтёра-автора по id; None — аноним/форма/удалён."""
+    if not volunteer_id:
+        return None
+    volunteer = await session.get(Volunteer, volunteer_id)
+    return volunteer.email if volunteer else None
 
 
 async def get_incident(session: AsyncSession, incident_id: UUID) -> Incident:

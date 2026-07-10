@@ -14,7 +14,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,7 +35,7 @@ from ..core.security import (
     get_password_hash,
     verify_password,
 )
-from ..models import Volunteer
+from ..models import Incident, Volunteer
 from ..schemas.volunteer import VolunteerRegister
 from . import blocked_domain as blocked_domain_service
 from . import smtp as smtp_service
@@ -399,6 +399,22 @@ async def list_all(session: AsyncSession) -> list[Volunteer]:
         select(Volunteer).order_by(Volunteer.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def incidents_counts_map(session: AsyncSession, volunteer_ids) -> dict[UUID, int]:
+    """{volunteer_id: кол-во обращений} для непустых id — одним GROUP BY.
+
+    Питает колонку «Обращений» в справочнике «Волонтёры». Пустой список id → {}.
+    """
+    uniq = {vid for vid in volunteer_ids if vid}
+    if not uniq:
+        return {}
+    result = await session.execute(
+        select(Incident.volunteer_id, func.count(Incident.id))
+        .where(Incident.volunteer_id.in_(uniq))
+        .group_by(Incident.volunteer_id)
+    )
+    return {vid: cnt for vid, cnt in result.all()}
 
 
 async def set_active(session: AsyncSession, vol_id: UUID, is_active: bool) -> Volunteer:

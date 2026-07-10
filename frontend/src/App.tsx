@@ -141,7 +141,8 @@ export default function App() {
             </RequireAdmin>
           }
         />
-        <Route path="volunteers" element={<VolunteersPage />} />
+        {/* Splat: /volunteers и /volunteers/<id> — карточка волонтёра (ЧПУ) без ремаунта. */}
+        <Route path="volunteers/*" element={<VolunteersPage />} />
         <Route
           path="integration"
           element={
