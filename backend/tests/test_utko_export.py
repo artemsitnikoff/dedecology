@@ -98,6 +98,22 @@ def test_utko_subject_from_our_directory_by_mno():
     assert row2[0] == "Самарская обл (DaData)"
 
 
+def test_utko_subtype_label_for_no_access():
+    """incident_subtype='blocked_by_car' → в колонке «Подтип инцидента» его подпись."""
+    inc = _incident(incident_type="no_access", incident_subtype="blocked_by_car")
+    ws = _rows([inc])
+    row = [c.value for c in next(ws.iter_rows(min_row=2))]
+    assert row[5] == "Проезд заблокирован автомобилем"  # Подтип из справочника
+
+
+def test_utko_subtype_empty_when_absent():
+    """Без подтипа (incident_subtype=None) колонка «Подтип инцидента» пуста."""
+    inc = _incident(incident_subtype=None)
+    ws = _rows([inc])
+    row = [c.value for c in next(ws.iter_rows(min_row=2))]
+    assert row[5] in (None, "")
+
+
 def test_utko_skips_placeholder_photos():
     inc = _incident(photos=1, photo_urls=["placeholder://incident-photo/1"])
     ws = _rows([inc], base_url="https://ecopulse.reo.ru")

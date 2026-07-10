@@ -2,8 +2,8 @@
 
 Отличается от обычного экспорта инцидентов (services/export.py): фиксированный порядок
 колонок УТКО, дата+время фотофиксации одной ячейкой, до 6 столбцов «Ссылка на фото» —
-ПРОСТО текстовые полные URL (без встраивания картинок и формул). «Подтип инцидента» у
-нас отдельного поля нет — колонка присутствует для соответствия формату, но пустая.
+ПРОСТО текстовые полные URL (без встраивания картинок и формул). «Подтип инцидента» —
+подпись из справочника services/incident_subtypes.py (только у типа no_access; иначе "").
 """
 
 from io import BytesIO
@@ -12,6 +12,7 @@ from typing import Iterable
 from openpyxl import Workbook
 
 from ..models import Incident
+from .incident_subtypes import label_for as _subtype_label
 from .incident_types import incident_type_label as _static_type_label
 
 # Заголовки в точном порядке формата УТКО (6 столбцов «Ссылка на фото» — под макс. число фото).
@@ -88,7 +89,7 @@ def _row(inc: Incident, base_url: str, type_labels: dict | None, region_by_mno: 
         _photo_datetime(inc),
         _address(inc),
         _type_label(inc, type_labels),
-        "",  # Подтип инцидента — отдельного поля нет (колонка для формата УТКО)
+        _subtype_label(inc.incident_subtype),  # Подтип (только у типа no_access; иначе "")
         inc.comment or "",
         *_photo_urls(inc, base_url),
     ]

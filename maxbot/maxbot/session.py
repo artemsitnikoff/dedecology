@@ -33,6 +33,10 @@ NO_MNO = "x"
 # где code — код из справочника incident_types (пусто = «Пропустить»).
 PAYLOAD_PREFIX_TYPE = "t"
 
+# Префикс payload для кнопок выбора ПОДТИПА инцидента (шаг 3, только для типа с подтипами —
+# «Отсутствует доступ к МНО»): «s:{pid}:{code}», где code — код подтипа.
+PAYLOAD_PREFIX_SUBTYPE = "s"
+
 # Максимальная длина текста инлайн-кнопки (в MAX Button.text — 1..64 символа;
 # держим короче для читаемости в узком столбце клавиатуры).
 BUTTON_MAX = 40
@@ -96,6 +100,25 @@ def decode_type_payload(s: str) -> tuple[str, str] | None:
         return None
     pid, code = parts[1], parts[2]
     if not pid:
+        return None
+    return pid, code
+
+
+def encode_subtype_payload(pending_id: str, code: str) -> str:
+    """Payload кнопки выбора подтипа: «s:{pending_id}:{code}» (шаг 3, тип с подтипами)."""
+    return f"{PAYLOAD_PREFIX_SUBTYPE}:{pending_id}:{code}"
+
+
+def decode_subtype_payload(s: str) -> tuple[str, str] | None:
+    """Разобрать payload выбора подтипа. Вернуть (pending_id, code) либо None, если формат
+    чужой/битый. code непуст (подтип обязателен, «Пропустить» тут нет)."""
+    if not s:
+        return None
+    parts = s.split(":", 2)
+    if len(parts) != 3 or parts[0] != PAYLOAD_PREFIX_SUBTYPE:
+        return None
+    pid, code = parts[1], parts[2]
+    if not pid or not code:
         return None
     return pid, code
 
@@ -189,6 +212,11 @@ class PendingReport:
     chosen_mno_label: str = ""
     awaiting_type: bool = False
     incident_types: list = field(default_factory=list)
+    # Шаг 3 (только для типа с подтипами, «Отсутствует доступ к МНО»): держим выбранный
+    # тип между шагом 2 и 3 + карту подтипов (для клавиатуры/подписи выбранного подтипа).
+    chosen_type: str = ""
+    awaiting_subtype: bool = False
+    incident_subtypes: dict = field(default_factory=dict)
 
     @property
     def key(self) -> str:

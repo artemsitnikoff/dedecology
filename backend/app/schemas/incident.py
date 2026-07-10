@@ -29,6 +29,7 @@ class IncidentListItem(ORMBase):
     volunteer_login: str | None = None
     comment: str | None = None
     incident_type: str | None = None
+    incident_subtype: str | None = None
     photo_time: Optional[datetime]
     photos: int
     photo_urls: list[str]
@@ -56,6 +57,7 @@ class IncidentDetail(ORMBase):
     volunteer_login: str | None = None
     comment: str | None = None
     incident_type: str | None = None
+    incident_subtype: str | None = None
     photo_time: Optional[datetime]
     photos: int
     photo_urls: list[str]

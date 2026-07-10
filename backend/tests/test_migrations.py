@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0024():
-    """Цепочка ревизий консистентна: ровно один head, и это 0024 (0024→0023→…)."""
+def test_migration_chain_single_head_is_0025():
+    """Цепочка ревизий консистентна: ровно один head, и это 0025 (0025→0024→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0024"}
+    assert heads == {"0025"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -309,3 +309,35 @@ def test_0024_downgrade_drops_blocked_email_domains(monkeypatch):
     m.downgrade()
 
     fake_op.drop_table.assert_called_once_with("blocked_email_domains")
+
+
+def test_0025_revision_identifiers():
+    m = _load("0025_incident_subtype.py")
+    assert m.revision == "0025"
+    assert m.down_revision == "0024"
+
+
+def test_0025_upgrade_adds_incident_subtype(monkeypatch):
+    """upgrade(): add_column incidents.incident_subtype String(64) NULLABLE."""
+    m = _load("0025_incident_subtype.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    fake_op.add_column.assert_called_once()
+    table, column = fake_op.add_column.call_args.args
+    assert table == "incidents"
+    assert column.name == "incident_subtype"
+    assert column.nullable is True
+
+
+def test_0025_downgrade_drops_incident_subtype(monkeypatch):
+    """downgrade(): drop_column incidents.incident_subtype."""
+    m = _load("0025_incident_subtype.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    fake_op.drop_column.assert_called_once_with("incidents", "incident_subtype")

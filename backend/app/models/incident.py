@@ -60,6 +60,10 @@ class Incident(Base, TimestampMixin):
     # Заполняется публичной формой волонтёра; русская подпись резолвится по коду на
     # фронте. NULL — тип не задан (старые инциденты / Макс-бот, где типа нет).
     incident_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Код подтипа инцидента (только для типа no_access): 'blocked_by_car' |
+    # 'other_reason' из фиксированного справочника services/incident_subtypes.py.
+    # Для остальных типов подтип не применяется → NULL.
+    incident_subtype: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # дата/время фотофиксации (ключ сортировки + фильтра периода)
     photo_time: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     photos: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))

@@ -6,6 +6,7 @@ import { thumbUrl } from '@/lib/photo';
 import { mnoCardPath } from '@/lib/mnoLink';
 import { useIncident } from '@/api/hooks/useIncident';
 import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
+import { useIncidentSubtypes } from '@/api/hooks/useIncidentSubtypes';
 import { useSetStatus } from '@/api/mutations/incidents';
 import type { Incident, Status } from '@/api/aliases';
 
@@ -73,6 +74,7 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
   const navigate = useNavigate();
   const setStatus = useSetStatus();
   const { data: incidentTypes = [] } = useIncidentTypes();
+  const { data: subtypesMap = {} } = useIncidentSubtypes();
   const statusMeta = STATUS[d.status];
   const sourceMeta = SOURCE[d.source];
   const link = maxLink(d.msg_url);
@@ -84,10 +86,19 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
   // Резолвим код типа в подпись по справочнику; нет типа / неизвестный код → «—».
   const typeLabel =
     (d.incident_type && incidentTypes.find((t) => t.code === d.incident_type)?.label) || '—';
+  // Подпись подтипа (только у типа «Отсутствует доступ к МНО») — из справочника подтипов.
+  const subtypeLabel =
+    (d.incident_subtype &&
+      d.incident_type &&
+      subtypesMap[d.incident_type]?.find((s) => s.code === d.incident_subtype)?.label) ||
+    d.incident_subtype ||
+    '';
 
   const fields: Array<[string, string]> = [
     ['Заявитель', d.fio],
     ['Тип инцидента', typeLabel],
+    // Подтип показываем только когда он есть (тип «Отсутствует доступ к МНО»).
+    ...(d.incident_subtype ? ([['Подтип инцидента', subtypeLabel]] as Array<[string, string]>) : []),
     ['Регион', d.region],
     ['Город / н.п.', d.city],
     ['Адрес', d.street],

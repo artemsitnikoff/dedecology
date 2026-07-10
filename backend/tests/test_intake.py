@@ -1289,6 +1289,75 @@ async def test_public_service_incident_type_defaults_none(fake_session):
 
 
 @pytest.mark.asyncio
+async def test_public_service_no_access_requires_valid_subtype(fake_session):
+    """Тип no_access без валидного подтипа → ValidationError (подтип обязателен)."""
+    from app.core.errors import ValidationError
+
+    fake_session.add = MagicMock()
+    with patch("app.services.intake.code_exists", new=AsyncMock(return_value=True)):
+        with pytest.raises(ValidationError):
+            await create_incident_from_public_form(
+                fake_session,
+                fio="Волонтёр",
+                full_address="",
+                region="Самарская область",
+                city="г. Самара",
+                street="ул. Ленина, 1",
+                coords="",
+                photo_time="",
+                bins="",
+                incident_type="no_access",
+                incident_subtype="",  # не задан → ошибка
+                photo_files=[],
+            )
+
+
+@pytest.mark.asyncio
+async def test_public_service_no_access_saves_valid_subtype(fake_session):
+    """Тип no_access + валидный подтип → incident_subtype сохраняется."""
+    fake_session.add = MagicMock()
+    with patch("app.services.intake.code_exists", new=AsyncMock(return_value=True)):
+        incident = await create_incident_from_public_form(
+            fake_session,
+            fio="Волонтёр",
+            full_address="",
+            region="Самарская область",
+            city="г. Самара",
+            street="ул. Ленина, 1",
+            coords="",
+            photo_time="",
+            bins="",
+            incident_type="no_access",
+            incident_subtype="blocked_by_car",
+            photo_files=[],
+        )
+    assert incident.incident_type == "no_access"
+    assert incident.incident_subtype == "blocked_by_car"
+
+
+@pytest.mark.asyncio
+async def test_public_service_non_no_access_ignores_subtype(fake_session):
+    """Тип ≠ no_access → incident_subtype=None, даже если прислали код."""
+    fake_session.add = MagicMock()
+    with patch("app.services.intake.code_exists", new=AsyncMock(return_value=True)):
+        incident = await create_incident_from_public_form(
+            fake_session,
+            fio="Волонтёр",
+            full_address="",
+            region="Самарская область",
+            city="г. Самара",
+            street="ул. Ленина, 1",
+            coords="",
+            photo_time="",
+            bins="",
+            incident_type="fire",
+            incident_subtype="blocked_by_car",  # игнорируется для не-no_access
+            photo_files=[],
+        )
+    assert incident.incident_subtype is None
+
+
+@pytest.mark.asyncio
 async def test_public_service_saves_volunteer_id(fake_session):
     """volunteer_id (автор из приложения) проставляется на инциденте; по умолчанию None."""
     fake_session.add = MagicMock()
@@ -2643,6 +2712,75 @@ async def test_max_selected_sets_incident_type(fake_session):
             incident_type="not_a_type",
         )
     assert inc2.incident_type is None
+
+
+@pytest.mark.asyncio
+async def test_max_selected_no_access_requires_valid_subtype(fake_session):
+    """finalize: тип no_access без валидного подтипа → ValidationError."""
+    from app.core.errors import ValidationError
+
+    fake_session.add = MagicMock()
+    with patch("app.services.intake.code_exists", new=AsyncMock(return_value=True)):
+        with pytest.raises(ValidationError):
+            await create_incident_from_max_selected(
+                fake_session,
+                region="",
+                city="",
+                street="",
+                coords="",
+                comment="",
+                mno_id="",
+                msg_id="m",
+                sender_name="И",
+                msg_url="",
+                photo_time=None,
+                photo_files=[],
+                incident_type="no_access",
+                incident_subtype="",  # не задан → ошибка
+            )
+
+
+@pytest.mark.asyncio
+async def test_max_selected_no_access_saves_subtype(fake_session):
+    """finalize: тип no_access + валидный подтип → сохраняется; для fire — None."""
+    fake_session.add = MagicMock()
+    with patch("app.services.intake.code_exists", new=AsyncMock(return_value=True)):
+        inc = await create_incident_from_max_selected(
+            fake_session,
+            region="",
+            city="",
+            street="",
+            coords="",
+            comment="",
+            mno_id="",
+            msg_id="m",
+            sender_name="И",
+            msg_url="",
+            photo_time=None,
+            photo_files=[],
+            incident_type="no_access",
+            incident_subtype="other_reason",
+        )
+    assert inc.incident_subtype == "other_reason"
+
+    with patch("app.services.intake.code_exists", new=AsyncMock(return_value=True)):
+        inc2 = await create_incident_from_max_selected(
+            fake_session,
+            region="",
+            city="",
+            street="",
+            coords="",
+            comment="",
+            mno_id="",
+            msg_id="m",
+            sender_name="И",
+            msg_url="",
+            photo_time=None,
+            photo_files=[],
+            incident_type="fire",
+            incident_subtype="other_reason",  # игнорируется для не-no_access
+        )
+    assert inc2.incident_subtype is None
 
 
 @pytest.mark.asyncio

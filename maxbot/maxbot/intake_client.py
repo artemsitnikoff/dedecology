@@ -177,6 +177,7 @@ async def finalize_max(
     mno_id: str,
     photo_bytes_list: list[bytes],
     incident_type: str = "",
+    incident_subtype: str = "",
 ) -> dict:
     """Создать обращение (source='max') из уже разобранных полей + выбранного МНО.
 
@@ -201,6 +202,7 @@ async def finalize_max(
         "msg_url": msg_url or "",
         "mno_id": mno_id or "",
         "incident_type": incident_type or "",
+        "incident_subtype": incident_subtype or "",
     }
     files = [
         ("photos", (f"{i}.jpg", photo, "image/jpeg"))
@@ -300,6 +302,49 @@ async def fetch_incident_types() -> list[dict]:
     if out:
         _TYPES_CACHE["data"] = out
         _TYPES_CACHE["at"] = now
+    return out
+
+
+# Кэш карты подтипов (редко меняется). {type_code: [{code,label}]}.
+_SUBTYPES_CACHE: dict = {"at": 0.0, "data": {}}
+_SUBTYPES_TTL = 300.0
+
+
+async def fetch_incident_subtypes() -> dict:
+    """Карта подтипов {type_code: [{code,label}]} для шага 3 (тип с подтипами).
+
+    GET {api_base}/intake/incident-subtypes (публичный эндпоинт, тот же, что у формы).
+    Кэш TTL 5 мин. При ЛЮБОЙ ошибке / не-2xx / неожиданном формате → {} (бот пропускает
+    шаг подтипа и создаёт обращение без подтипа — деградация, не фейл)."""
+    now = time.monotonic()
+    if _SUBTYPES_CACHE["data"] and (now - _SUBTYPES_CACHE["at"] < _SUBTYPES_TTL):
+        return _SUBTYPES_CACHE["data"]
+
+    url = f"{settings.api_base}/intake/incident-subtypes"
+    try:
+        async with httpx.AsyncClient(timeout=_NOTIFY_TIMEOUT) as client:
+            resp = await client.get(url)
+        resp.raise_for_status()
+        payload = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("fetch_incident_subtypes failed url=%s: %s", url, exc)
+        return {}
+    if not isinstance(payload, dict):
+        logger.warning("fetch_incident_subtypes: unexpected payload: %r", payload)
+        return {}
+    # Оставляем только валидные {type_code: [{code,label}]}.
+    out: dict = {}
+    for type_code, subs in payload.items():
+        if not isinstance(subs, list):
+            continue
+        out[str(type_code)] = [
+            {"code": str(s.get("code") or ""), "label": str(s.get("label") or "")}
+            for s in subs
+            if isinstance(s, dict) and s.get("code")
+        ]
+    if out:
+        _SUBTYPES_CACHE["data"] = out
+        _SUBTYPES_CACHE["at"] = now
     return out
 
 

@@ -31,6 +31,12 @@ export interface IncidentType {
   label: string;
 }
 
+/** Подтип инцидента (код + подпись). Существует только у типа «Отсутствует доступ к МНО». */
+export interface IncidentSubtype {
+  code: string;
+  label: string;
+}
+
 /**
  * Полная запись справочника типов инцидента (GET /incident-types) — с id и порядком
  * сортировки. Используется страницей-справочником «Типы инцидентов» в админке (CRUD).
@@ -104,6 +110,8 @@ export interface Incident {
   comment: string | null;
   /** Код типа инцидента (см. IncidentType); null — тип не задан. Подпись резолвим по справочнику. */
   incident_type: string | null;
+  /** Код подтипа (только у типа «Отсутствует доступ к МНО»/no_access); null — нет. Подпись из справочника подтипов. */
+  incident_subtype: string | null;
   /** Форма «баки раздельного сбора»; null для Макса. Скрыто в таблице (ТЗ §11), есть в модели. */
   bins: boolean | null;
   /** Реестровый № выбранного на карте МНО (форма); null — МНО не выбирали. */
@@ -143,6 +151,8 @@ export interface IncidentListItem {
   comment: string | null;
   /** Код типа инцидента (см. IncidentType); null — тип не задан. Подпись резолвим по справочнику. */
   incident_type: string | null;
+  /** Код подтипа (только у типа «Отсутствует доступ к МНО»/no_access); null — нет. Подпись из справочника подтипов. */
+  incident_subtype: string | null;
   /** Реестровый № выбранного на карте МНО (форма); null — МНО не выбирали. */
   mno_reg: string | null;
   /** UUID выбранного на карте МНО (ссылка на объект ТКО); null — МНО не выбирали. */

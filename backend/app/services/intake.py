@@ -30,6 +30,7 @@ from .dadata import clean_address, geocode_address
 from .geo import parse_latlon
 from . import parse_log
 from .incident_parse import ai_parse_incident
+from .incident_subtypes import is_valid_subtype
 from .incident_type import code_exists
 
 logger = logging.getLogger(__name__)
@@ -647,6 +648,7 @@ async def create_incident_from_public_form(
     mno_reg: str = "",
     mno_id: str = "",
     incident_type: str = "",
+    incident_subtype: str = "",
     comment: str = "",
     actor_user_id=None,
     volunteer_id: uuid.UUID | None = None,
@@ -675,6 +677,18 @@ async def create_incident_from_public_form(
     incident_type_value = (
         type_code if type_code and await code_exists(session, type_code) else None
     )
+    # Подтип инцидента: применяется ТОЛЬКО к типу no_access — там ОБЯЗАТЕЛЕН и должен
+    # быть валидным кодом справочника services/incident_subtypes.py; для остальных типов
+    # подтип не пишется (→ NULL, даже если прислали).
+    subtype_code = _clean_str(incident_subtype)
+    if incident_type_value == "no_access":
+        if not is_valid_subtype("no_access", subtype_code):
+            raise ValidationError(
+                "Для типа «Отсутствует доступ к МНО» укажите подтип"
+            )
+        incident_subtype_value = subtype_code
+    else:
+        incident_subtype_value = None
     # Прочая информация из формы (необязательное поле): стрипнутая строка или NULL.
     comment_value = _clean_str(comment) or None
     # Рег-номер выбранного на карте формы МНО (необязателен: адрес можно ввести
@@ -754,6 +768,7 @@ async def create_incident_from_public_form(
         volunteer_id=volunteer_id,
         comment=comment_value,
         incident_type=incident_type_value,
+        incident_subtype=incident_subtype_value,
         photo_time=parsed_photo_time,
         photos=0,
         photo_urls=[],
@@ -919,6 +934,7 @@ async def create_incident_from_max_selected(
     photo_time,
     photo_files: list,
     incident_type: str = "",
+    incident_subtype: str = "",
     actor_user_id=None,
 ) -> Incident:
     """Создаёт Incident(source='max') из УЖЕ разобранных полей + выбранного МНО.
@@ -948,6 +964,17 @@ async def create_incident_from_max_selected(
     incident_type_value = (
         type_code if type_code and await code_exists(session, type_code) else None
     )
+    # Подтип инцидента: обязателен и валиден ТОЛЬКО для типа no_access; иначе → NULL
+    # (та же логика, что в публичной форме). Бот присылает код, выбранный кнопкой.
+    subtype_code = _clean_str(incident_subtype)
+    if incident_type_value == "no_access":
+        if not is_valid_subtype("no_access", subtype_code):
+            raise ValidationError(
+                "Для типа «Отсутствует доступ к МНО» укажите подтип"
+            )
+        incident_subtype_value = subtype_code
+    else:
+        incident_subtype_value = None
 
     # ССЫЛКА на выбранное МНО (Mno.id) — парсим как UUID: пусто/мусор → NULL (не роняем
     # INSERT). Пусто = «Нет в списке» (обращение без привязки к площадке).
@@ -1008,6 +1035,7 @@ async def create_incident_from_max_selected(
         mno_id=mno_id_value,
         comment=comment_value,
         incident_type=incident_type_value,
+        incident_subtype=incident_subtype_value,
         photo_time=parsed_photo_time,
         photos=0,
         photo_urls=[],

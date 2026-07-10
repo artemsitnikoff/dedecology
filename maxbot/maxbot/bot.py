@@ -43,6 +43,7 @@ from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 from .config import settings
 from .errors import AppError, IntakeError
 from .intake_client import (
+    fetch_incident_subtypes,
     fetch_incident_types,
     fetch_map,
     finalize_max,
@@ -56,8 +57,10 @@ from .session import (
     button_text,
     chat_key,
     decode_payload,
+    decode_subtype_payload,
     decode_type_payload,
     encode_payload,
+    encode_subtype_payload,
     encode_type_payload,
     human_distance,
     map_query,
@@ -137,6 +140,8 @@ _HDR_PICK = (
 # Шаг 2 диалога — вопрос о типе инцидента (после выбора площадки).
 _HDR_TYPE = "Площадка выбрана. Теперь выберите тип обращения:"
 _TYPE_SKIP = "Пропустить"
+# Шаг 3 — подтип (только для типа с подтипами, «Отсутствует доступ к МНО»). Обязателен.
+_HDR_SUBTYPE = "Уточните подтип обращения:"
 # Потолок текста кнопки типа (в MAX Button.text ≤ 64; типы бывают длинными).
 _TYPE_BUTTON_MAX = 60
 _NO_MNO_NEARBY = (
@@ -407,6 +412,40 @@ def _type_label(types: list[dict], code: str) -> str:
     return ""
 
 
+def _build_subtype_keyboard(pending_id: str, subtypes: list[dict]):
+    """Инлайн-клавиатура выбора ПОДТИПА (шаг 3). Кнопки «s:{pid}:{code}»; «Пропустить»
+    НЕТ — подтип обязателен (тип «Отсутствует доступ к МНО» без подтипа не создаётся)."""
+    b = InlineKeyboardBuilder()
+    for s in subtypes:
+        code = str(s.get("code") or "")
+        label = str(s.get("label") or code).strip() or code
+        if not code:
+            continue
+        if len(label) > _TYPE_BUTTON_MAX:
+            label = label[: _TYPE_BUTTON_MAX - 1].rstrip() + "…"
+        b.row(
+            CallbackButton(
+                text=label,
+                payload=encode_subtype_payload(pending_id, code),
+                intent=Intent.DEFAULT,
+            )
+        )
+    # maxapi 0.9.4: билдер стартует с пустого ряда [[]] — отфильтровать пустые ряды.
+    b.payload = [r for r in b.payload if r]
+    return b.as_markup()
+
+
+def _subtype_label(subtypes: list[dict], code: str) -> str:
+    """Подпись подтипа по коду из сохранённой карты подтипов; «» — если не найден."""
+    code = (code or "").strip()
+    if not code:
+        return ""
+    for s in subtypes or []:
+        if str(s.get("code") or "") == code:
+            return str(s.get("label") or "").strip()
+    return ""
+
+
 async def _send_report_prompt(
     msg: Message, report: PendingReport, point: tuple[float, float] | None
 ) -> None:
@@ -446,8 +485,13 @@ async def _send_report_prompt(
     await msg.answer(text=text, attachments=[markup], parse_mode=ParseMode.HTML)
 
 
-async def _finalize(report: PendingReport, mno_id: str, incident_type: str = "") -> dict:
-    """Создать обращение из полей pending + выбранного МНО (или без него) + типа."""
+async def _finalize(
+    report: PendingReport,
+    mno_id: str,
+    incident_type: str = "",
+    incident_subtype: str = "",
+) -> dict:
+    """Создать обращение из полей pending + выбранного МНО (или без него) + типа/подтипа."""
     p = report.parsed
     return await finalize_max(
         region=p.get("region", ""),
@@ -462,6 +506,7 @@ async def _finalize(report: PendingReport, mno_id: str, incident_type: str = "")
         mno_id=mno_id,
         photo_bytes_list=report.photos,
         incident_type=incident_type,
+        incident_subtype=incident_subtype,
     )
 
 
@@ -482,15 +527,23 @@ async def _start_report(
     # площадке (шаг 1) он уже был готов и клавиатура типов открывалась мгновенно, без
     # 3-4с сетевого запроса в колбэке (жалоба с прода). Сбой fetch → [] (деградация).
     types_task = asyncio.create_task(fetch_incident_types())
+    # Карту подтипов тянем тем же приёмом — чтобы шаг 3 (если тип с подтипами) открывался
+    # мгновенно, без сетевого запроса в колбэке. Сбой → {} (шаг подтипа пропускается).
+    subtypes_task = asyncio.create_task(fetch_incident_subtypes())
     try:
         prep = await prepare_max(text, photo_time=photo_time)  # IntakeError → внешний soft-reply
     except BaseException:
         types_task.cancel()
+        subtypes_task.cancel()
         raise
     try:
         prefetched_types = await types_task
     except Exception:  # noqa: BLE001
         prefetched_types = []
+    try:
+        prefetched_subtypes = await subtypes_task
+    except Exception:  # noqa: BLE001
+        prefetched_subtypes = {}
     report = PendingReport(
         pending_id=new_pending_id(),
         chat_id=chat_id,
@@ -501,6 +554,7 @@ async def _start_report(
         msg_id=msg_id,
         parsed=(prep.get("parsed") or {}),
         incident_types=prefetched_types,
+        incident_subtypes=prefetched_subtypes,
     )
     if prep.get("status") == "need_address":
         report.awaiting_address = True
@@ -649,6 +703,7 @@ async def _do_finalize(
     report: PendingReport,
     mno_id: str,
     incident_type: str,
+    incident_subtype: str,
     mno_label: str,
     is_no_mno: bool,
 ) -> None:
@@ -669,7 +724,7 @@ async def _do_finalize(
     # что идёт отправка, чтобы пользователь видел процесс (по просьбе). Awaited → до finalize.
     await _answer_new(event, "⏳ Идёт отправка инцидента…")
     try:
-        result = await _finalize(report, mno_id, incident_type)
+        result = await _finalize(report, mno_id, incident_type, incident_subtype)
     except IntakeError:
         report.processing = False
         await _answer_new(
@@ -691,6 +746,11 @@ async def _do_finalize(
     type_label = _type_label(report.incident_types, incident_type)
     if type_label:
         parts.append(f"Тип: <b>{html.escape(type_label)}</b>")
+    subtype_label = _subtype_label(
+        report.incident_subtypes.get(incident_type) or [], incident_subtype
+    )
+    if subtype_label:
+        parts.append(f"Подтип: <b>{html.escape(subtype_label)}</b>")
     quote = _quote_of(result)
     if quote:
         parts.append("")
@@ -849,12 +909,23 @@ def build_router() -> Router:
         try:
             payload = event.callback.payload or ""
             mno_dec = decode_payload(payload)  # (pid, idx) — шаг 1
-            # Типовой payload разбираем только если это НЕ МНО-payload.
+            # Типовой/подтиповой payload разбираем только если это НЕ МНО-payload.
             type_dec = decode_type_payload(payload) if mno_dec is None else None
-            if mno_dec is None and type_dec is None:
+            subtype_dec = (
+                decode_subtype_payload(payload)
+                if (mno_dec is None and type_dec is None)
+                else None
+            )
+            if mno_dec is None and type_dec is None and subtype_dec is None:
                 await _notify_callback(event, _CB_BAD_CHOICE)
                 return
-            pid = mno_dec[0] if mno_dec is not None else type_dec[0]
+            pid = (
+                mno_dec[0]
+                if mno_dec is not None
+                else type_dec[0]
+                if type_dec is not None
+                else subtype_dec[0]
+            )
 
             _STORE.purge(time.time())
             report = _STORE.get(pid)
@@ -868,18 +939,55 @@ def build_router() -> Router:
                 await _notify_callback(event, _CB_PROCESSING)
                 return
 
-            # === Шаг 2: выбран тип инцидента → создаём обращение ===
-            if type_dec is not None:
-                _, code = type_dec
+            # === Шаг 3: выбран подтип → создаём обращение ===
+            if subtype_dec is not None:
+                _, subcode = subtype_dec
+                # Подтип пришёл вне шага 3 (устаревшая кнопка) → мягко игнорируем.
+                if not report.awaiting_subtype:
+                    await _notify_callback(event, _CB_PROCESSING)
+                    return
                 mno_id = report.chosen_mno_id or ""
-                # Замок ставим СИНХРОННО ДО фоновой финализации: повторный тап тут же
-                # ловится проверкой report.processing выше. Сам finalize — в фоне, чтобы
-                # обработчик вернулся мгновенно (не ждём ~2-3с вызовы к Максу).
                 report.processing = True
                 _STORE.put(report)
                 _spawn(
                     _do_finalize(
-                        event, report, mno_id, code, report.chosen_mno_label, mno_id == ""
+                        event,
+                        report,
+                        mno_id,
+                        report.chosen_type,
+                        subcode,
+                        report.chosen_mno_label,
+                        mno_id == "",
+                    )
+                )
+                return
+
+            # === Шаг 2: выбран тип инцидента → подтип (если есть) или создаём обращение ===
+            if type_dec is not None:
+                _, code = type_dec
+                mno_id = report.chosen_mno_id or ""
+                # Тип с подтипами («Отсутствует доступ к МНО») → шаг 3: спрашиваем подтип.
+                subs = report.incident_subtypes.get(code) or []
+                if subs:
+                    if report.awaiting_subtype:  # анти-дубль повторного тапа по типу
+                        await _notify_callback(event, _CB_PROCESSING)
+                        return
+                    report.chosen_type = code
+                    report.awaiting_subtype = True
+                    _STORE.put(report)
+                    _spawn(_notify_callback(event, "Тип выбран"))
+                    _spawn(_delete_callback_message(event))
+                    _spawn(
+                        _answer_new(event, _HDR_SUBTYPE, markup=_build_subtype_keyboard(pid, subs))
+                    )
+                    return
+                # Тип без подтипов → создаём сразу (подтип пустой). Замок ставим СИНХРОННО
+                # ДО фоновой финализации: повторный тап ловится проверкой report.processing.
+                report.processing = True
+                _STORE.put(report)
+                _spawn(
+                    _do_finalize(
+                        event, report, mno_id, code, "", report.chosen_mno_label, mno_id == ""
                     )
                 )
                 return
@@ -934,7 +1042,7 @@ def build_router() -> Router:
             # Справочник типов недоступен → создаём сразу без типа (деградация).
             report.processing = True
             _STORE.put(report)
-            _spawn(_do_finalize(event, report, mno_id, "", mno_label, idx == NO_MNO))
+            _spawn(_do_finalize(event, report, mno_id, "", "", mno_label, idx == NO_MNO))
 
         except Exception:  # noqa: BLE001 — poller must never die on one bad callback
             logger.exception("unexpected error handling callback")

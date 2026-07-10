@@ -15,8 +15,10 @@ from maxbot.session import (
     button_text,
     chat_key,
     decode_payload,
+    decode_subtype_payload,
     decode_type_payload,
     encode_payload,
+    encode_subtype_payload,
     encode_type_payload,
     human_distance,
     map_query,
@@ -84,6 +86,28 @@ def test_mno_and_type_payloads_do_not_collide():
     # decode_payload не принимает типовой payload и наоборот
     assert decode_payload(encode_type_payload("p", "fire")) is None
     assert decode_type_payload(encode_payload("p", 0)) is None
+
+
+# --- subtype payload (шаг 3: подтип для типа «Отсутствует доступ к МНО») -------
+
+
+def test_subtype_payload_roundtrip():
+    p = encode_subtype_payload("abc123", "blocked_by_car")
+    assert decode_subtype_payload(p) == ("abc123", "blocked_by_car")
+
+
+def test_subtype_payload_requires_code():
+    # Подтип обязателен — пустой код отвергается (в отличие от типа с «Пропустить»).
+    assert decode_subtype_payload("s:abc123:") is None
+
+
+def test_subtype_payload_isolated_from_type_and_mno():
+    p = encode_subtype_payload("p", "other_reason")
+    assert decode_type_payload(p) is None  # префикс s != t
+    assert decode_payload(p) is None  # префикс s != m
+    assert decode_subtype_payload(encode_type_payload("p", "fire")) is None
+    assert decode_subtype_payload("garbage") is None
+    assert decode_subtype_payload("") is None
 
 
 # --- button_text truncation ----------------------------------------------

@@ -35,6 +35,7 @@ from ...services import incident_type as incident_type_service
 from ...services import intake as intake_service
 from ...services import mno as mno_service
 from ...services import quotes as quotes_service
+from ...services.incident_subtypes import INCIDENT_SUBTYPES
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,17 @@ async def incident_types(session: AsyncSession = Depends(get_db)):
     return [{"code": t.code, "label": t.label} for t in types]
 
 
+@router.get("/incident-subtypes", tags=["Отправка фотоотчёта"])
+async def incident_subtypes():
+    """ПУБЛИЧНО: фиксированный справочник подтипов инцидента {type_code: [{code, label}]}.
+
+    Подтипы заданы жёстко в коде (services/incident_subtypes.py), не в БД — есть только у
+    типа no_access. Отдаём словарь как есть; форма/бот показывают подтипы для выбранного
+    типа. Публичный (intake-роутер без auth) — нужен неавторизованной форме волонтёра.
+    """
+    return INCIDENT_SUBTYPES
+
+
 @router.get(
     "/mno-points",
     response_model=MnoFormPointsResponse,
@@ -253,6 +265,7 @@ async def public_form(
     mno_reg: str = Form(""),
     mno_id: str = Form(""),
     incident_type: str = Form(""),
+    incident_subtype: str = Form(""),
     comment: str = Form(""),
     photo_time: str = Form(""),
     bins: str = Form(""),
@@ -282,6 +295,7 @@ async def public_form(
         mno_reg=mno_reg,
         mno_id=mno_id,
         incident_type=incident_type,
+        incident_subtype=incident_subtype,
         comment=comment,
         photo_time=photo_time,
         bins=bins,
@@ -377,6 +391,7 @@ async def max_finalize(
     msg_url: str = Form(""),
     mno_id: str = Form(""),
     incident_type: str = Form(""),
+    incident_subtype: str = Form(""),
     photos: list[UploadFile] = File(default=[]),
 ):
     """Вторая фаза приёма из Макс-бота: создаёт Incident(source='max') из разобранных
@@ -401,6 +416,7 @@ async def max_finalize(
         photo_time=photo_time or None,
         photo_files=photos,
         incident_type=incident_type,
+        incident_subtype=incident_subtype,
     )
     await session.commit()
     # Цитата теперь БЫСТРАЯ — случайная строка из таблицы quotes (claude CLI убран),

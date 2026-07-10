@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { submitIntakeForm } from '@/api/intake';
 import type { AddressSuggestion, SuggestOptions } from '@/api/intake';
 import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
+import { useIncidentSubtypes } from '@/api/hooks/useIncidentSubtypes';
 import { useAddressSuggest } from './useAddressSuggest';
 import { MnoPickerModal } from './MnoPickerModal';
 import type { MnoPick } from './MnoPickerModal';
@@ -111,10 +112,14 @@ function AddressField({ label, required, value, onChange, onPick, opts, placehol
 export default function ReportFormPage() {
   // Справочник типов инцидента для дропдауна (публичный, без auth).
   const { data: incidentTypes = [] } = useIncidentTypes();
+  // Справочник подтипов (код типа → подтипы). Подтип есть только у «Отсутствует доступ к МНО».
+  const { data: subtypesMap = {} } = useIncidentSubtypes();
 
   // --- Поля формы ---
   const [fio, setFio] = useState('');
   const [incidentType, setIncidentType] = useState('');
+  // Подтип инцидента — обязателен, только когда у выбранного типа есть подтипы (no_access).
+  const [incidentSubtype, setIncidentSubtype] = useState('');
   const [comment, setComment] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
@@ -245,6 +250,11 @@ export default function ReportFormPage() {
       setSubmitError('Пожалуйста, выберите тип инцидента.');
       return;
     }
+    // Подтип обязателен, если у выбранного типа есть подтипы (тип «Отсутствует доступ к МНО»).
+    if ((subtypesMap[incidentType]?.length ?? 0) > 0 && !incidentSubtype) {
+      setSubmitError('Пожалуйста, выберите подтип инцидента.');
+      return;
+    }
     if (!region.trim()) {
       setSubmitError('Пожалуйста, укажите регион.');
       return;
@@ -274,6 +284,10 @@ export default function ReportFormPage() {
       const fd = new FormData();
       fd.append('fio', fio.trim());
       fd.append('incident_type', incidentType);
+      // Подтип шлём только если он релевантен типу (иначе бэк его обнулит) — не мусорим.
+      if ((subtypesMap[incidentType]?.length ?? 0) > 0 && incidentSubtype) {
+        fd.append('incident_subtype', incidentSubtype);
+      }
       fd.append('comment', comment.trim());
       fd.append('full_address', fullAddress);
       fd.append('region', region.trim());
@@ -458,7 +472,11 @@ export default function ReportFormPage() {
                 <select
                   className="de-rf-input de-rf-select"
                   value={incidentType}
-                  onChange={(e) => setIncidentType(e.target.value)}
+                  onChange={(e) => {
+                    setIncidentType(e.target.value);
+                    // Смена типа сбрасывает подтип (у другого типа его нет / он иной).
+                    setIncidentSubtype('');
+                  }}
                 >
                   <option value="" disabled>
                     Выберите тип инцидента…
@@ -470,6 +488,30 @@ export default function ReportFormPage() {
                   ))}
                 </select>
               </label>
+
+              {/* Подтип инцидента — только для типа с подтипами («Отсутствует доступ к МНО»),
+                  тогда обязателен (2-е поле открывается по выбору типа). */}
+              {(subtypesMap[incidentType]?.length ?? 0) > 0 && (
+                <label className="de-rf-field">
+                  <span className="de-rf-label">
+                    Подтип инцидента <span className="de-rf-req">*</span>
+                  </span>
+                  <select
+                    className="de-rf-input de-rf-select"
+                    value={incidentSubtype}
+                    onChange={(e) => setIncidentSubtype(e.target.value)}
+                  >
+                    <option value="" disabled>
+                      Выберите подтип…
+                    </option>
+                    {subtypesMap[incidentType].map((s) => (
+                      <option key={s.code} value={s.code}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               {/* Комментарий — обязательная прочая информация */}
               <label className="de-rf-field">
