@@ -124,7 +124,8 @@ export default function App() {
         }
       >
         <Route index element={<Navigate to="/incidents" replace />} />
-        <Route path="incidents" element={<IncidentsPage />} />
+        {/* Splat: /incidents и /incidents/<id> — один элемент → ЧПУ-карточка без ремаунта. */}
+        <Route path="incidents/*" element={<IncidentsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         {/* Splat (/*): /mno и /mno/<id> матчит один и тот же элемент → карточка (ЧПУ)
             открывается без ремаунта страницы. Аналогично /mno-new (волонтёрские МНО). */}

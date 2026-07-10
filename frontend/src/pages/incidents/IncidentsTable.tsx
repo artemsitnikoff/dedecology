@@ -140,7 +140,7 @@ const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, o
             title="Открыть карточку МНО"
             onClick={(e) => e.stopPropagation()}
           >
-            {d.mno_reg || 'Открыть'}
+            {d.mno_reg || (d.mno_source === 'volunteer' ? 'Новый' : 'Открыть')}
           </Link>
         ) : (
           <span className="de-inc-mno-empty">—</span>

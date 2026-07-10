@@ -183,7 +183,7 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
                   title="Открыть карточку объекта ТКО"
                 >
                   <Icon name="pin" size={13} />
-                  {d.mno_reg || 'Открыть карточку МНО'}
+                  {d.mno_reg || (d.mno_source === 'volunteer' ? 'Новый' : 'Открыть карточку МНО')}
                 </button>
               ) : (
                 d.mno_reg || '—'

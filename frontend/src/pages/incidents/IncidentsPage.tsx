@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { useIncidents } from '@/api/hooks/useIncidents';
@@ -53,6 +53,12 @@ function parseSources(values: string[]): Source[] {
  */
 export function IncidentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  // ЧПУ-карточка инцидента: id живёт в пути (/incidents/<id>) — URL копируется/вставляется,
+  // при заходе по ссылке drawer открывается сам. Splat-параметр (*) = часть пути после раздела.
+  const routeParams = useParams();
+  const urlDetailId = routeParams['*'] || null;
 
   // Реконструируем типизированный объект фильтров из URL на каждый рендер.
   const search = searchParams.get('search') ?? '';
@@ -287,17 +293,32 @@ export function IncidentsPage() {
    * Открыть карточку: считаем top (верх скролл-контейнера) и left (его левый край +
    * ширина видимых левых колонок) и запускаем drawer.
    */
-  const openDetail = useCallback((id: string) => {
-    const el = scrollRef.current;
-    if (el) {
-      const rect = el.getBoundingClientRect();
-      setDetailPos({
-        top: Math.round(rect.top),
-        left: Math.round(rect.left + DRAWER_LEFT_INSET),
-      });
-    }
-    setDetailId(id);
-  }, []);
+  const openDetail = useCallback(
+    (id: string) => {
+      const el = scrollRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        setDetailPos({
+          top: Math.round(rect.top),
+          left: Math.round(rect.left + DRAWER_LEFT_INSET),
+        });
+      }
+      // Навигация на ЧПУ-путь; строку запроса (фильтры/поиск/страница) сохраняем.
+      navigate({ pathname: `/incidents/${id}`, search: location.search });
+    },
+    [navigate, location.search]
+  );
+
+  // Закрытие drawer — возврат на /incidents (без id), фильтры в query сохраняются.
+  const closeDrawer = useCallback(
+    () => navigate({ pathname: '/incidents', search: location.search }),
+    [navigate, location.search]
+  );
+
+  // Drawer = отражение URL: смена пути (переход/копипаст/назад) синхронит открытую карточку.
+  useEffect(() => {
+    setDetailId(urlDetailId);
+  }, [urlDetailId]);
 
   const openPhoto = useCallback((id: string) => setLb({ id, idx: 0 }), []);
   const openPhotoAt = useCallback((id: string, idx: number) => setLb({ id, idx }), []);
@@ -389,12 +410,13 @@ export function IncidentsPage() {
     bulkDelete.mutate(ids, {
       onSuccess: () => {
         const deletedSet = new Set(ids);
-        setDetailId((cur) => (cur && deletedSet.has(cur) ? null : cur));
+        // Открытая карточка удалена → закрываем drawer (уводим с ЧПУ-пути /incidents/<id>).
+        if (detailId && deletedSet.has(detailId)) closeDrawer();
         setLb((cur) => (cur && deletedSet.has(cur.id) ? null : cur));
         clearSelection();
       },
     });
-  }, [bulkDelete, clearSelection]);
+  }, [bulkDelete, clearSelection, detailId, closeDrawer]);
 
   return (
     <div className="de-inc-wrap">
@@ -615,7 +637,7 @@ export function IncidentsPage() {
           id={detailId}
           top={detailPos.top}
           left={detailPos.left}
-          onClose={() => setDetailId(null)}
+          onClose={closeDrawer}
           onPhoto={openPhotoAt}
         />
       )}
