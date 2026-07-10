@@ -72,9 +72,18 @@ def _photo_urls(inc: Incident, base_url: str) -> list[str]:
     return urls + [""] * (_PHOTO_SLOTS - len(urls))
 
 
-def _row(inc: Incident, base_url: str, type_labels: dict | None) -> list:
+def _subject(inc: Incident, region_by_mno: dict | None) -> str:
+    """Субъект РФ КАК В УТКО: из нашего справочника по МНО инцидента; фолбэк — inc.region."""
+    if region_by_mno and getattr(inc, "mno_id", None):
+        name = region_by_mno.get(inc.mno_id)
+        if name:
+            return name
+    return inc.region
+
+
+def _row(inc: Incident, base_url: str, type_labels: dict | None, region_by_mno: dict | None) -> list:
     return [
-        inc.region,
+        _subject(inc, region_by_mno),
         inc.mno_reg or "",
         _photo_datetime(inc),
         _address(inc),
@@ -89,15 +98,20 @@ def build_utko_xlsx(
     rows: Iterable[Incident],
     base_url: str = "",
     type_labels: dict | None = None,
+    region_by_mno: dict | None = None,
 ) -> bytes:
-    """Строит .xlsx (bytes) в формате УТКО. Ссылки на фото — просто текстовые URL."""
+    """Строит .xlsx (bytes) в формате УТКО. Ссылки на фото — просто текстовые URL.
+
+    region_by_mno — {mno_id: имя субъекта из НАШЕГО справочника (синхр. из УТКО)} для
+    колонки «Субъект РФ» (как в УТКО, не DaData-текстом инцидента); None → фолбэк inc.region.
+    """
     wb = Workbook()
     ws = wb.active
     ws.title = "Выгрузка УТКО"
 
     ws.append(_HEADERS)
     for inc in rows:
-        ws.append(_row(inc, base_url, type_labels))
+        ws.append(_row(inc, base_url, type_labels, region_by_mno))
 
     buffer = BytesIO()
     wb.save(buffer)

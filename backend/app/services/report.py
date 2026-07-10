@@ -22,6 +22,7 @@ from ..schemas.base import Paginated
 from ..schemas.report import ReportCreateRequest, ReportListItem
 from ..services import incident as incident_service
 from ..services import incident_type as incident_type_service
+from ..services import mno as mno_service
 from ..services.audit import audit
 from ..services.utko_export import build_utko_xlsx
 
@@ -61,7 +62,11 @@ async def create_incidents_report(
         )
 
     type_labels = await incident_type_service.labels_map(session)
-    content = build_utko_xlsx(rows, base_url, type_labels)
+    # «Субъект РФ» в УТКО-выгрузке — из НАШЕГО справочника регионов (синхр. из УТКО), а не
+    # DaData-текста инцидента: резолвим mno_id → Mno.region_code → Region.name.
+    mno_ids = [inc.mno_id for inc in rows if getattr(inc, "mno_id", None)]
+    region_by_mno = await mno_service.region_names_by_mno(session, mno_ids)
+    content = build_utko_xlsx(rows, base_url, type_labels, region_by_mno)
 
     # Формирование отчёта = выгрузка: включённые в него обращения СРАЗУ переходят в
     # статус «Выгружен» (по требованию). Файл собран ВЫШЕ — в нём статусы на момент

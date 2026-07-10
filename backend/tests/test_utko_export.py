@@ -78,6 +78,26 @@ def test_utko_row_maps_fields_and_photo_urls():
     assert all(row[i] in (None, "") for i in range(9, 13))
 
 
+def test_utko_subject_from_our_directory_by_mno():
+    """«Субъект РФ» берётся из справочника (region_by_mno по mno_id), а не из inc.region (DaData)."""
+    from uuid import uuid4
+
+    mid = uuid4()
+    inc = _incident(region="Самарская обл (DaData)", mno_id=mid)
+    wb = load_workbook(
+        BytesIO(
+            build_utko_xlsx([inc], "", {"fire": "x"}, region_by_mno={mid: "Самарская область"})
+        )
+    )
+    row = [c.value for c in next(wb.active.iter_rows(min_row=2))]
+    assert row[0] == "Самарская область"  # из нашего справочника (как в УТКО), НЕ DaData
+
+    # Нет соответствия в справочнике / нет карты → фолбэк на inc.region.
+    wb2 = load_workbook(BytesIO(build_utko_xlsx([inc], "", {"fire": "x"}, region_by_mno={})))
+    row2 = [c.value for c in next(wb2.active.iter_rows(min_row=2))]
+    assert row2[0] == "Самарская обл (DaData)"
+
+
 def test_utko_skips_placeholder_photos():
     inc = _incident(photos=1, photo_urls=["placeholder://incident-photo/1"])
     ws = _rows([inc], base_url="https://ecopulse.reo.ru")

@@ -117,6 +117,24 @@ async def _region_names(session: AsyncSession) -> dict[str, str]:
     return {code: name for code, name in result.all()}
 
 
+async def region_names_by_mno(session: AsyncSession, mno_ids: list) -> dict:
+    """{mno_id: имя субъекта из НАШЕГО справочника (Region.name, синхр. из УТКО)}.
+
+    Для УТКО-выгрузки: «Субъект РФ» должен быть КАК В УТКО (наш справочник регионов),
+    а не DaData-текстом из инцидента. Связь: Mno.region_code → Region.code → Region.name.
+    МНО без региона в справочнике / пустой набор → в словарь не попадают (фолбэк на
+    inc.region у вызывающего)."""
+    if not mno_ids:
+        return {}
+    stmt = (
+        select(Mno.id, Region.name)
+        .join(Region, Mno.region_code == Region.code)
+        .where(Mno.id.in_(mno_ids))
+    )
+    result = await session.execute(stmt)
+    return {mno_id: name for mno_id, name in result.all()}
+
+
 async def _incident_counts(session: AsyncSession, mno_ids: list) -> dict:
     """{mno_id: живой COUNT инцидентов} по ссылке incidents.mno_id, одним запросом.
 
