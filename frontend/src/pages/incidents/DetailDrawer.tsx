@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/Icon';
 import { STATUS, SOURCE } from '@/lib/status';
 import { formatDate, formatTime, fullAddr, maxLink } from '@/lib/format';
 import { thumbUrl } from '@/lib/photo';
+import { mnoCardPath } from '@/lib/mnoLink';
 import { useIncident } from '@/api/hooks/useIncident';
 import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
 import { useSetStatus } from '@/api/mutations/incidents';
@@ -169,8 +170,8 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
             </div>
           ))}
           {/* Объект ТКО — если инцидент привязан к МНО (есть mno_id), реестровый №
-              кликабелен → переход к карточке МНО (/mno?open=id). Без mno_id — просто
-              текст рег-номера или «—». */}
+              кликабелен → ЧПУ-карточка МНО (/mno/<id>, а для волонтёрского МНО — /mno-new/<id>
+              по mno_source). Без mno_id — просто текст рег-номера или «—». */}
           <div className="de-inc-field">
             <div className="de-inc-field-key">Объект ТКО</div>
             <div className="de-inc-field-val">
@@ -178,7 +179,7 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
                 <button
                   type="button"
                   className="de-inc-mno-link"
-                  onClick={() => navigate(`/mno?open=${d.mno_id}`)}
+                  onClick={() => navigate(mnoCardPath(d.mno_id!, d.mno_source))}
                   title="Открыть карточку объекта ТКО"
                 >
                   <Icon name="pin" size={13} />

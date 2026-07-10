@@ -110,6 +110,8 @@ export interface Incident {
   mno_reg: string | null;
   /** UUID выбранного на карте МНО (ссылка на объект ТКО); null — МНО не выбирали. */
   mno_id: string | null;
+  /** Источник связанного МНО ('fgis'|'volunteer') — выбор раздела карточки (/mno vs /mno-new). */
+  mno_source: string | null;
   /** ISO-строка — «поступило». */
   received_at: string;
   created_at: string;
@@ -141,6 +143,8 @@ export interface IncidentListItem {
   mno_reg: string | null;
   /** UUID выбранного на карте МНО (ссылка на объект ТКО); null — МНО не выбирали. */
   mno_id: string | null;
+  /** Источник связанного МНО ('fgis'|'volunteer') — выбор раздела карточки (/mno vs /mno-new). */
+  mno_source: string | null;
   received_at: string;
 }
 

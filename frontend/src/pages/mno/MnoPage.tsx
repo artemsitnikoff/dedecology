@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
 import { formatDate } from '@/lib/format';
@@ -208,25 +208,27 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
   // Любая смена фильтра/поиска/сортировки сбрасывает страницу на первую.
   const resetPage = useCallback(() => setPage(1), [setPage]);
 
-  // Диплинк из карточки инцидента: /mno?open=<id> открывает drawer этого МНО при
-  // загрузке. openParam входит в deps — переход по новой ссылке переоткрывает карточку.
-  const openParam = searchParams.get('open');
+  // ЧПУ-карточка: id живёт в пути (/mno/<id> или /mno-new/<id>) — URL копируется/вставляется,
+  // при заходе по ссылке drawer открывается сам. Splat-параметр (*) = часть пути после раздела.
+  const basePath = sourceFilter === 'volunteer' ? '/mno-new' : '/mno';
+  const params = useParams();
+  const urlId = params['*'] || null;
+  const location = useLocation();
+  // Drawer = отражение URL: смена пути (переход/копипаст/назад) синхронит открытую карточку.
   useEffect(() => {
-    if (openParam) setDetailId(openParam);
-  }, [openParam]);
+    setDetailId(urlId);
+  }, [urlId]);
 
-  // Закрытие drawer: снимаем detailId и убираем ?open из URL (иначе эффект переоткроет).
-  const closeDrawer = useCallback(() => {
-    setDetailId(null);
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete('open');
-        return next;
-      },
-      { replace: true }
-    );
-  }, [setSearchParams]);
+  // Открытие карточки — навигация на ЧПУ-путь; строку запроса (фильтры/страница) сохраняем.
+  const openDetail = useCallback(
+    (id: string) => navigate({ pathname: `${basePath}/${id}`, search: location.search }),
+    [navigate, basePath, location.search]
+  );
+  // Закрытие drawer — возврат на путь раздела (без id), фильтры в query сохраняются.
+  const closeDrawer = useCallback(
+    () => navigate({ pathname: basePath, search: location.search }),
+    [navigate, basePath, location.search]
+  );
 
   // Клик по счётчику обращений МНО → список инцидентов, отфильтрованный по этому объекту ТКО.
   const openIncidentsForMno = useCallback(
@@ -541,7 +543,7 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
                   active={detailId === m.id}
                   volunteerView={isVolunteer}
                   onToggle={toggleSel}
-                  onOpen={setDetailId}
+                  onOpen={openDetail}
                   onIncidents={openIncidentsForMno}
                 />
               ))}

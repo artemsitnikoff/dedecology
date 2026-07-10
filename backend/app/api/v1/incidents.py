@@ -253,7 +253,9 @@ async def get_incident(
 ):
     """Карточка инцидента (включая bins)."""
     incident = await incident_service.get_incident(session, incident_id)
-    return IncidentDetail.model_validate(incident)
+    detail = IncidentDetail.model_validate(incident)
+    detail.mno_source = await incident_service.get_mno_source(session, incident.mno_id)
+    return detail
 
 
 @router.patch(
@@ -270,4 +272,6 @@ async def update_incident_status(
         session, incident_id, payload.status, current_user.id
     )
     await session.commit()
-    return IncidentDetail.model_validate(incident)
+    detail = IncidentDetail.model_validate(incident)
+    detail.mno_source = await incident_service.get_mno_source(session, incident.mno_id)
+    return detail

@@ -9,7 +9,7 @@ from sqlalchemy import and_, asc, case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import NotFoundError, ValidationError
-from ..models import Incident
+from ..models import Incident, Mno
 from ..schemas.base import Paginated
 from ..schemas.incident import (
     FunnelCounts,
@@ -149,9 +149,16 @@ async def list_incidents(
         with_total=True,
     )
     items, total = rows
+    src_map = await _mno_source_map(session, [i.mno_id for i in items])
     pages = math.ceil(total / page_size) if total > 0 else 0
+
+    def _to_item(i: Incident) -> IncidentListItem:
+        item = IncidentListItem.model_validate(i)
+        item.mno_source = src_map.get(i.mno_id)
+        return item
+
     return Paginated[IncidentListItem](
-        items=[IncidentListItem.model_validate(i) for i in items],
+        items=[_to_item(i) for i in items],
         total=total,
         page=page,
         page_size=page_size,
@@ -432,6 +439,26 @@ async def list_points(
         for row in result.all()
     ]
     return IncidentPointsResponse(points=points, total=total, capped=total > MAX_POINTS)
+
+
+async def _mno_source_map(session: AsyncSession, mno_ids) -> dict:
+    """{mno_id: source} для непустых id — фронт выбирает раздел карточки МНО
+    (fgis → /mno, volunteer → /mno-new). Один запрос на всю страницу."""
+    ids = {mid for mid in mno_ids if mid}
+    if not ids:
+        return {}
+    result = await session.execute(
+        select(Mno.id, Mno.source).where(Mno.id.in_(ids))
+    )
+    return {mid: src for mid, src in result.all()}
+
+
+async def get_mno_source(session: AsyncSession, mno_id) -> str | None:
+    """Источник МНО ('fgis'|'volunteer') по id; None — не привязано/удалено."""
+    if not mno_id:
+        return None
+    mno = await session.get(Mno, mno_id)
+    return mno.source if mno else None
 
 
 async def get_incident(session: AsyncSession, incident_id: UUID) -> Incident:

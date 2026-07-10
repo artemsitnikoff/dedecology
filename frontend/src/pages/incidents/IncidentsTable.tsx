@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { STATUS, SOURCE } from '@/lib/status';
 import { formatDate, formatTime, fullAddr } from '@/lib/format';
 import { thumbUrl } from '@/lib/photo';
+import { mnoCardPath } from '@/lib/mnoLink';
 import type { IncidentListItem } from '@/api/aliases';
 import type { SortKey, SortOrder } from '@/api/hooks/useIncidents';
 
@@ -135,7 +136,7 @@ const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, o
         {d.mno_id ? (
           <Link
             className="de-inc-mno-link"
-            to={`/mno?open=${d.mno_id}`}
+            to={mnoCardPath(d.mno_id, d.mno_source)}
             title="Открыть карточку МНО"
             onClick={(e) => e.stopPropagation()}
           >

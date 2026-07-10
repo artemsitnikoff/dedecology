@@ -419,6 +419,38 @@ async def test_detail_carries_mno_id(client):
 
 
 @pytest.mark.asyncio
+async def test_detail_carries_mno_source(client):
+    """Карточка отдаёт mno_source связанного МНО — фронт ведёт волонтёрское МНО в /mno-new."""
+    detail = _detail(mno_id=uuid4(), mno_reg="63-04-001162")
+    with patch(
+        "app.api.v1.incidents.incident_service.get_incident",
+        new=AsyncMock(return_value=detail),
+    ), patch(
+        "app.api.v1.incidents.incident_service.get_mno_source",
+        new=AsyncMock(return_value="volunteer"),
+    ):
+        resp = await client.get(f"/api/v1/incidents/{detail.id}")
+    assert resp.status_code == 200
+    assert resp.json()["mno_source"] == "volunteer"
+
+
+@pytest.mark.asyncio
+async def test_get_mno_source_resolves_and_handles_missing():
+    """get_mno_source: None для пустого id/удалённого МНО, иначе Mno.source."""
+    session = MagicMock()
+    # Пустой id → без обращения к БД.
+    assert await incident_service.get_mno_source(session, None) is None
+    # Нет такого МНО → None.
+    session.get = AsyncMock(return_value=None)
+    assert await incident_service.get_mno_source(session, uuid4()) is None
+    # Есть МНО → его source.
+    mno = MagicMock()
+    mno.source = "volunteer"
+    session.get = AsyncMock(return_value=mno)
+    assert await incident_service.get_mno_source(session, uuid4()) == "volunteer"
+
+
+@pytest.mark.asyncio
 async def test_funnel_forwards_region(client):
     """GET /incidents/funnel?region=... пробрасывает region (влияет на счётчики)."""
     counts = FunnelCounts(all=2, new=1, found=1, none=0, exported=0)
