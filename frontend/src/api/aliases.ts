@@ -302,17 +302,20 @@ export interface MnoListItem {
   /** Кол-во обращений по МНО (сидовое/хранимое значение). */
   incidents: number;
   /** ISO-момент создания записи МНО (= created_at на бэке); имя — под мобильное приложение,
-   * показывается как «дата создания» в «Новых МНО». */
+   * показывается как «дата поступления» в «Новых МНО». */
   received_at: string | null;
-}
-
-/** Деталь МНО (GET /mno/{id}) — поля списка + (для волонтёрских МНО) комментарий и фото. */
-export interface MnoDetail extends MnoListItem {
   /** Комментарий волонтёра; null/пусто — у ФГИС/ручных МНО. */
   comment: string | null;
   /** URL фото волонтёрского МНО (`/api/v1/intake/mno-photo/<uuid>/<n>.jpg`); пусто — фото нет. */
   photo_urls: string[];
+  /** Логин (email) волонтёра-автора; null — у ФГИС/ручных МНО. */
+  volunteer_login: string | null;
+  /** Контакт (телефон) волонтёра-автора; null — не указан / у ФГИС-МНО. */
+  volunteer_contact: string | null;
 }
+
+/** Деталь МНО (GET /mno/{id}) — те же поля (волонтёрские comment/photo/логин — в списке тоже). */
+export type MnoDetail = MnoListItem;
 
 /** Лёгкая точка МНО для карты (GET /mno/points) — только id + координаты + название. */
 export interface MnoPoint {

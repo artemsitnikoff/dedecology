@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { Toast, useToast } from '@/components/ui/Toast';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatTime } from '@/lib/format';
 import { thumbUrl } from '@/lib/photo';
 import { useMno, useMnoDetail, useMnoPoints } from '@/api/hooks/mno';
 import type { MnoFilters, MnoSortKey, SortOrder } from '@/api/hooks/mno';
@@ -49,8 +49,21 @@ const HEADS: Head[] = [
   { key: 'incidents', label: 'Обращ.', cellClass: 'de-mno-c-incidents' },
   { key: 'sync', label: 'Синхрон.', cellClass: 'de-mno-c-sync', nosort: true },
 ];
-// Колонка «Создано» — только в разделе «Новые МНО» (вставляется перед «Синхрон.»).
-const CREATED_HEAD: Head = { key: 'created', label: 'Создано', cellClass: 'de-mno-c-created', nosort: true };
+// Заголовки раздела «Новые МНО» (по ТЗ): поступление · адрес · фото×6 · логин · контакт · комментарий.
+// Все без серверной сортировки (nosort) — список идёт свежими первыми по умолчанию.
+const VOL_HEADS: Head[] = [
+  { key: 'created', label: 'Дата и время поступления', cellClass: 'de-mno-c-vreceived', nosort: true },
+  { key: 'address', label: 'Адрес МНО', cellClass: 'de-mno-c-vaddress', nosort: true },
+  ...Array.from({ length: 6 }, (_, i) => ({
+    key: `photo${i}` as HeadKey,
+    label: `Фото ${i + 1}`,
+    cellClass: 'de-mno-c-vphoto',
+    nosort: true,
+  })),
+  { key: 'vlogin' as HeadKey, label: 'Логин волонтёра', cellClass: 'de-mno-c-vlogin', nosort: true },
+  { key: 'vcontact' as HeadKey, label: 'Контакт волонтёра', cellClass: 'de-mno-c-vcontact', nosort: true },
+  { key: 'vcomment' as HeadKey, label: 'Комментарий', cellClass: 'de-mno-c-vcomment', nosort: true },
+];
 
 function CheckMark() {
   return (
@@ -97,21 +110,74 @@ const MnoRow = memo(function MnoRow({
   onOpen,
   onIncidents,
 }: RowProps) {
+  const check = (
+    <div
+      className="de-mno-cell de-mno-check-col"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle(m.id);
+      }}
+    >
+      <div className={`de-mno-check ${selected ? 'checked' : ''}`}>{selected && <CheckMark />}</div>
+    </div>
+  );
+
+  // Раздел «Новые МНО»: колонки по ТЗ — поступление · адрес · фото×6 · логин · контакт · комментарий.
+  if (volunteerView) {
+    return (
+      <div
+        className={`de-mno-row ${selected ? 'selected' : active ? 'active' : ''}`}
+        onClick={() => onOpen(m.id)}
+      >
+        {check}
+        <div className="de-mno-cell de-mno-c-vreceived">
+          <span className="de-mno-vdate">{formatDate(m.received_at) || '—'}</span>
+          <span className="de-mno-vtime">{formatTime(m.received_at)}</span>
+        </div>
+        <div className="de-mno-cell de-mno-c-vaddress" title={m.address}>
+          {m.address || '—'}
+        </div>
+        {Array.from({ length: 6 }).map((_, i) => {
+          const url = m.photo_urls?.[i];
+          return (
+            <div key={i} className="de-mno-cell de-mno-c-vphoto">
+              {url ? (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="de-mno-vphoto-link"
+                  title={`Фото ${i + 1}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <img className="de-mno-vphoto-thumb" src={thumbUrl(url)} alt={`Фото ${i + 1}`} loading="lazy" />
+                </a>
+              ) : (
+                <span className="de-mno-vphoto-empty">—</span>
+              )}
+            </div>
+          );
+        })}
+        <div className="de-mno-cell de-mno-c-vlogin" title={m.volunteer_login || ''}>
+          {m.volunteer_login || '—'}
+        </div>
+        <div className="de-mno-cell de-mno-c-vcontact" title={m.volunteer_contact || ''}>
+          {m.volunteer_contact || '—'}
+        </div>
+        <div className="de-mno-cell de-mno-c-vcomment" title={m.comment || ''}>
+          {m.comment || '—'}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`de-mno-row ${selected ? 'selected' : active ? 'active' : ''}`}
       onClick={() => onOpen(m.id)}
     >
-      <div
-        className="de-mno-cell de-mno-check-col"
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle(m.id);
-        }}
-      >
-        <div className={`de-mno-check ${selected ? 'checked' : ''}`}>{selected && <CheckMark />}</div>
-      </div>
-      {!volunteerView && <div className="de-mno-cell de-mno-c-reg">{m.reg}</div>}
+      {check}
+      <div className="de-mno-cell de-mno-c-reg">{m.reg}</div>
       <div className="de-mno-cell de-mno-c-name">{m.name}</div>
       <div className="de-mno-cell de-mno-c-region" title={m.region_name}>
         {m.region_name}
@@ -140,9 +206,6 @@ const MnoRow = memo(function MnoRow({
           <span className="de-mno-inc-zero">0</span>
         )}
       </div>
-      {volunteerView && (
-        <div className="de-mno-cell de-mno-c-created">{formatDate(m.received_at) || '—'}</div>
-      )}
       <div className="de-mno-cell de-mno-c-sync">
         {m.source === 'volunteer' ? (
           // МНО добавлено волонтёром на форме — помечаем, чтобы эколог проверил (source из контракта).
@@ -504,7 +567,7 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
           ) : listQuery.isError ? (
             <div className="de-mno-state error">Не удалось загрузить реестр МНО.</div>
           ) : rows.length > 0 ? (
-            <div className="de-mno-table">
+            <div className={`de-mno-table ${isVolunteer ? 'volunteer' : ''}`}>
               <div className="de-mno-thead">
                 <div className="de-mno-check-col">
                   <div
@@ -514,14 +577,7 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
                     {allSelected && <CheckMark />}
                   </div>
                 </div>
-                {(isVolunteer
-                  ? (() => {
-                      // «Новые МНО»: без «Реестровый №» (у волонтёрских его нет), «Создано» перед «Синхрон.».
-                      const noReg = HEADS.filter((h) => h.key !== 'reg');
-                      return [...noReg.slice(0, -1), CREATED_HEAD, noReg[noReg.length - 1]];
-                    })()
-                  : HEADS
-                ).map((h) => {
+                {(isVolunteer ? VOL_HEADS : HEADS).map((h) => {
                   const on = !h.nosort && sortKey === h.key;
                   return (
                     <div

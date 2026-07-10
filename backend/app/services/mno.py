@@ -15,7 +15,7 @@ from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import NotFoundError, ValidationError
-from ..models import Incident, Mno, Region
+from ..models import Incident, Mno, Region, Volunteer
 from ..schemas.base import Paginated
 from ..schemas.mno import (
     MnoDetail,
@@ -155,10 +155,17 @@ async def _incident_counts(session: AsyncSession, mno_ids: list) -> dict:
 
 
 def _to_list_item(
-    m: Mno, region_names: dict[str, str], incidents: int | None = None
+    m: Mno,
+    region_names: dict[str, str],
+    incidents: int | None = None,
+    volunteers: dict | None = None,
 ) -> MnoListItem:
     """Строка/карточка МНО. incidents=None → статичное поле модели (create/sync);
-    заданный incidents ПЕРЕКРЫВАЕТ его живым COUNT (списки/деталь на чтение)."""
+    заданный incidents ПЕРЕКРЫВАЕТ его живым COUNT (списки/деталь на чтение).
+
+    volunteers — {volunteer_id: Volunteer} для резолва логина/контакта автора (раздел
+    «Новые МНО»); None/нет ключа → volunteer_login/contact = None."""
+    vol = volunteers.get(m.volunteer_id) if volunteers and m.volunteer_id else None
     return MnoListItem(
         id=m.id,
         reg=m.reg,
@@ -175,7 +182,21 @@ def _to_list_item(
         incidents=m.incidents if incidents is None else incidents,
         # received_at = момент создания (Mno.created_at); имя поля — под мобильное приложение.
         received_at=m.created_at,
+        comment=m.comment,
+        photo_urls=m.photo_urls or [],
+        volunteer_login=vol.email if vol else None,
+        volunteer_contact=vol.phone if vol else None,
     )
+
+
+async def _volunteers_map(session: AsyncSession, ids) -> dict:
+    """{volunteer_id: Volunteer} по непустым id — логин/контакт авторов волонтёрских МНО.
+    Один запрос на страницу списка (у ФГИС/ручных МНО volunteer_id=NULL → в карту не идут)."""
+    uniq = {i for i in ids if i}
+    if not uniq:
+        return {}
+    result = await session.execute(select(Volunteer).where(Volunteer.id.in_(uniq)))
+    return {v.id: v for v in result.scalars().all()}
 
 
 async def _count(
@@ -301,7 +322,8 @@ async def list_mno(
     )
     region_names = await _region_names(session)
     counts = await _incident_counts(session, [m.id for m in rows])
-    items = [_to_list_item(m, region_names, counts.get(m.id, 0)) for m in rows]
+    volunteers = await _volunteers_map(session, [m.volunteer_id for m in rows])
+    items = [_to_list_item(m, region_names, counts.get(m.id, 0), volunteers) for m in rows]
     pages = math.ceil(total / page_size) if total > 0 else 0
     return Paginated[MnoListItem](
         items=items, total=total, page=page, page_size=page_size, pages=pages
@@ -340,12 +362,9 @@ async def list_by_volunteer(
 
     region_names = await _region_names(session)
     counts = await _incident_counts(session, [m.id for m in rows])
+    volunteers = await _volunteers_map(session, [m.volunteer_id for m in rows])
     items = [
-        MnoDetail(
-            **_to_list_item(m, region_names, counts.get(m.id, 0)).model_dump(),
-            comment=m.comment,
-            photo_urls=(m.photo_urls or []),
-        )
+        MnoDetail(**_to_list_item(m, region_names, counts.get(m.id, 0), volunteers).model_dump())
         for m in rows
     ]
     pages = math.ceil(total / page_size) if total > 0 else 0
@@ -487,11 +506,10 @@ async def get_mno(session: AsyncSession, mno_id: uuid.UUID) -> MnoDetail:
     mno = await _get(session, mno_id)
     region_names = await _region_names(session)
     counts = await _incident_counts(session, [mno.id])
-    item = _to_list_item(mno, region_names, counts.get(mno.id, 0))
-    # comment/photo_urls есть только у волонтёрских МНО; у ФГИС/ручных — NULL/[].
-    return MnoDetail(
-        **item.model_dump(), comment=mno.comment, photo_urls=mno.photo_urls or []
-    )
+    volunteers = await _volunteers_map(session, [mno.volunteer_id])
+    # comment/photo_urls/volunteer_* есть только у волонтёрских МНО (у ФГИС/ручных — пусто).
+    item = _to_list_item(mno, region_names, counts.get(mno.id, 0), volunteers)
+    return MnoDetail(**item.model_dump())
 
 
 async def create_mno(
@@ -630,11 +648,9 @@ async def create_mno_from_volunteer(
         actor_type="system",
     )
     region_names = await _region_names(session)
+    # comment/photo_urls/volunteer_* попадают в item из _to_list_item (у волонтёрского МНО).
     item = _to_list_item(mno, region_names)
-    # comment/photo_urls есть только у волонтёрских МНО — отдаём их в карточке.
-    return MnoDetail(
-        **item.model_dump(), comment=mno.comment, photo_urls=(mno.photo_urls or [])
-    )
+    return MnoDetail(**item.model_dump())
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

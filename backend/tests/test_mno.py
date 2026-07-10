@@ -20,7 +20,7 @@ from app.schemas.mno import (
     MnoVolunteerCreate,
 )
 from app.services import mno as mno_service
-from app.services.mno import _filters
+from app.services.mno import _filters, _to_list_item
 
 
 def _item(**kw) -> MnoListItem:
@@ -1004,3 +1004,60 @@ async def test_mno_list_by_volunteer_empty_skips_counts():
     assert page.total == 0
     assert page.items == []
     assert session.execute.await_count == 3
+
+
+def _mock_mno(**kw):
+    """MagicMock площадки МНО с полями, которые читает _to_list_item (name — служебный у Mock)."""
+    base = dict(
+        id=uuid4(),
+        reg="",
+        region_code="63",
+        city="Кинель",
+        address="ул. Ленина, 1",
+        coords="53.2, 50.6",
+        source="volunteer",
+        fgis_id=None,
+        synced=False,
+        sync_date=None,
+        incidents=0,
+        created_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        comment=None,
+        photo_urls=[],
+        volunteer_id=None,
+    )
+    base.update(kw)
+    m = MagicMock(**base)
+    m.name = kw.get("name", "Площадка A")
+    return m
+
+
+def test_to_list_item_populates_volunteer_fields():
+    """Волонтёрское МНО: comment/photo_urls из модели + логин/контакт из карты волонтёров."""
+    vid = uuid4()
+    m = _mock_mno(
+        volunteer_id=vid,
+        comment="Свалка у забора",
+        photo_urls=["/api/v1/intake/mno-photo/x/0.jpg", "/api/v1/intake/mno-photo/x/1.jpg"],
+    )
+    vol = MagicMock(email="volunteer@list.ru", phone="+79990000000")
+    item = _to_list_item(m, {"63": "Самарская область"}, 3, {vid: vol})
+    assert item.region_name == "Самарская область"
+    assert item.incidents == 3  # живой COUNT перекрывает статичное поле
+    assert item.received_at == m.created_at
+    assert item.comment == "Свалка у забора"
+    assert item.photo_urls == [
+        "/api/v1/intake/mno-photo/x/0.jpg",
+        "/api/v1/intake/mno-photo/x/1.jpg",
+    ]
+    assert item.volunteer_login == "volunteer@list.ru"
+    assert item.volunteer_contact == "+79990000000"
+
+
+def test_to_list_item_fgis_leaves_volunteer_fields_empty():
+    """ФГИС/ручное МНО (volunteer_id=None, нет карты): волонтёрские поля пусты."""
+    m = _mock_mno(source="fgis", reg="63-04-001162", volunteer_id=None, comment=None, photo_urls=[])
+    item = _to_list_item(m, {"63": "Самарская область"}, 0, None)
+    assert item.volunteer_login is None
+    assert item.volunteer_contact is None
+    assert item.comment is None
+    assert item.photo_urls == []

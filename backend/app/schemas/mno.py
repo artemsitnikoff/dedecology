@@ -29,19 +29,20 @@ class MnoListItem(ORMBase):
     incidents: int
     # Момент создания записи МНО (фиксируется на бэке при вставке = Mno.created_at).
     # Отдаётся как `received_at` — мобильное приложение читает именно это имя; показывается
-    # как «дата создания» в разделе «Новые МНО». Optional — старые ответы.
+    # как «дата поступления» в разделе «Новые МНО». Optional — старые ответы.
     received_at: Optional[datetime] = None
+    # Данные волонтёрского МНО (source='volunteer') — показываются в разделе «Новые МНО».
+    # У ФГИС/ручных МНО: comment=None, photo_urls=[], volunteer_* = None.
+    comment: Optional[str] = None
+    photo_urls: list[str] = []
+    # Логин (email) и контакт (телефон) волонтёра-автора — резолвятся по Mno.volunteer_id.
+    volunteer_login: Optional[str] = None
+    volunteer_contact: Optional[str] = None
 
 
 class MnoDetail(MnoListItem):
-    """Карточка МНО: поля списка + комментарий и фото (только у волонтёрских МНО).
-
-    comment/photo_urls есть лишь у МНО, добавленных волонтёром на публичной форме
-    (POST /intake/mno). У синхронизированных из ФГИС / ручных МНО — comment=None,
-    photo_urls=[] (список реестра остаётся лёгким — MnoListItem их не несёт).
-    """
-    comment: Optional[str] = None
-    photo_urls: list[str] = []
+    """Карточка МНО. Поля-волонтёрские (comment/photo_urls/volunteer_*) унаследованы от
+    MnoListItem — у ФГИС/ручных МНО они пустые."""
 
 
 class MnoCreate(BaseModel):

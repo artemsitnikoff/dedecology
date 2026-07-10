@@ -543,6 +543,94 @@
   font-size: var(--fs-12);
   color: var(--fg-2);
 }
+
+/* ============================================================
+   Раздел «Новые МНО» — свой набор колонок (ТЗ): поступление · адрес ·
+   фото×6 · логин · контакт · комментарий. Ширины совпадают в шапке и
+   строках (одинаковые классы), поэтому не разъезжаются.
+   min-width таблицы = сумма fixed-колонок + min тянущегося «Адреса».
+   ============================================================ */
+.de-mno-table.volunteer {
+  min-width: 1360px;
+}
+.de-mno-c-vreceived {
+  width: 150px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.de-mno-vdate {
+  font-size: var(--fs-12);
+  color: var(--fg-1);
+  white-space: nowrap;
+}
+.de-mno-vtime {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+.de-mno-c-vaddress {
+  flex: 1;
+  min-width: 220px;
+  font-size: var(--fs-13);
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Фото — 6 отдельных колонок с миниатюрой (клик → полное фото в новой вкладке). */
+.de-mno-c-vphoto {
+  width: 56px;
+  justify-content: center;
+}
+.de-mno-vphoto-link {
+  display: inline-flex;
+  line-height: 0;
+}
+.de-mno-vphoto-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-panel-2);
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+.de-mno-vphoto-link:hover .de-mno-vphoto-thumb {
+  filter: brightness(1.06);
+}
+.de-mno-vphoto-empty {
+  color: var(--fg-3);
+  font-size: var(--fs-13);
+}
+.de-mno-c-vlogin {
+  width: 190px;
+  font-size: var(--fs-12);
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.de-mno-c-vcontact {
+  width: 150px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.de-mno-c-vcomment {
+  width: 260px;
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .de-mno-sync-date {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
