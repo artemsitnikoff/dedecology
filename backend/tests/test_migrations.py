@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0025():
-    """Цепочка ревизий консистентна: ровно один head, и это 0025 (0025→0024→…)."""
+def test_migration_chain_single_head_is_0026():
+    """Цепочка ревизий консистентна: ровно один head, и это 0026 (0026→0025→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0025"}
+    assert heads == {"0026"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -341,3 +341,39 @@ def test_0025_downgrade_drops_incident_subtype(monkeypatch):
     m.downgrade()
 
     fake_op.drop_column.assert_called_once_with("incidents", "incident_subtype")
+
+
+def test_0026_revision_identifiers():
+    m = _load("0026_backfill_no_access_subtype.py")
+    assert m.revision == "0026"
+    assert m.down_revision == "0025"
+
+
+def test_0026_upgrade_backfills_other_reason(monkeypatch):
+    """upgrade(): UPDATE строк no_access с пустым подтипом → 'other_reason'."""
+    m = _load("0026_backfill_no_access_subtype.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    fake_op.execute.assert_called_once()
+    sql = fake_op.execute.call_args.args[0]
+    assert "UPDATE incidents" in sql
+    assert "incident_subtype = 'other_reason'" in sql
+    assert "incident_type = 'no_access'" in sql
+    assert "incident_subtype IS NULL OR incident_subtype = ''" in sql
+
+
+def test_0026_downgrade_reverts_backfill(monkeypatch):
+    """downgrade(): те же строки обратно в NULL."""
+    m = _load("0026_backfill_no_access_subtype.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    fake_op.execute.assert_called_once()
+    sql = fake_op.execute.call_args.args[0]
+    assert "SET incident_subtype = NULL" in sql
+    assert "incident_type = 'no_access'" in sql
