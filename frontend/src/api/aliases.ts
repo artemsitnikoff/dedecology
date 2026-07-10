@@ -65,6 +65,23 @@ export interface IncidentTypeUpdate {
   sort_order?: number;
 }
 
+/**
+ * Запись справочника «Стоп-лист почтовых доменов» (GET /blocked-domains, только admin).
+ * Регистрация волонтёра с адресом на таком домене запрещается (иностранные бесплатные
+ * почты — gmail.com, icloud.com и т.п.). domain хранится в нижнем регистре.
+ */
+export interface BlockedDomainItem {
+  id: string;
+  /** Домен почты в нижнем регистре («gmail.com»). */
+  domain: string;
+  created_at: string;
+}
+
+/** Тело добавления домена в стоп-лист (POST /blocked-domains). */
+export interface BlockedDomainCreate {
+  domain: string;
+}
+
 /** Инцидент (детальное представление, GET /incidents/{id} — все поля, включая bins). */
 export interface Incident {
   id: string;

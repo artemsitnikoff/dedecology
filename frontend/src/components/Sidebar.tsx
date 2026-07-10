@@ -50,6 +50,7 @@ export function Sidebar() {
     if (path.startsWith('/mno')) return 'mno';
     if (path.startsWith('/regions')) return 'regions';
     if (path.startsWith('/incident-types')) return 'incident-types';
+    if (path.startsWith('/blocked-domains')) return 'blocked-domains';
     if (path.startsWith('/volunteers')) return 'volunteers';
     if (path.startsWith('/integration')) return 'integration';
     if (path.startsWith('/settings')) return 'settings';
@@ -109,6 +110,10 @@ export function Sidebar() {
 
         <div className="nav-group-label">Справочники</div>
         {refNav.map(renderNav)}
+
+        {/* Стоп-лист почтовых доменов — только админ (раздел и API admin-only) */}
+        {user?.role === 'admin' &&
+          renderNav({ id: 'blocked-domains', label: 'Стоп-лист доменов', icon: 'shield' })}
 
         {/* Интеграция ФГИС — только супер-админ */}
         {user?.is_superadmin &&

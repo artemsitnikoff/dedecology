@@ -29,6 +29,11 @@ const IncidentTypesPage = lazy(() =>
 const IntegrationPage = lazy(() =>
   import('@/pages/integration/IntegrationPage').then((m) => ({ default: m.IntegrationPage }))
 );
+const BlockedDomainsPage = lazy(() =>
+  import('@/pages/blocked-domains/BlockedDomainsPage').then((m) => ({
+    default: m.BlockedDomainsPage,
+  }))
+);
 const VolunteersPage = lazy(() =>
   import('@/pages/volunteers/VolunteersPage').then((m) => ({ default: m.VolunteersPage }))
 );
@@ -90,6 +95,14 @@ function RequireSuperadmin({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const user = useAuthStore((s) => s.user);
+  if (user?.role !== 'admin') {
+    return <Navigate to="/incidents" replace />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -117,6 +130,14 @@ export default function App() {
         <Route path="mno-new" element={<MnoPage sourceFilter="volunteer" />} />
         <Route path="regions" element={<RegionsPage />} />
         <Route path="incident-types" element={<IncidentTypesPage />} />
+        <Route
+          path="blocked-domains"
+          element={
+            <RequireAdmin>
+              <BlockedDomainsPage />
+            </RequireAdmin>
+          }
+        />
         <Route path="volunteers" element={<VolunteersPage />} />
         <Route
           path="integration"

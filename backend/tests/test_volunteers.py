@@ -120,15 +120,22 @@ async def test_register_returns_code_when_email_not_sent(client):
 
 @pytest.mark.asyncio
 async def test_register_password_mismatch_400(client):
-    """Пароль ≠ повтор → 400 PASSWORDS_MISMATCH (реальный сервис, до обращения к БД)."""
-    resp = await client.post(
-        "/api/v1/volunteer/register",
-        json={
-            "email": "vol@example.com",
-            "password": "secret123",
-            "repeat_password": "secret999",
-        },
-    )
+    """Пароль ≠ повтор → 400 PASSWORDS_MISMATCH (реальный сервис, до обращения к БД).
+
+    Домен-стоп-лист замокан (не блокирует) — проверяется приоритет ветки паролей.
+    """
+    with patch(
+        "app.services.blocked_domain.is_email_blocked",
+        new=AsyncMock(return_value=False),
+    ):
+        resp = await client.post(
+            "/api/v1/volunteer/register",
+            json={
+                "email": "vol@example.com",
+                "password": "secret123",
+                "repeat_password": "secret999",
+            },
+        )
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "PASSWORDS_MISMATCH"
 
@@ -693,7 +700,11 @@ async def test_service_register_hashes_password_and_sets_flags():
     data = VolunteerRegister(
         email="vol@example.com", password="secret123", repeat_password="secret123"
     )
-    vol = await vol_service.register(session, data)
+    with patch(
+        "app.services.blocked_domain.is_email_blocked",
+        new=AsyncMock(return_value=False),
+    ):
+        vol = await vol_service.register(session, data)
     assert vol.email_verified is False
     assert vol.is_active is True
     assert vol.phone is None
@@ -708,11 +719,14 @@ async def test_service_register_password_mismatch():
     data = VolunteerRegister(
         email="vol@example.com", password="secret123", repeat_password="secret999"
     )
-    with pytest.raises(AppError) as exc:
+    with patch(
+        "app.services.blocked_domain.is_email_blocked",
+        new=AsyncMock(return_value=False),
+    ), pytest.raises(AppError) as exc:
         await vol_service.register(session, data)
     assert exc.value.code == "PASSWORDS_MISMATCH"
     assert exc.value.status_code == 400
-    # До проверки дубля дело не дошло — email в БД не запрашивали.
+    # До проверки дубля дело не дошло — email в БД не запрашивали (домен-стоп-лист замокан).
     session.execute.assert_not_called()
 
 
@@ -725,7 +739,10 @@ async def test_service_register_duplicate_conflict():
     data = VolunteerRegister(
         email="vol@example.com", password="secret123", repeat_password="secret123"
     )
-    with pytest.raises(ConflictError):
+    with patch(
+        "app.services.blocked_domain.is_email_blocked",
+        new=AsyncMock(return_value=False),
+    ), pytest.raises(ConflictError):
         await vol_service.register(session, data)
 
 

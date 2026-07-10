@@ -5,6 +5,7 @@ from .audit import AuditLog
 from .region import Region
 from .mno import Mno
 from .incident_type import IncidentType
+from .blocked_domain import BlockedEmailDomain
 from .volunteer import Volunteer
 from .smtp import SmtpSettings
 from .report import Report
@@ -20,6 +21,7 @@ __all__ = [
     "Region",
     "Mno",
     "IncidentType",
+    "BlockedEmailDomain",
     "Volunteer",
     "SmtpSettings",
     "Report",

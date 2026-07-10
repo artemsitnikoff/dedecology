@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from ...core.permissions import require_admin, require_superadmin
 from .auth import router as auth_router
+from .blocked_domains import router as blocked_domains_router
 from .incident_types import router as incident_types_router
 from .incidents import router as incidents_router
 from .intake import router as intake_router
@@ -34,6 +35,9 @@ api_router.include_router(federal_districts_router, prefix="/federal-districts")
 # Справочник «Типы инцидентов»: GET — авторизованным (гвард get_current_user на
 # роуте), мутации — под require_admin (Depends на каждом мутирующем эндпоинте).
 api_router.include_router(incident_types_router, prefix="/incident-types")
+# Справочник «Стоп-лист почтовых доменов»: все роуты (GET/POST/DELETE) — только admin
+# (Depends(require_admin) на каждом эндпоинте). Блокирует регистрацию волонтёра по домену.
+api_router.include_router(blocked_domains_router, prefix="/blocked-domains")
 # Публичный вебхук приёма Яндекс-Формы: БЕЗ auth-dependency — самозащита токеном.
 api_router.include_router(intake_router, prefix="/intake")
 api_router.include_router(

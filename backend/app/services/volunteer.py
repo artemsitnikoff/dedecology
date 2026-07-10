@@ -23,6 +23,7 @@ from ..core.errors import (
     AppError,
     BlockedError,
     ConflictError,
+    EmailDomainBlockedError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     InvalidTokenError,
@@ -36,6 +37,7 @@ from ..core.security import (
 )
 from ..models import Volunteer
 from ..schemas.volunteer import VolunteerRegister
+from . import blocked_domain as blocked_domain_service
 from . import smtp as smtp_service
 from .audit import audit
 from .smtp_templates import render_simple_email
@@ -154,6 +156,9 @@ async def register(session: AsyncSession, data: VolunteerRegister) -> Volunteer:
     Пароль ≠ повтор → 400 PASSWORDS_MISMATCH; дубль email → 409. После flush() id
     проставлен БД (gen_random_uuid); код подтверждения выдаёт/шлёт роутер (send_email_code).
     """
+    if await blocked_domain_service.is_email_blocked(session, data.email):
+        domain = data.email.rsplit("@", 1)[-1].strip().lower()
+        raise EmailDomainBlockedError(domain)
     if data.password != data.repeat_password:
         raise AppError("PASSWORDS_MISMATCH", "Пароли не совпадают", 400)
     if await get_by_email(session, data.email) is not None:

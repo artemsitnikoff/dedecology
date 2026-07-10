@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0023():
-    """Цепочка ревизий консистентна: ровно один head, и это 0023 (0023→0022→…)."""
+def test_migration_chain_single_head_is_0024():
+    """Цепочка ревизий консистентна: ровно один head, и это 0024 (0024→0023→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0023"}
+    assert heads == {"0024"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -270,3 +270,42 @@ def test_0021_downgrade_drops_reports(monkeypatch):
     m.downgrade()
 
     fake_op.drop_table.assert_called_once_with("reports")
+
+
+def test_0024_revision_identifiers():
+    m = _load("0024_blocked_email_domains.py")
+    assert m.revision == "0024"
+    assert m.down_revision == "0023"
+
+
+def test_0024_upgrade_creates_blocked_email_domains_and_seeds(monkeypatch):
+    """upgrade(): create_table blocked_email_domains + bulk_insert сида (иностранные домены)."""
+    m = _load("0024_blocked_email_domains.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    fake_op.create_table.assert_called_once()
+    args = fake_op.create_table.call_args.args
+    assert args[0] == "blocked_email_domains"
+    col_names = {c.name for c in args[1:] if hasattr(c, "name")}
+    assert {"id", "domain", "created_at", "updated_at"} <= col_names
+    # Сид: иностранные бесплатные провайдеры, российские домены НЕ блокируем.
+    fake_op.bulk_insert.assert_called_once()
+    seeded = {row["domain"] for row in fake_op.bulk_insert.call_args.args[1]}
+    assert "gmail.com" in seeded
+    assert "proton.me" in seeded
+    assert "mail.ru" not in seeded
+    assert "yandex.ru" not in seeded
+
+
+def test_0024_downgrade_drops_blocked_email_domains(monkeypatch):
+    """downgrade(): drop_table blocked_email_domains."""
+    m = _load("0024_blocked_email_domains.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    fake_op.drop_table.assert_called_once_with("blocked_email_domains")

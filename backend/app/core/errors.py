@@ -124,6 +124,18 @@ class BlockedError(AppError):
         )
 
 
+class EmailDomainBlockedError(AppError):
+    """Регистрация волонтёра с почтового домена из стоп-листа запрещена (400)."""
+
+    def __init__(self, domain: str = ""):
+        msg = (
+            f"Регистрация с адресов @{domain} недоступна. Укажите другой адрес электронной почты."
+            if domain
+            else "Регистрация с этого почтового домена недоступна. Укажите другой адрес."
+        )
+        super().__init__(code="EMAIL_DOMAIN_BLOCKED", message=msg, status_code=400)
+
+
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
