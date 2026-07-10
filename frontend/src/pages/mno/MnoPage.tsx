@@ -52,7 +52,7 @@ const HEADS: Head[] = [
 // Заголовки раздела «Новые МНО» (по ТЗ): поступление · адрес · фото×6 · логин · контакт · комментарий.
 // Все без серверной сортировки (nosort) — список идёт свежими первыми по умолчанию.
 const VOL_HEADS: Head[] = [
-  { key: 'created', label: 'Дата и время поступления', cellClass: 'de-mno-c-vreceived', nosort: true },
+  { key: 'created', label: 'Дата и время', cellClass: 'de-mno-c-vreceived', nosort: true },
   { key: 'address', label: 'Адрес МНО', cellClass: 'de-mno-c-vaddress', nosort: true },
   ...Array.from({ length: 6 }, (_, i) => ({
     key: `photo${i}` as HeadKey,
@@ -61,7 +61,7 @@ const VOL_HEADS: Head[] = [
     nosort: true,
   })),
   { key: 'vlogin' as HeadKey, label: 'Логин волонтёра', cellClass: 'de-mno-c-vlogin', nosort: true },
-  { key: 'vcontact' as HeadKey, label: 'Контакт волонтёра', cellClass: 'de-mno-c-vcontact', nosort: true },
+  { key: 'vcontact' as HeadKey, label: 'Телефон волонтёра', cellClass: 'de-mno-c-vcontact', nosort: true },
   { key: 'vcomment' as HeadKey, label: 'Комментарий', cellClass: 'de-mno-c-vcomment', nosort: true },
 ];
 
