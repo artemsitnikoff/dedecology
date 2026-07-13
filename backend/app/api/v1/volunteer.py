@@ -20,6 +20,7 @@ from ...core.security import create_volunteer_access_token
 from ...schemas.base import Paginated
 from ...schemas.incident import IncidentListItem
 from ...schemas.mno import MnoDetail
+from ...services import blocked_domain as blocked_domain_service
 from ...services import incident as incident_service
 from ...services import mno as mno_service
 from ...schemas.volunteer import (
@@ -55,6 +56,15 @@ from ...services.volunteer import (
 router = APIRouter()
 
 _TAG = "Волонтёры (мобильное приложение)"
+
+
+@router.get("/blocked-domains", response_model=list[str], tags=[_TAG])
+async def volunteer_blocked_domains(session: AsyncSession = Depends(get_db)):
+    """ПУБЛИЧНЫЙ (анонимный, без токена) стоп-лист почтовых доменов — для формы регистрации
+    в приложении: клиент проверяет домен ДО отправки. Возвращает только имена доменов
+    (без id/дат — админ-CRUD /blocked-domains остаётся под admin-гейтом)."""
+    domains = await blocked_domain_service.list_domains(session)
+    return [d.domain for d in domains]
 
 
 @router.post("/register", response_model=VolunteerRegisterResponse, status_code=201, tags=[_TAG])

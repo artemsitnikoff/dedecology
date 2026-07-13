@@ -194,6 +194,20 @@ async def test_list_blocked_domains(client):
 
 
 @pytest.mark.asyncio
+async def test_public_volunteer_blocked_domains(client):
+    """GET /volunteer/blocked-domains — публичный (без auth-зависимости) список ИМЁН доменов
+    для формы регистрации в приложении (без id/дат)."""
+    with patch(
+        "app.api.v1.volunteer.blocked_domain_service.list_domains",
+        new=AsyncMock(return_value=[_orm_domain("gmail.com"), _orm_domain("icloud.com")]),
+    ):
+        resp = await client.get("/api/v1/volunteer/blocked-domains")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == ["gmail.com", "icloud.com"]  # плоский список строк
+
+
+@pytest.mark.asyncio
 async def test_create_blocked_domain_201(client):
     """POST /blocked-domains → 201, домен передан в сервис."""
     from datetime import datetime, timezone
