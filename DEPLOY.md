@@ -251,42 +251,94 @@ docker run --rm -v dedecology_backend_storage:/data -v "$PWD":/out alpine \
 Развернуть у себя: восстановить дамп (`scripts/restore-db.sh`) и распаковать `storage_*.tgz` в
 volume/каталог, смонтированный в `/app/storage`.
 
-### 11.3 Вынос фото на S3 — вариант A: FUSE-монтирование (без правок кода, рекомендуется)
-Поскольку приложение файловое, самый простой способ «положить фото в S3» — **смонтировать S3-бакет как
-каталог** (s3fs-fuse или `rclone mount`) в путь хранилища. Код при этом не меняется: он читает/пишет
-обычные файлы, а под ними — объекты S3.
+### 11.3 Вынос фото на S3 — FUSE-монтирование через rclone (ВЫБРАННЫЙ путь, без правок кода)
+Поскольку приложение файловое, кладём фото в S3 **смонтировав S3-бакет как каталог** в путь хранилища —
+код не меняется, он пишет/читает обычные файлы, а под ними объекты S3. Используем **`rclone mount`**
+(выбран как более стабильный на запись, чем s3fs, — за счёт локального write-кэша `--vfs-cache-mode`).
 
-Переменные S3 читает СКРИПТ МОНТИРОВАНИЯ (не бэкенд) — они уже добавлены в `.env.example`
+Переменные S3 читает СКРИПТ/КОНФИГ МОНТИРОВАНИЯ (не бэкенд) — они в `.env.example`
 (`S3_BUCKET`, `S3_PREFIX`, `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`).
 
-Пример через s3fs на ХОСТЕ, затем bind-mount в контейнер:
+**Монтируем на S3 ТОЛЬКО фото** — каталоги `storage/incidents` и `storage/mno`. `reports/` и `logs/`
+оставляем на локальном volume (логи — дозапись в конец файла, а S3 её не поддерживает: каждая строка
+перезаливала бы весь объект).
+
+**Шаг 1. Установка + разрешение allow_other (на хосте, один раз):**
 ```bash
-# на хосте (один раз): установить s3fs, положить ключи
-apt-get install -y s3fs
-echo "$S3_ACCESS_KEY:$S3_SECRET_KEY" > /etc/passwd-s3fs && chmod 600 /etc/passwd-s3fs
-
-# смонтировать бакет/префикс в каталог хоста (укажите endpoint своего S3)
-mkdir -p /srv/ecopulse-storage
-s3fs "$S3_BUCKET:/$S3_PREFIX" /srv/ecopulse-storage \
-  -o url="$S3_ENDPOINT" -o use_path_request_style -o allow_other -o umask=0022
-# автозапуск — через /etc/fstab (s3fs) или systemd-unit
+apt-get install -y rclone fuse3
+# для --allow-other раскомментировать/добавить строку user_allow_other в /etc/fuse.conf
+grep -q '^user_allow_other' /etc/fuse.conf || echo user_allow_other >> /etc/fuse.conf
 ```
-В `docker-compose.prod.yml` заменить именованный volume на bind-mount этого каталога:
+
+**Шаг 2. Настроить remote `s3` (тип s3, ваш endpoint/ключи):**
+```bash
+rclone config create s3 s3 \
+  provider Other \
+  access_key_id "$S3_ACCESS_KEY" \
+  secret_access_key "$S3_SECRET_KEY" \
+  endpoint "$S3_ENDPOINT" \
+  region "$S3_REGION"
+# конфиг ляжет в ~/.config/rclone/rclone.conf; проверка:
+rclone lsd s3:$S3_BUCKET
+```
+
+**Шаг 3. Автозапуск монтирований через systemd** (переживают reboot). Создать два юнита
+`/etc/systemd/system/ecopulse-s3-incidents.service` и `…-mno.service` по образцу:
+```ini
+[Unit]
+Description=rclone mount ecopulse incidents -> S3
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStartPre=/bin/mkdir -p /srv/ecopulse/incidents
+ExecStart=/usr/bin/rclone mount s3:BUCKET/PREFIX/incidents /srv/ecopulse/incidents \
+  --vfs-cache-mode writes --allow-other --dir-perms 0777 --file-perms 0666 --umask 000
+ExecStop=/bin/fusermount -uz /srv/ecopulse/incidents
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+(во втором юните заменить `incidents` → `mno`; `BUCKET/PREFIX` — ваш бакет/префикс). Затем:
+```bash
+systemctl daemon-reload
+systemctl enable --now ecopulse-s3-incidents ecopulse-s3-mno
+mountpoint /srv/ecopulse/incidents && mountpoint /srv/ecopulse/mno   # оба смонтированы
+```
+
+**Шаг 4. Пробросить mount-каталоги в контейнеры.** В `docker-compose.prod.yml` у сервисов **`backend`
+И `worker`** (storage у них общий) ДОБАВИТЬ bind-mount поверх фото-подкаталогов — именованный volume
+`backend_storage` оставить (в нём `reports/` + `logs/`):
 ```yaml
-# было:  - backend_storage:/app/storage
-# стало: - /srv/ecopulse-storage:/app/storage
+volumes:
+  - backend_storage:/app/storage
+  - /srv/ecopulse/incidents:/app/storage/incidents
+  - /srv/ecopulse/mno:/app/storage/mno
 ```
-(нужно поправить у сервисов `backend` И `worker` — у них общий storage).
+Пересоздать: `docker compose -f docker-compose.prod.yml up -d --force-recreate backend worker`.
 
-**Важно / грабли FUSE-S3:**
-- **Логи** (`storage/logs/`) — аппенд-нагрузка, на S3-FUSE работает плохо (S3 не поддерживает дозапись).
-  Рекомендуется вынести на S3 ТОЛЬКО фото: смонтировать S3 в `storage/incidents` и `storage/mno`
-  (два mount-а), а `reports/` и `logs/` оставить на локальном volume. Либо принять, что логи будут
-  переписываться целиком (медленно) — тогда лучше настроить логирование в stdout/ротацию отдельно.
-- **Латентность/консистентность**: генерация выгрузки встраивает миниатюры (много мелких чтений) —
-  на S3-FUSE будет медленнее локального диска. Для больших выгрузок держите это в уме.
-- `rclone mount --vfs-cache-mode writes` (альтернатива s3fs) даёт локальный кэш и обычно стабильнее
-  для записи; endpoint/ключи — те же переменные.
+**Шаг 5. Проверка** — создать обращение с фото (через приложение/бота), затем:
+```bash
+rclone ls s3:$S3_BUCKET/$S3_PREFIX/incidents | head    # появились объекты в S3
+# и фото открывается в админке (URL /api/v1/intake/photo/…) → чтение с S3 тоже работает
+```
+
+**Грабли / на что заложиться:**
+- **Права/uid**: контейнер пишет от своего пользователя — потому в юните `--allow-other` +
+  `--dir-perms/--file-perms/--umask` (иначе контейнер не сможет писать в mount).
+- **Латентность**: генерация выгрузки читает много мелких миниатюр — на S3-FUSE медленнее локального
+  диска; write-кэш rclone (`--vfs-cache-mode writes`) сглаживает запись, но не сетевые чтения.
+- Приложение пишет файлы напрямую (`write_bytes`), без «temp-файл → атомарный rename», поэтому
+  несовместимости S3 с атомарным переименованием тут НЕТ.
+- Порядок старта: mount-юниты должны подниматься ДО контейнеров (docker обычно стартует позже; при
+  желании добавить в compose-сервисы зависимость через systemd или healthcheck на mountpoint).
+
+**Альтернатива s3fs** (если rclone недоступен): `s3fs "$S3_BUCKET:/$S3_PREFIX/incidents" /srv/ecopulse/incidents
+-o url="$S3_ENDPOINT" -o use_path_request_style -o allow_other -o umask=0022` (ключи в `/etc/passwd-s3fs`),
+автозапуск через `/etc/fstab`. Менее стабилен на запись, чем rclone.
 
 ### 11.4 Вариант B: нативный S3 в коде (на будущее, требует доработки)
 Переписать слой хранения на boto3/S3 SDK (upload при записи, отдача через presigned-URL вместо

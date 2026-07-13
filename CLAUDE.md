@@ -206,10 +206,12 @@ npm run dev            # дев-сервер :5173 (нужен бэк на VITE_
   (`/app/storage`, volume `backend_storage`): `incidents/<id>/`, `mno/<id>/` (отдаётся как
   `/intake/mno-photo/…`), `reports/`, `logs/`. Пишет файлы, отдаёт `FileResponse`, встраивает
   миниатюры в .xlsx с диска. **Поэтому S3-переменных в env/compose исходно нет — это не забытьё.**
-  Вынести фото на S3 БЕЗ правок кода — FUSE-монтирование бакета (s3fs/rclone) в путь storage:
-  `S3_*` в `.env.example` читает СКРИПТ МОНТИРОВАНИЯ, а не бэкенд (логи держать локально —
-  аппенд на S3-FUSE плох). Полная инструкция + перенос данных (дамп БД + tar volume `storage`) —
-  **DEPLOY.md §11**. Нативный S3-SDK (presigned-URL) — отдельная доработка (вариант B там же).
+  Вынести фото на S3 БЕЗ правок кода — FUSE-монтирование бакета в путь storage; **выбран `rclone
+  mount`** (`--vfs-cache-mode writes`, стабильнее s3fs на запись) — монтируют ТОЛЬКО фото
+  (`storage/incidents` + `storage/mno`), `reports/`+`logs/` локально (аппенд-логи на S3-FUSE плох).
+  `S3_*` в `.env.example` читает КОНФИГ МОНТИРОВАНИЯ, а не бэкенд. Полная инструкция (rclone config →
+  systemd-юниты → bind-mount в compose у backend+worker) + перенос данных (дамп БД + tar volume
+  `storage`) — **DEPLOY.md §11**. Нативный S3-SDK (presigned-URL) — отдельная доработка (вариант B там же).
 - **Замечание о среде разработки:** локального Docker/Postgres в ЭТОЙ машине нет — здесь только
   `pytest`/`tsc`/`build`/`grep`; сквозной прогон идёт на сервере (уже работает вживую).
 
