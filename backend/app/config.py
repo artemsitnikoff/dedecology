@@ -58,7 +58,9 @@ class Settings(BaseSettings):
     # в контейнере = /app/storage). Структура: {STORAGE_DIR}/incidents/{id}/{n}.ext
     STORAGE_DIR: str = "storage"
 
-    # --- claude CLI (мотивирующая цитата о природе на успешном приёме) ---
+    # --- claude CLI (AI-разбор адреса из свободного текста Макс-обращения) ---
+    # Цитаты о природе БОЛЬШЕ не через claude (берутся из БД, таблица quotes) — claude здесь
+    # только для ai_parse_incident (регион/город/улица/координаты из грязного текста).
     # Долгоживущий OAuth-токен из `claude setup-token`. Фолбэк, если нет CLAUDE_TOKEN_FILE.
     CLAUDE_CODE_OAUTH_TOKEN: str = ""
     # Путь к общему токен-файлу claude (JSON {access_token, ...}); читаем на каждый вызов,
@@ -72,16 +74,9 @@ class Settings(BaseSettings):
     # цитаты остаются на CLAUDE_QUOTE_MODEL.
     CLAUDE_PARSE_MODEL: str = "sonnet"
 
-    # --- LEGACY / больше не используется ---
-    # Письма приложения (код подтверждения, сброс пароля) идут через UI-SMTP
-    # (Настройки → Почта, таблица smtp_settings — редактируется из админки, шифрованный
-    # пароль). Эти SMTP_* env-поля кодом больше НЕ читаются; оставлены для совместимости
-    # .env, чтобы pydantic-settings не падал на существующих проде/окружениях.
-    SMTP_HOST: str = ""
-    SMTP_PORT: int = 0
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_FROM: str = ""
+    # Почта приложения (код подтверждения, сброс пароля) идёт через UI-SMTP (Настройки →
+    # Почта, таблица smtp_settings — редактируется из админки, шифр. пароль). Отдельных
+    # SMTP_* env-полей нет; остаточные SMTP_* в старых .env безвредны (model_config extra="ignore").
 
     # Базовый публичный URL приложения — из него собираются ссылки verify/reset
     # в письмах волонтёрам (APP_PUBLIC_URL + "/verify?token=..." и т.п.).
