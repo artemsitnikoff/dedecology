@@ -53,9 +53,6 @@ services:
         condition: service_started
     volumes:
       - backend_storage:/app/storage
-      # Общий токен claude (read-only) для генерации цитаты о природе. Папка с токеном на хосте —
-      # CLAUDE_TOKEN_DIR (по умолчанию /data симлинк). В .env задать CLAUDE_TOKEN_FILE=/app/claude-auth/<файл>.
-      - ${CLAUDE_TOKEN_DIR:-/data}:/app/claude-auth:ro
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/dedecolog
       - REDIS_URL=redis://redis:6379/0

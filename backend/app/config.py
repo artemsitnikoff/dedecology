@@ -61,11 +61,8 @@ class Settings(BaseSettings):
     # --- claude CLI (AI-разбор адреса из свободного текста Макс-обращения) ---
     # Цитаты о природе БОЛЬШЕ не через claude (берутся из БД, таблица quotes) — claude здесь
     # только для ai_parse_incident (регион/город/улица/координаты из грязного текста).
-    # Долгоживущий OAuth-токен из `claude setup-token`. Фолбэк, если нет CLAUDE_TOKEN_FILE.
+    # Долгоживущий OAuth-токен из `claude setup-token` — единственный способ авторизации CLI.
     CLAUDE_CODE_OAUTH_TOKEN: str = ""
-    # Путь к общему токен-файлу claude (JSON {access_token, ...}); читаем на каждый вызов,
-    # имеет приоритет над CLAUDE_CODE_OAUTH_TOKEN. Монтируется в контейнер.
-    CLAUDE_TOKEN_FILE: str = ""
     CLAUDE_CLI_PATH: str = "claude"
     CLAUDE_QUOTE_MODEL: str = "haiku"
     CLAUDE_QUOTE_TIMEOUT: int = 20

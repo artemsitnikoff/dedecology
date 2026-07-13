@@ -197,8 +197,9 @@ npm run dev            # дев-сервер :5173 (нужен бэк на VITE_
   вручную. ⚠️ `.github/workflows/*` пушится только токеном со scope `workflow`.
 - **Dev:** `cp .env.example .env && docker compose up --build` (фронт :8080, бек :8000, postgres :5432).
 - **Прод сейчас (актуальное):** ЖИВ на **`ecopulse.reo.ru`** (HTTPS, Caddy → :8888). claude CLI — токен
-  через `CLAUDE_CODE_OAUTH_TOKEN` в серверном `.env` (**`CLAUDE_TOKEN_FILE` ПУСТОЙ** — файловая шара из
-  ArkadyJarvis протухала 401); нужен и для цитат, и для AI-разбора (sonnet). DaData: Подсказки
+  через `CLAUDE_CODE_OAUTH_TOKEN` в серверном `.env` (**единственный способ авторизации**; токен-файл
+  `CLAUDE_TOKEN_FILE` + монтирование `/app/claude-auth` УДАЛЕНЫ — файловая шара протухала 401). claude
+  нужен ТОЛЬКО для AI-разбора адреса (sonnet); цитаты теперь из БД (таблица `quotes`). DaData: Подсказки
   (бесплатно) работают, Clean (платный) → 403, не подключён (геокод через Подсказки). maxbot — профиль
   `--profile maxbot`, уведомляет в Макс-группу (`MAX_GROUP_CHAT_ID`). Бэкап БД — `scripts/backup-db.sh` /
   `scripts/restore-db.sh` (см. DEPLOY.md §9).

@@ -45,8 +45,6 @@ services:
       # Bind-mount исходников для --reload в dev.
       - ./backend:/app
       - backend_storage:/app/storage
-      # Общий токен claude (read-only) для генерации цитаты; CLAUDE_TOKEN_DIR по умолчанию /data.
-      - ${CLAUDE_TOKEN_DIR:-/data}:/app/claude-auth:ro
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-dedecolog}:${POSTGRES_PASSWORD:-dedecolog}@db:5432/dedecolog
       - REDIS_URL=redis://redis:6379/0
