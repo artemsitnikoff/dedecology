@@ -786,6 +786,31 @@
 .de-inc-cell-source {
   width: 108px;
 }
+/* Данные волонтёра (source='app') — отдельные столбцы после «Источник». */
+.de-inc-cell-vlogin {
+  width: 190px;
+  font-size: var(--fs-12);
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.de-inc-cell-vcontact {
+  width: 150px;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.de-inc-cell-vcomment {
+  width: 240px;
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .de-inc-thumb {
   position: relative;

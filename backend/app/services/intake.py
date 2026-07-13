@@ -142,18 +142,40 @@ def _to_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _photo_wallclock(dt: datetime) -> datetime:
+    """Сохраняет МЕСТНОЕ настенное время волонтёра в поле photo_time.
+
+    Фронт рендерит photo_time UTC-геттерами (getUTCHours и т.п.), т.е. показывает
+    «настенные» компоненты хранимого timestamp БЕЗ сдвига в TZ браузера. Мобильное
+    приложение шлёт время съёмки как МЕСТНОЕ со смещением (напр. 19:30+04:00). Если
+    перевести его в UTC (astimezone), 19:30 станет 15:30 и админ увидит смещённое
+    время. Поэтому здесь смещение ОТБРАСЫВАЕТСЯ (replace tzinfo=UTC): для aware
+    datetime цифры времени сохраняются (19:30+04:00 → 19:30 UTC), для naive — просто
+    проставляется UTC. Так админ видит именно то местное время, что было у волонтёра.
+
+    ⚠️ Исторические app-инциденты уже сохранены со сдвигом (смещение не сохранялось) —
+    бэкфилла НЕТ, фикс действует только на будущие приёмы.
+    """
+    return dt.replace(tzinfo=timezone.utc)
+
+
 def _parse_photo_time(value) -> datetime | None:
-    """Best-effort разбор времени фотофиксации → tz-aware UTC. Иначе None."""
+    """Best-effort разбор времени фотофиксации → tz-aware (местное настенное). Иначе None.
+
+    Смещение волонтёрского времени НЕ конвертируется в UTC, а отбрасывается
+    (_photo_wallclock) — сохраняем именно те цифры времени, что были у волонтёра
+    (фронт рендерит их UTC-геттерами без сдвига). Подробнее — в _photo_wallclock.
+    """
     text_value = _clean_str(value)
     if not text_value:
         return None
     for fmt in _PHOTO_TIME_FORMATS:
         try:
-            return _to_utc(datetime.strptime(text_value, fmt))
+            return _photo_wallclock(datetime.strptime(text_value, fmt))
         except ValueError:
             continue
     try:
-        return _to_utc(datetime.fromisoformat(text_value))
+        return _photo_wallclock(datetime.fromisoformat(text_value))
     except ValueError:
         return None
 

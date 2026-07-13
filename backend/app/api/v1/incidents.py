@@ -260,9 +260,11 @@ async def get_incident(
     incident = await incident_service.get_incident(session, incident_id)
     detail = IncidentDetail.model_validate(incident)
     detail.mno_source = await incident_service.get_mno_source(session, incident.mno_id)
-    detail.volunteer_login = await incident_service.get_volunteer_login(
+    email, phone = await incident_service.get_volunteer_info(
         session, incident.volunteer_id
     )
+    detail.volunteer_login = email
+    detail.volunteer_contact = phone
     return detail
 
 
@@ -282,7 +284,9 @@ async def update_incident_status(
     await session.commit()
     detail = IncidentDetail.model_validate(incident)
     detail.mno_source = await incident_service.get_mno_source(session, incident.mno_id)
-    detail.volunteer_login = await incident_service.get_volunteer_login(
+    email, phone = await incident_service.get_volunteer_info(
         session, incident.volunteer_id
     )
+    detail.volunteer_login = email
+    detail.volunteer_contact = phone
     return detail

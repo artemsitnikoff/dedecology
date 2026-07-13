@@ -10,6 +10,7 @@ from .volunteer import Volunteer
 from .smtp import SmtpSettings
 from .report import Report
 from .quote import Quote
+from .error_report import ErrorReport
 
 __all__ = [
     "Base",
@@ -26,4 +27,5 @@ __all__ = [
     "SmtpSettings",
     "Report",
     "Quote",
+    "ErrorReport",
 ]

@@ -34,6 +34,9 @@ const BlockedDomainsPage = lazy(() =>
     default: m.BlockedDomainsPage,
   }))
 );
+const ErrorsPage = lazy(() =>
+  import('@/pages/errors/ErrorsPage').then((m) => ({ default: m.ErrorsPage }))
+);
 const VolunteersPage = lazy(() =>
   import('@/pages/volunteers/VolunteersPage').then((m) => ({ default: m.VolunteersPage }))
 );
@@ -138,6 +141,14 @@ export default function App() {
           element={
             <RequireAdmin>
               <BlockedDomainsPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="errors"
+          element={
+            <RequireAdmin>
+              <ErrorsPage />
             </RequireAdmin>
           }
         />

@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # в письмах волонтёрам (APP_PUBLIC_URL + "/verify?token=..." и т.п.).
     APP_PUBLIC_URL: str = "https://ecopulse.reo.ru"
 
+    # Адрес техподдержки ФГИС УТКО — получатель писем о технических ошибках
+    # мобильного приложения (POST /intake/error-report). Можно переопределить env.
+    SUPPORT_EMAIL: str = "ecopulse@reo.ru"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

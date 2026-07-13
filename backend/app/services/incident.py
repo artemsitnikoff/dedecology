@@ -160,13 +160,15 @@ async def list_incidents(
     )
     items, total = rows
     src_map = await _mno_source_map(session, [i.mno_id for i in items])
-    vol_map = await _volunteer_logins_map(session, [i.volunteer_id for i in items])
+    vol_map = await _volunteer_info_map(session, [i.volunteer_id for i in items])
     pages = math.ceil(total / page_size) if total > 0 else 0
 
     def _to_item(i: Incident) -> IncidentListItem:
         item = IncidentListItem.model_validate(i)
         item.mno_source = src_map.get(i.mno_id)
-        item.volunteer_login = vol_map.get(i.volunteer_id)
+        email, phone = vol_map.get(i.volunteer_id, (None, None))
+        item.volunteer_login = email
+        item.volunteer_contact = phone
         return item
 
     return Paginated[IncidentListItem](
@@ -477,16 +479,18 @@ async def get_mno_source(session: AsyncSession, mno_id) -> str | None:
     return mno.source if mno else None
 
 
-async def _volunteer_logins_map(session: AsyncSession, volunteer_ids) -> dict:
-    """{volunteer_id: email} для непустых id — логин волонтёра-автора в строке списка.
-    Один запрос на всю страницу (зеркалит _mno_source_map)."""
+async def _volunteer_info_map(session: AsyncSession, volunteer_ids) -> dict:
+    """{volunteer_id: (email, phone)} для непустых id — логин+контакт волонтёра-автора
+    в строке списка. Один запрос на всю страницу (зеркалит _mno_source_map)."""
     ids = {vid for vid in volunteer_ids if vid}
     if not ids:
         return {}
     result = await session.execute(
-        select(Volunteer.id, Volunteer.email).where(Volunteer.id.in_(ids))
+        select(Volunteer.id, Volunteer.email, Volunteer.phone).where(
+            Volunteer.id.in_(ids)
+        )
     )
-    return {vid: email for vid, email in result.all()}
+    return {vid: (email, phone) for vid, email, phone in result.all()}
 
 
 async def get_volunteer_login(session: AsyncSession, volunteer_id) -> str | None:
@@ -495,6 +499,19 @@ async def get_volunteer_login(session: AsyncSession, volunteer_id) -> str | None
         return None
     volunteer = await session.get(Volunteer, volunteer_id)
     return volunteer.email if volunteer else None
+
+
+async def get_volunteer_info(
+    session: AsyncSession, volunteer_id
+) -> tuple[str | None, str | None]:
+    """(email, phone) волонтёра-автора по id; (None, None) — аноним/форма/удалён.
+    Питает detail-карточку (volunteer_login + volunteer_contact)."""
+    if not volunteer_id:
+        return None, None
+    volunteer = await session.get(Volunteer, volunteer_id)
+    if volunteer is None:
+        return None, None
+    return volunteer.email, volunteer.phone
 
 
 async def get_incident(session: AsyncSession, incident_id: UUID) -> Incident:

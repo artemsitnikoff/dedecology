@@ -27,6 +27,8 @@ class IncidentListItem(ORMBase):
     volunteer_id: UUID | None = None
     # Логин (email) волонтёра-автора (source='app'); None — аноним/форма/удалён. Резолвится сервисом.
     volunteer_login: str | None = None
+    # Контакт (телефон) волонтёра-автора; None — аноним/форма/удалён/нет телефона. Резолвится сервисом.
+    volunteer_contact: str | None = None
     comment: str | None = None
     incident_type: str | None = None
     incident_subtype: str | None = None
@@ -55,6 +57,8 @@ class IncidentDetail(ORMBase):
     volunteer_id: UUID | None = None
     # Логин (email) волонтёра-автора (source='app'); None — аноним/форма/удалён. Резолвится сервисом.
     volunteer_login: str | None = None
+    # Контакт (телефон) волонтёра-автора; None — аноним/форма/удалён/нет телефона. Резолвится сервисом.
+    volunteer_contact: str | None = None
     comment: str | None = None
     incident_type: str | None = None
     incident_subtype: str | None = None

@@ -545,13 +545,13 @@
 }
 
 /* ============================================================
-   Раздел «Новые МНО» — свой набор колонок (ТЗ): поступление · адрес ·
-   фото×6 · логин · контакт · комментарий. Ширины совпадают в шапке и
-   строках (одинаковые классы), поэтому не разъезжаются.
-   min-width таблицы = сумма fixed-колонок + min тянущегося «Адреса».
+   Раздел «Новые МНО» — свой набор колонок: дата · фото (лайтбокс, как в
+   Инцидентах) · регион · город · адрес · координаты · логин · телефон ·
+   комментарий. Ширины совпадают в шапке и строках (одинаковые классы).
+   min-width = сумма fixed-колонок + min тянущегося «Адреса».
    ============================================================ */
 .de-mno-table.volunteer {
-  min-width: 1360px;
+  min-width: 1480px;
 }
 .de-mno-c-vreceived {
   width: 150px;
@@ -571,39 +571,74 @@
   font-size: 10.5px;
   color: var(--fg-3);
 }
-.de-mno-c-vaddress {
-  flex: 1;
-  min-width: 220px;
+/* Фото — миниатюра 1-го снимка + счётчик (клик → лайтбокс, как в Инцидентах). */
+.de-mno-c-vphoto1 {
+  width: 64px;
+  justify-content: center;
+}
+.de-mno-vthumb {
+  position: relative;
+  width: 46px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-1);
+  cursor: zoom-in;
+  background: var(--ark-gray-200);
+}
+.de-mno-vthumb-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+.de-mno-vthumb-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  background: rgba(15, 22, 32, 0.72);
+  color: var(--ark-white);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 4px;
+  line-height: 14px;
+}
+.de-mno-vphoto-empty {
+  color: var(--fg-3);
+  font-size: var(--fs-13);
+}
+.de-mno-c-vregion {
+  width: 150px;
   font-size: var(--fs-13);
   color: var(--fg-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Фото — 6 отдельных колонок с миниатюрой (клик → полное фото в новой вкладке). */
-.de-mno-c-vphoto {
-  width: 56px;
-  justify-content: center;
-}
-.de-mno-vphoto-link {
-  display: inline-flex;
-  line-height: 0;
-}
-.de-mno-vphoto-thumb {
-  width: 40px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--border-1);
-  background: var(--bg-panel-2);
-  transition: filter var(--dur-fast) var(--ease-out);
-}
-.de-mno-vphoto-link:hover .de-mno-vphoto-thumb {
-  filter: brightness(1.06);
-}
-.de-mno-vphoto-empty {
-  color: var(--fg-3);
+.de-mno-c-vcity {
+  width: 140px;
   font-size: var(--fs-13);
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.de-mno-c-vaddress {
+  flex: 1;
+  min-width: 200px;
+  font-size: var(--fs-13);
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.de-mno-c-vcoords {
+  width: 150px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--fg-2);
 }
 .de-mno-c-vlogin {
   width: 190px;

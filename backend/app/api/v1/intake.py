@@ -28,8 +28,10 @@ from ...schemas.incident import (
     MarkNotifiedResult,
     PendingNotifyResponse,
 )
+from ...schemas.error_report import ErrorReportCreate, ErrorReportCreated
 from ...schemas.mno import MnoFormPointsResponse, MnoVolunteerCreate
 from ...services import dadata as dadata_service
+from ...services import error_report as error_report_service
 from ...services import incident as incident_service
 from ...services import incident_type as incident_type_service
 from ...services import intake as intake_service
@@ -348,6 +350,30 @@ async def max_intake(
     incident.quote = quote
     await session.commit()
     return {"ok": True, "incident_id": str(incident.id), "quote": quote}
+
+
+@router.post(
+    "/error-report",
+    response_model=ErrorReportCreated,
+    status_code=201,
+    tags=["Приём вебхуков (server-to-server)"],
+)
+async def error_report_intake(
+    payload: ErrorReportCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """Приём технической ошибки мобильного приложения → журнал + письмо в техподдержку.
+
+    Вызывается приложением при сбое server-to-server. Самозащита — общий секрет
+    в заголовке X-Intake-Token (тот же гейт, что у /max): токен не задан → 503;
+    не совпал/отсутствует → 403. Регистрирует ошибку с уникальным кодом, пишет в
+    лог-систему и шлёт письмо на SUPPORT_EMAIL. Ответ — {id, code, created_at, emailed}.
+    """
+    _require_intake_token(request)
+    error = await error_report_service.create_error_report(session, payload)
+    await session.commit()
+    return ErrorReportCreated.model_validate(error, from_attributes=True)
 
 
 @router.post("/max/prepare", tags=["Приём вебхуков (server-to-server)"])

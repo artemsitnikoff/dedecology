@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from ...core.permissions import require_admin, require_superadmin
 from .auth import router as auth_router
 from .blocked_domains import router as blocked_domains_router
+from .errors import router as errors_router
 from .incident_types import router as incident_types_router
 from .incidents import router as incidents_router
 from .intake import router as intake_router
@@ -57,6 +58,13 @@ api_router.include_router(
     integration_router,
     prefix="/integration",
     dependencies=[Depends(require_superadmin)],
+)
+# Журнал технических ошибок мобильного приложения: просмотр — только admin
+# (приём от приложения — в /intake/error-report, защита X-Intake-Token).
+api_router.include_router(
+    errors_router,
+    prefix="/errors",
+    dependencies=[Depends(require_admin)],
 )
 # Волонтёры (мобильное приложение): контур самообслуживания — БЕЗ admin-гейта
 # (регистрация/логин/сброс публичны; /me и /onboarding защищены get_current_volunteer).

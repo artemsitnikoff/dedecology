@@ -124,6 +124,8 @@ export interface Incident {
   volunteer_id: string | null;
   /** Логин (email) волонтёра-автора; null — нет волонтёра. */
   volunteer_login: string | null;
+  /** Контакт (телефон) волонтёра-автора; null — нет/не указан. */
+  volunteer_contact: string | null;
   /** ISO-строка — «поступило». */
   received_at: string;
   created_at: string;
@@ -163,6 +165,8 @@ export interface IncidentListItem {
   volunteer_id: string | null;
   /** Логин (email) волонтёра-автора; null — нет волонтёра. */
   volunteer_login: string | null;
+  /** Контакт (телефон) волонтёра-автора; null — нет/не указан. */
+  volunteer_contact: string | null;
   received_at: string;
 }
 

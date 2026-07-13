@@ -49,17 +49,15 @@ const HEADS: Head[] = [
   { key: 'incidents', label: 'Обращ.', cellClass: 'de-mno-c-incidents' },
   { key: 'sync', label: 'Синхрон.', cellClass: 'de-mno-c-sync', nosort: true },
 ];
-// Заголовки раздела «Новые МНО» (по ТЗ): поступление · адрес · фото×6 · логин · контакт · комментарий.
-// Все без серверной сортировки (nosort) — список идёт свежими первыми по умолчанию.
+// Заголовки раздела «Новые МНО»: дата · фото (лайтбокс, как в Инцидентах) · регион · город ·
+// адрес · координаты · логин · телефон · комментарий. Все без серверной сортировки (nosort).
 const VOL_HEADS: Head[] = [
   { key: 'created', label: 'Дата и время', cellClass: 'de-mno-c-vreceived', nosort: true },
-  { key: 'address', label: 'Адрес МНО', cellClass: 'de-mno-c-vaddress', nosort: true },
-  ...Array.from({ length: 6 }, (_, i) => ({
-    key: `photo${i}` as HeadKey,
-    label: `Фото ${i + 1}`,
-    cellClass: 'de-mno-c-vphoto',
-    nosort: true,
-  })),
+  { key: 'photo' as HeadKey, label: 'Фото', cellClass: 'de-mno-c-vphoto1', nosort: true },
+  { key: 'region', label: 'Регион', cellClass: 'de-mno-c-vregion', nosort: true },
+  { key: 'city', label: 'Город', cellClass: 'de-mno-c-vcity', nosort: true },
+  { key: 'address', label: 'Адрес', cellClass: 'de-mno-c-vaddress', nosort: true },
+  { key: 'coords', label: 'Координаты', cellClass: 'de-mno-c-vcoords', nosort: true },
   { key: 'vlogin' as HeadKey, label: 'Логин волонтёра', cellClass: 'de-mno-c-vlogin', nosort: true },
   { key: 'vcontact' as HeadKey, label: 'Телефон волонтёра', cellClass: 'de-mno-c-vcontact', nosort: true },
   { key: 'vcomment' as HeadKey, label: 'Комментарий', cellClass: 'de-mno-c-vcomment', nosort: true },
@@ -95,11 +93,13 @@ type RowProps = {
   m: MnoListItem;
   selected: boolean;
   active: boolean;
-  /** Раздел «Новые МНО»: скрыть «Реестровый №» (у волонтёрских его нет) + показать «Создано». */
+  /** Раздел «Новые МНО»: другой набор колонок (регион/город/адрес/координаты/фото-лайтбокс/…). */
   volunteerView: boolean;
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onIncidents: (id: string) => void;
+  /** Открыть фото площадки в лайтбоксе (как в Инцидентах) — только «Новые МНО». */
+  onPhoto: (srcs: string[], title: string) => void;
 };
 const MnoRow = memo(function MnoRow({
   m,
@@ -109,6 +109,7 @@ const MnoRow = memo(function MnoRow({
   onToggle,
   onOpen,
   onIncidents,
+  onPhoto,
 }: RowProps) {
   const check = (
     <div
@@ -122,8 +123,11 @@ const MnoRow = memo(function MnoRow({
     </div>
   );
 
-  // Раздел «Новые МНО»: колонки по ТЗ — поступление · адрес · фото×6 · логин · контакт · комментарий.
+  // Раздел «Новые МНО»: дата · фото (лайтбокс) · регион · город · адрес · координаты · логин ·
+  // телефон · комментарий. Фото — как в Инцидентах: миниатюра 1-го снимка + счётчик → лайтбокс.
   if (volunteerView) {
+    const photos = m.photo_urls ?? [];
+    const first = photos[0];
     return (
       <div
         className={`de-mno-row ${selected ? 'selected' : active ? 'active' : ''}`}
@@ -134,30 +138,33 @@ const MnoRow = memo(function MnoRow({
           <span className="de-mno-vdate">{formatDate(m.received_at) || '—'}</span>
           <span className="de-mno-vtime">{formatTime(m.received_at)}</span>
         </div>
+        <div className="de-mno-cell de-mno-c-vphoto1">
+          {first ? (
+            <div
+              className="de-mno-vthumb"
+              title="Открыть фото"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPhoto(photos, m.name || m.address || '');
+              }}
+            >
+              <div className="de-mno-vthumb-img" style={{ backgroundImage: `url("${thumbUrl(first)}")` }} />
+              {photos.length > 1 && <span className="de-mno-vthumb-badge">{photos.length}</span>}
+            </div>
+          ) : (
+            <span className="de-mno-vphoto-empty">—</span>
+          )}
+        </div>
+        <div className="de-mno-cell de-mno-c-vregion" title={m.region_name}>
+          {m.region_name || '—'}
+        </div>
+        <div className="de-mno-cell de-mno-c-vcity" title={m.city}>
+          {m.city || '—'}
+        </div>
         <div className="de-mno-cell de-mno-c-vaddress" title={m.address}>
           {m.address || '—'}
         </div>
-        {Array.from({ length: 6 }).map((_, i) => {
-          const url = m.photo_urls?.[i];
-          return (
-            <div key={i} className="de-mno-cell de-mno-c-vphoto">
-              {url ? (
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="de-mno-vphoto-link"
-                  title={`Фото ${i + 1}`}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <img className="de-mno-vphoto-thumb" src={thumbUrl(url)} alt={`Фото ${i + 1}`} loading="lazy" />
-                </a>
-              ) : (
-                <span className="de-mno-vphoto-empty">—</span>
-              )}
-            </div>
-          );
-        })}
+        <div className="de-mno-cell de-mno-c-vcoords">{m.coords || '—'}</div>
         <div className="de-mno-cell de-mno-c-vlogin" title={m.volunteer_login || ''}>
           {m.volunteer_login || '—'}
         </div>
@@ -249,6 +256,13 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
   const [mapBbox, setMapBbox] = useState<string | undefined>(undefined);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  // Лайтбокс фото из ТАБЛИЦЫ «Новые МНО» (клик по миниатюре строки) — на уровне страницы,
+  // как в Инцидентах. Отдельно от лайтбокса внутри drawer (тот живёт в MnoDrawer).
+  const [tableLb, setTableLb] = useState<{ srcs: string[]; idx: number; title: string } | null>(null);
+  const openTablePhotos = useCallback(
+    (srcs: string[], title: string) => srcs.length > 0 && setTableLb({ srcs, idx: 0, title }),
+    []
+  );
 
   const { message, showToast } = useToast();
 
@@ -601,6 +615,7 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
                   onToggle={toggleSel}
                   onOpen={openDetail}
                   onIncidents={openIncidentsForMno}
+                  onPhoto={openTablePhotos}
                 />
               ))}
             </div>
@@ -719,6 +734,22 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
         />
       )}
 
+      {/* Лайтбокс фото из таблицы «Новые МНО» — как в Инцидентах (полноэкранно, листание). */}
+      {tableLb && (
+        <MnoLightbox
+          srcs={tableLb.srcs}
+          idx={tableLb.idx}
+          title={tableLb.title}
+          onClose={() => setTableLb(null)}
+          onPrev={() =>
+            setTableLb((v) => (v ? { ...v, idx: (v.idx - 1 + v.srcs.length) % v.srcs.length } : v))
+          }
+          onNext={() =>
+            setTableLb((v) => (v ? { ...v, idx: (v.idx + 1) % v.srcs.length } : v))
+          }
+        />
+      )}
+
       <Toast message={message} />
     </div>
   );
@@ -820,7 +851,7 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
                 [
                   ['Наименование МНО', data.name],
                   ['Реестровый номер', data.reg || '—'],
-                  ['Регион', data.region_name],
+                  ['Регион', data.region_name || '—'],
                   ['Город / н.п.', data.city || '—'],
                   ['Адрес МНО', data.address || '—'],
                   ['Координаты', data.coords],

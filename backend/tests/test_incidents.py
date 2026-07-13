@@ -454,19 +454,21 @@ async def test_get_mno_source_resolves_and_handles_missing():
 
 
 @pytest.mark.asyncio
-async def test_detail_carries_volunteer_login(client):
-    """Карточка отдаёт volunteer_login — логин волонтёра-автора (source='app')."""
+async def test_detail_carries_volunteer_login_and_contact(client):
+    """Карточка отдаёт volunteer_login+contact — email/телефон волонтёра-автора (source='app')."""
     detail = _detail(source="app", volunteer_id=uuid4())
     with patch(
         "app.api.v1.incidents.incident_service.get_incident",
         new=AsyncMock(return_value=detail),
     ), patch(
-        "app.api.v1.incidents.incident_service.get_volunteer_login",
-        new=AsyncMock(return_value="vol@example.com"),
+        "app.api.v1.incidents.incident_service.get_volunteer_info",
+        new=AsyncMock(return_value=("vol@example.com", "+79990000000")),
     ):
         resp = await client.get(f"/api/v1/incidents/{detail.id}")
     assert resp.status_code == 200
-    assert resp.json()["volunteer_login"] == "vol@example.com"
+    body = resp.json()
+    assert body["volunteer_login"] == "vol@example.com"
+    assert body["volunteer_contact"] == "+79990000000"
 
 
 @pytest.mark.asyncio
@@ -483,6 +485,85 @@ async def test_get_volunteer_login_resolves_and_handles_missing():
     vol.email = "vol@example.com"
     session.get = AsyncMock(return_value=vol)
     assert await incident_service.get_volunteer_login(session, uuid4()) == "vol@example.com"
+
+
+@pytest.mark.asyncio
+async def test_list_incidents_carries_volunteer_login_and_contact():
+    """list_incidents проставляет volunteer_login+contact из _volunteer_info_map."""
+    from app.models import Incident
+
+    vid = uuid4()
+    inc = Incident(
+        id=uuid4(),
+        source="app",
+        status="new",
+        fio="Иванов Иван",
+        region="Самарская область",
+        city="г. Кинель",
+        street="ул. Маяковского, 41",
+        coords="53.2, 50.6",
+        photo_time=datetime(2026, 4, 26, 8, 5, tzinfo=timezone.utc),
+        photos=0,
+        photo_urls=[],
+        msg=None,
+        msg_url=None,
+        volunteer_id=vid,
+        received_at=datetime(2026, 4, 26, 8, 11, tzinfo=timezone.utc),
+    )
+    session = MagicMock()
+    with patch(
+        "app.services.incident._query_incidents",
+        new=AsyncMock(return_value=([inc], 1)),
+    ), patch(
+        "app.services.incident._mno_source_map",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.incident._volunteer_info_map",
+        new=AsyncMock(return_value={vid: ("vol@example.com", "+79990000000")}),
+    ):
+        page = await incident_service.list_incidents(session)
+
+    assert page.total == 1
+    item = page.items[0]
+    assert item.volunteer_login == "vol@example.com"
+    assert item.volunteer_contact == "+79990000000"
+
+
+@pytest.mark.asyncio
+async def test_volunteer_info_map_builds_email_phone_tuples():
+    """_volunteer_info_map → {id: (email, phone)}; пустой вход → {} без запроса."""
+    session = MagicMock()
+    # Пустой вход → пустой map, БД не трогаем.
+    session.execute = AsyncMock(side_effect=AssertionError("БД не должна вызываться"))
+    assert await incident_service._volunteer_info_map(session, [None]) == {}
+
+    vid = uuid4()
+    res = MagicMock()
+    res.all.return_value = [(vid, "vol@example.com", "+79990000000")]
+    session.execute = AsyncMock(return_value=res)
+    assert await incident_service._volunteer_info_map(session, [vid]) == {
+        vid: ("vol@example.com", "+79990000000")
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_volunteer_info_resolves_and_handles_missing():
+    """get_volunteer_info: (None,None) для пустого id/удалённого волонтёра, иначе (email, phone)."""
+    session = MagicMock()
+    # Пустой id → без обращения к БД.
+    assert await incident_service.get_volunteer_info(session, None) == (None, None)
+    # Нет такого волонтёра → (None, None).
+    session.get = AsyncMock(return_value=None)
+    assert await incident_service.get_volunteer_info(session, uuid4()) == (None, None)
+    # Есть волонтёр → (email, phone).
+    vol = MagicMock()
+    vol.email = "vol@example.com"
+    vol.phone = "+79990000000"
+    session.get = AsyncMock(return_value=vol)
+    assert await incident_service.get_volunteer_info(session, uuid4()) == (
+        "vol@example.com",
+        "+79990000000",
+    )
 
 
 def test_base_filters_volunteer_id_valid_uuid():

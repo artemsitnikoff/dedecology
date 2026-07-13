@@ -9,7 +9,7 @@ import type { SortKey, SortOrder } from '@/api/hooks/useIncidents';
 
 /** Описание колонки заголовка. */
 type Head = {
-  key: SortKey | 'coords' | 'type' | 'mno';
+  key: SortKey | 'coords' | 'type' | 'mno' | 'vlogin' | 'vcontact' | 'vcomment';
   label: string;
   /** Класс ячейки заголовка (ширина/flex задаётся в CSS на парных cell-классах). */
   thClass: string;
@@ -31,6 +31,10 @@ const HEADS: Head[] = [
   { key: 'mno', label: 'МНО', thClass: 'de-inc-cell-mno', nosort: true },
   { key: 'status', label: 'Статус', thClass: 'de-inc-cell-status' },
   { key: 'source', label: 'Источник', thClass: 'de-inc-cell-source' },
+  // Данные волонтёра (source='app') — отдельными столбцами; у не-волонтёрских «—».
+  { key: 'vlogin', label: 'Логин волонтёра', thClass: 'de-inc-cell-vlogin', nosort: true },
+  { key: 'vcontact', label: 'Контакт волонтёра', thClass: 'de-inc-cell-vcontact', nosort: true },
+  { key: 'vcomment', label: 'Комментарий волонтёра', thClass: 'de-inc-cell-vcomment', nosort: true },
 ];
 
 function CheckMark() {
@@ -159,6 +163,15 @@ const IncidentRow = memo(function IncidentRow({ d, selected, onToggle, onOpen, o
         <span className="de-inc-pill" style={{ background: sourceMeta.bg, color: sourceMeta.fg }}>
           {sourceMeta.label}
         </span>
+      </div>
+      <div className="de-inc-cell de-inc-cell-vlogin" title={d.volunteer_login || ''}>
+        {d.volunteer_login || '—'}
+      </div>
+      <div className="de-inc-cell de-inc-cell-vcontact" title={d.volunteer_contact || ''}>
+        {d.volunteer_contact || '—'}
+      </div>
+      <div className="de-inc-cell de-inc-cell-vcomment" title={d.comment || ''}>
+        {d.comment || '—'}
       </div>
     </div>
   );

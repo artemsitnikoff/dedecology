@@ -1,0 +1,327 @@
+/* ============================================================
+   «Технические ошибки» — таблица + модалка. Скоуп .de-err-*, токены --ark/--de.
+   ============================================================ */
+.de-err-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--bg-1);
+}
+
+/* Шапка */
+.de-err-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 28px 9px;
+  border-bottom: 1px solid var(--border-1);
+  flex: none;
+}
+.de-err-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--fg-1);
+}
+.de-err-subtitle {
+  font-size: var(--fs-12);
+  color: var(--fg-3);
+  margin-top: 1px;
+}
+
+/* Контент/таблица */
+.de-err-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-1);
+}
+.de-err-table {
+  min-width: 1320px;
+}
+.de-err-thead {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  background: var(--bg-panel-2);
+  border-bottom: 1px solid var(--border-1);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+}
+.de-err-th {
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  flex: none;
+  white-space: nowrap;
+  user-select: none;
+}
+.de-err-row {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--bg-1);
+  cursor: pointer;
+}
+.de-err-row:hover {
+  background: var(--bg-panel-2);
+}
+.de-err-cell {
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  flex: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-13);
+  color: var(--fg-1);
+}
+/* Ширины колонок — общие для шапки и строк. */
+.de-err-c-code {
+  width: 140px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--de-brand);
+}
+.de-err-c-type {
+  width: 170px;
+}
+.de-err-c-msg {
+  flex: 1;
+  min-width: 220px;
+  color: var(--fg-2);
+}
+.de-err-c-app {
+  width: 100px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+.de-err-c-platform {
+  width: 100px;
+  color: var(--fg-2);
+}
+.de-err-c-email {
+  width: 200px;
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+.de-err-c-occurred,
+.de-err-c-created {
+  width: 150px;
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+.de-err-c-mail {
+  width: 140px;
+}
+.de-err-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  background: var(--bg-panel-2);
+  color: var(--fg-2);
+}
+.de-err-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+/* Пустое/служебные состояния */
+.de-err-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 32px;
+  text-align: center;
+  color: var(--fg-2);
+}
+.de-err-empty-mark {
+  font-size: 44px;
+  line-height: 1;
+}
+.de-err-empty h3 {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.de-err-empty p {
+  margin: 0;
+  max-width: 380px;
+  font-size: var(--fs-13);
+}
+.de-err-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
+  color: var(--fg-2);
+  font-size: var(--fs-14);
+}
+.de-err-state.error {
+  color: var(--error-fg);
+}
+
+/* Пагинация */
+.de-err-pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 28px;
+  border-top: 1px solid var(--border-1);
+  flex: none;
+}
+.de-err-pager-btn {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-1);
+  border-radius: 7px;
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--fs-13);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.de-err-pager-btn:hover:not(:disabled) {
+  background: var(--bg-panel-2);
+}
+.de-err-pager-btn.on {
+  background: var(--de-brand);
+  color: var(--ark-white);
+  border-color: var(--de-brand);
+}
+.de-err-pager-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.de-err-pager-gap {
+  color: var(--fg-3);
+  padding: 0 4px;
+}
+
+/* Модалка карточки */
+.de-err-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(15, 22, 32, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.de-err-modal {
+  width: 620px;
+  max-width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--bg-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+}
+.de-err-modal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border-2);
+}
+.de-err-modal-title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--de-brand);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.de-err-modal-sub {
+  font-size: var(--fs-12);
+  color: var(--fg-3);
+  margin-top: 2px;
+}
+.de-err-modal-close {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: var(--ark-gray-100);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--fg-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.de-err-modal-body {
+  padding: 18px 22px;
+}
+.de-err-fields {
+  display: flex;
+  flex-direction: column;
+}
+.de-err-field {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-2);
+}
+.de-err-field:last-child {
+  border-bottom: 0;
+}
+.de-err-field-key {
+  flex: none;
+  width: 200px;
+  font-size: var(--fs-12);
+  color: var(--fg-3);
+}
+.de-err-field-val {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+.de-err-tech {
+  margin-top: 14px;
+}
+.de-err-tech-pre {
+  margin: 6px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

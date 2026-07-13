@@ -18,6 +18,7 @@ from app.services import intake as intake_svc
 from app.services import mno as mno_service
 from app.services.intake import (
     _deg2num,
+    _parse_photo_time,
     _pick_zoom,
     create_incident_from_form,
     create_incident_from_max,
@@ -25,6 +26,41 @@ from app.services.intake import (
     create_incident_from_public_form,
     prepare_max_report,
 )
+
+
+# --------------------------------------------------------------------------- #
+# Время фотофиксации: МЕСТНОЕ настенное время волонтёра (смещение отбрасывается) #
+# --------------------------------------------------------------------------- #
+
+
+def test_parse_photo_time_keeps_wallclock_from_offset():
+    """ISO со смещением: 19:30+04:00 → час 19 (НЕ 15). Смещение отбрасывается,
+    сохраняются цифры местного времени волонтёра (фронт рендерит их UTC-геттерами)."""
+    dt = _parse_photo_time("2026-07-13T19:30:00+04:00")
+    assert dt is not None
+    assert dt.hour == 19
+    assert dt.minute == 30
+    assert dt.tzinfo is not None
+
+
+def test_parse_photo_time_utc_offset_unchanged():
+    """ISO с +00:00 — час не меняется (19:30 → 19:30)."""
+    dt = _parse_photo_time("2026-07-13T19:30:00+00:00")
+    assert dt is not None and dt.hour == 19 and dt.minute == 30
+
+
+def test_parse_photo_time_naive_format():
+    """Naive-строка «ДД.ММ.ГГГГ ЧЧ:ММ» — час сохраняется как есть (19)."""
+    dt = _parse_photo_time("13.07.2026 19:30")
+    assert dt is not None
+    assert dt.hour == 19 and dt.minute == 30
+    assert dt.tzinfo is not None
+
+
+def test_parse_photo_time_negative_offset_keeps_wallclock():
+    """Отрицательное смещение тоже отбрасывается: 07:15-05:00 → час 07 (НЕ 12)."""
+    dt = _parse_photo_time("2026-07-13T07:15:00-05:00")
+    assert dt is not None and dt.hour == 7 and dt.minute == 15
 
 
 def _jpeg_bytes(size=(1200, 900), color=(0, 120, 0)) -> bytes:
