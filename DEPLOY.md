@@ -217,3 +217,78 @@ docker compose -f docker-compose.prod.yml build backend
 docker compose -f docker-compose.prod.yml up -d --force-recreate backend worker frontend
 docker compose -f docker-compose.prod.yml exec worker grep -c region_total app/services/fgis.py  # ≥1 = новый код
 ```
+
+## 11. Хранилище файлов (фото), перенос данных и вынос на S3
+
+### 11.1 Как устроено хранилище сейчас
+Приложение — **файловое**: пишет файлы на диск и отдаёт их напрямую (`FileResponse`), а миниатюры
+встраивает в .xlsx-выгрузку читая их с диска. **Нативной работы с S3 в коде НЕТ** — поэтому в `.env`
+и `docker-compose` нет S3-переменных (это ожидаемо, не забыли).
+
+Всё лежит под `STORAGE_DIR` (по умолчанию `storage`, в контейнере — `/app/storage`), это docker-volume
+`backend_storage` (общий для `backend` и `worker`):
+```
+/app/storage/
+  incidents/<incident_id>/<n>.jpg        # фото инцидента + <n>_thumb.jpg (миниатюра)
+  mno/<mno_id>/<i>.jpg                    # фото волонтёрского МНО (+ _thumb), отдаётся как /intake/mno-photo/…
+  reports/<report_id>.xlsx               # сформированные выгрузки УТКО
+  logs/*.log                             # parse.log / smtp.log / и т.п.
+```
+URL фото — относительные (`/api/v1/intake/photo/…`, `/api/v1/intake/mno-photo/…`), физически файлы
+берутся из этого каталога.
+
+### 11.2 Забрать текущие данные (миграция на ваши ресурсы)
+Нужны ДВЕ вещи — БД и файлы:
+```bash
+# 1) Дамп БД (pg_dump -Fc) — см. §9
+bash scripts/backup-db.sh                 # → backups/dedecolog_<дата>.dump
+
+# 2) Файлы из volume backend_storage (фото/отчёты/логи). Через временный контейнер:
+docker run --rm -v dedecology_backend_storage:/data -v "$PWD":/out alpine \
+  tar czf /out/storage_$(date +%F).tgz -C /data .
+# (имя volume уточните: docker volume ls | grep backend_storage)
+```
+Развернуть у себя: восстановить дамп (`scripts/restore-db.sh`) и распаковать `storage_*.tgz` в
+volume/каталог, смонтированный в `/app/storage`.
+
+### 11.3 Вынос фото на S3 — вариант A: FUSE-монтирование (без правок кода, рекомендуется)
+Поскольку приложение файловое, самый простой способ «положить фото в S3» — **смонтировать S3-бакет как
+каталог** (s3fs-fuse или `rclone mount`) в путь хранилища. Код при этом не меняется: он читает/пишет
+обычные файлы, а под ними — объекты S3.
+
+Переменные S3 читает СКРИПТ МОНТИРОВАНИЯ (не бэкенд) — они уже добавлены в `.env.example`
+(`S3_BUCKET`, `S3_PREFIX`, `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`).
+
+Пример через s3fs на ХОСТЕ, затем bind-mount в контейнер:
+```bash
+# на хосте (один раз): установить s3fs, положить ключи
+apt-get install -y s3fs
+echo "$S3_ACCESS_KEY:$S3_SECRET_KEY" > /etc/passwd-s3fs && chmod 600 /etc/passwd-s3fs
+
+# смонтировать бакет/префикс в каталог хоста (укажите endpoint своего S3)
+mkdir -p /srv/ecopulse-storage
+s3fs "$S3_BUCKET:/$S3_PREFIX" /srv/ecopulse-storage \
+  -o url="$S3_ENDPOINT" -o use_path_request_style -o allow_other -o umask=0022
+# автозапуск — через /etc/fstab (s3fs) или systemd-unit
+```
+В `docker-compose.prod.yml` заменить именованный volume на bind-mount этого каталога:
+```yaml
+# было:  - backend_storage:/app/storage
+# стало: - /srv/ecopulse-storage:/app/storage
+```
+(нужно поправить у сервисов `backend` И `worker` — у них общий storage).
+
+**Важно / грабли FUSE-S3:**
+- **Логи** (`storage/logs/`) — аппенд-нагрузка, на S3-FUSE работает плохо (S3 не поддерживает дозапись).
+  Рекомендуется вынести на S3 ТОЛЬКО фото: смонтировать S3 в `storage/incidents` и `storage/mno`
+  (два mount-а), а `reports/` и `logs/` оставить на локальном volume. Либо принять, что логи будут
+  переписываться целиком (медленно) — тогда лучше настроить логирование в stdout/ротацию отдельно.
+- **Латентность/консистентность**: генерация выгрузки встраивает миниатюры (много мелких чтений) —
+  на S3-FUSE будет медленнее локального диска. Для больших выгрузок держите это в уме.
+- `rclone mount --vfs-cache-mode writes` (альтернатива s3fs) даёт локальный кэш и обычно стабильнее
+  для записи; endpoint/ключи — те же переменные.
+
+### 11.4 Вариант B: нативный S3 в коде (на будущее, требует доработки)
+Переписать слой хранения на boto3/S3 SDK (upload при записи, отдача через presigned-URL вместо
+`FileResponse`, встраивание миниатюр из S3 в .xlsx). Это код-изменение (не инфра) — делаем отдельно,
+если FUSE-производительности не хватит. Тогда `S3_*` переменные начнёт читать сам бэкенд.
