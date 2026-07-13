@@ -1068,3 +1068,35 @@ def test_sort_columns_has_received_created_at():
     from app.services.mno import _SORT_COLUMNS
 
     assert _SORT_COLUMNS["received"] is Mno.created_at
+
+
+@pytest.mark.asyncio
+async def test_list_points_hides_volunteer_when_no_source():
+    """source не задан → выборка точек исключает волонтёрские МНО (Mno.source != 'volunteer')."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 0
+    points_res = MagicMock()
+    points_res.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    await mno_service.list_points(session)  # source=None
+
+    points_stmt = str(session.execute.call_args_list[-1].args[0])
+    assert "source != " in points_stmt
+
+
+@pytest.mark.asyncio
+async def test_list_points_explicit_volunteer_keeps_them():
+    """Явный source='volunteer' («Новые МНО») → без исключения (равенство, не !=)."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 0
+    points_res = MagicMock()
+    points_res.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    await mno_service.list_points(session, source="volunteer")
+
+    points_stmt = str(session.execute.call_args_list[-1].args[0])
+    assert "source != " not in points_stmt

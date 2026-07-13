@@ -410,8 +410,15 @@ async def list_points(
         существующие фильтры; total = COUNT по этому кадру.
       - bbox не задан/битый → прежнее поведение: все МНО по фильтрам с непустыми coords.
     В обоих случаях points — первые MAX_POINTS строк; capped=True — total превысил лимит.
+
+    Волонтёрские МНО (source='volunteer') на карту НЕ идут, пока их не провалидировали:
+    если source в запросе не задан — скрываем их (Mno.source != 'volunteer'). Явный
+    source='volunteer' (раздел «Новые МНО») по-прежнему отдаёт именно волонтёрские.
     """
     filters = _filters(search, region, synced, source=source)
+    # source не указан → прячем волонтёрские МНО (валидируются позже, в общую карту не попадают).
+    if not source:
+        filters.append(Mno.source != "volunteer")
     box = parse_bbox(bbox)
     if box is not None:
         min_lat, min_lon, max_lat, max_lon = box
@@ -422,9 +429,11 @@ async def list_points(
             await session.execute(select(func.count(Mno.id)).where(*filters))
         ).scalar_one()
     else:
-        total = await _count(
-            session, search=search, region=region, synced=synced, source=source
-        )
+        # total считаем по ТЕМ ЖЕ filters (включая скрытие волонтёрских) — не через _count,
+        # иначе счётчик не учёл бы исключение волонтёрских.
+        total = (
+            await session.execute(select(func.count(Mno.id)).where(*filters))
+        ).scalar_one()
         filters.append(Mno.coords != "")
     stmt = (
         select(Mno.id, Mno.coords, Mno.name)
