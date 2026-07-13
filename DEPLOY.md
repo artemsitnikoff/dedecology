@@ -238,15 +238,21 @@ URL фото — относительные (`/api/v1/intake/photo/…`, `/api/v
 берутся из этого каталога.
 
 ### 11.2 Забрать текущие данные (миграция на ваши ресурсы)
-Нужны ДВЕ вещи — БД и файлы:
+Нужны ДВЕ вещи — БД и файлы. Проще всего — **готовым скриптом** (собирает комплект в `handoff/`):
+```bash
+bash scripts/export-handoff.sh
+# → handoff/: dedecology_db_<дата>.dump + dedecology_storage_<дата>.tgz
+#            + SHA256SUMS.txt + README-IMPORT.txt (инструкция импорта для принимающей стороны)
+```
+`handoff/` в git исключён (внутри ПДн) — передавать по защищённому каналу. Импорт у принимающей
+стороны расписан в `README-IMPORT.txt` (pg_restore + распаковка архива в `/app/storage`).
+
+Вручную то же самое:
 ```bash
 # 1) Дамп БД (pg_dump -Fc) — см. §9
 bash scripts/backup-db.sh                 # → backups/dedecolog_<дата>.dump
-
-# 2) Файлы из volume backend_storage (фото/отчёты/логи). Через временный контейнер:
-docker run --rm -v dedecology_backend_storage:/data -v "$PWD":/out alpine \
-  tar czf /out/storage_$(date +%F).tgz -C /data .
-# (имя volume уточните: docker volume ls | grep backend_storage)
+# 2) Файлы из volume backend_storage (фото/отчёты/логи) — стримом из контейнера backend:
+docker compose -f docker-compose.prod.yml exec -T backend tar czf - -C /app/storage . > storage_$(date +%F).tgz
 ```
 Развернуть у себя: восстановить дамп (`scripts/restore-db.sh`) и распаковать `storage_*.tgz` в
 volume/каталог, смонтированный в `/app/storage`.
