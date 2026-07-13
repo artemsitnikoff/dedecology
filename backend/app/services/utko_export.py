@@ -1,36 +1,33 @@
-"""Выгрузка обращений в формате ФГИС УТКО (.xlsx) — плоская таблица под загрузку в УТКО.
+"""Выгрузка обращений в формате ФГИС УТКО (.xlsx) — СТРОГО по шаблону клиента.
 
-Отличается от обычного экспорта инцидентов (services/export.py): фиксированный порядок
-колонок УТКО, дата+время фотофиксации одной ячейкой, до 6 столбцов «Ссылка на фото» —
-ПРОСТО текстовые полные URL (без встраивания картинок и формул). «Подтип инцидента» —
-подпись из справочника services/incident_subtypes.py (только у типа no_access; иначе "").
+Заполняется ГОТОВЫЙ шаблон `app/templates/utko_template.xlsx` (=клиентский shp.xlsx):
+лист «Реестр для инцидентов» имеет ФИКСИРОВАННУЮ 4-строчную шапку (заголовки / номера
+колонок / типы данных / «Обязательное поле»), плюс листы-справочники (Субъекты РФ, Тип/
+Подтип инцидента, Да_Нет). Наши данные пишутся СТРОГО С 5-Й СТРОКИ — шапку не трогаем
+(«гвоздями вбитый» шаблон). Порядок 13 колонок совпадает со строкой 1 шаблона: Субъект РФ ·
+Реестровый № МНО · Дата и время фотофиксации · Адрес · Тип · Подтип · Описание · Ссылка
+на фото ×6 (просто текстовые полные URL). «Подтип» — подпись из services/incident_subtypes.
+
+⚠️ openpyxl при загрузке/сохранении удаляет расширенные data-validation (выпадашки x14)
+шаблона — на СОДЕРЖИМОЕ загрузки в УТКО это не влияет (грузятся значения строк 5+), но
+выпадающие списки в выходном файле пропадают. Сам шаблон в репозитории их сохраняет.
 """
 
 from io import BytesIO
+from pathlib import Path
 from typing import Iterable
 
-from openpyxl import Workbook
+from openpyxl import load_workbook
 
 from ..models import Incident
 from .incident_subtypes import label_for as _subtype_label
 from .incident_types import incident_type_label as _static_type_label
 
-# Заголовки в точном порядке формата УТКО (6 столбцов «Ссылка на фото» — под макс. число фото).
-_HEADERS = [
-    "Субъект РФ",
-    "Реестровый номер МНО",
-    "Дата и время фотофиксации",
-    "Адрес",
-    "Тип инцидента",
-    "Подтип инцидента",
-    "Описание",
-    "Ссылка на фото",
-    "Ссылка на фото",
-    "Ссылка на фото",
-    "Ссылка на фото",
-    "Ссылка на фото",
-    "Ссылка на фото",
-]
+# Готовый шаблон УТКО (клиентский). Лежит в образе (COPY . . в backend/Dockerfile).
+_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "utko_template.xlsx"
+# Лист с данными и первая строка данных (1–4 — фиксированная шапка шаблона).
+_DATA_SHEET = "Реестр для инцидентов"
+_DATA_START_ROW = 5
 _PHOTO_SLOTS = 6  # столбцов «Ссылка на фото»
 
 
@@ -101,18 +98,24 @@ def build_utko_xlsx(
     type_labels: dict | None = None,
     region_by_mno: dict | None = None,
 ) -> bytes:
-    """Строит .xlsx (bytes) в формате УТКО. Ссылки на фото — просто текстовые URL.
+    """Заполняет клиентский шаблон УТКО и возвращает .xlsx (bytes).
 
-    region_by_mno — {mno_id: имя субъекта из НАШЕГО справочника (синхр. из УТКО)} для
-    колонки «Субъект РФ» (как в УТКО, не DaData-текстом инцидента); None → фолбэк inc.region.
+    Данные пишутся СТРОГО с 5-й строки листа «Реестр для инцидентов» — 4-строчная шапка
+    шаблона не трогается. Ссылки на фото — просто текстовые URL. region_by_mno —
+    {mno_id: имя субъекта из НАШЕГО справочника (синхр. из УТКО)} для колонки «Субъект РФ»
+    (как в УТКО, не DaData-текстом инцидента); None → фолбэк inc.region.
     """
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Выгрузка УТКО"
+    wb = load_workbook(_TEMPLATE_PATH)
+    ws = wb[_DATA_SHEET]
+    wb.active = wb.sheetnames.index(_DATA_SHEET)
 
-    ws.append(_HEADERS)
+    row_idx = _DATA_START_ROW
     for inc in rows:
-        ws.append(_row(inc, base_url, type_labels, region_by_mno))
+        for col_idx, value in enumerate(
+            _row(inc, base_url, type_labels, region_by_mno), start=1
+        ):
+            ws.cell(row=row_idx, column=col_idx, value=value)
+        row_idx += 1
 
     buffer = BytesIO()
     wb.save(buffer)
