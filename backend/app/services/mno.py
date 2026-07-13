@@ -42,6 +42,7 @@ MAX_POINTS = 2000
 FORM_MAX_POINTS = 500
 
 # sort-ключ из API → колонка модели. region сортируется по коду субъекта.
+# received — момент создания записи (Mno.created_at); дефолт «Новых МНО» (свежие первыми).
 _SORT_COLUMNS = {
     "name": Mno.name,
     "reg": Mno.reg,
@@ -49,6 +50,7 @@ _SORT_COLUMNS = {
     "city": Mno.city,
     "address": Mno.address,
     "coords": Mno.coords,
+    "received": Mno.created_at,
 }
 
 

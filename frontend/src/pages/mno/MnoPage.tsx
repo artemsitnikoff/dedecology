@@ -245,8 +245,9 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const [sortKey, setSortKey] = useState<MnoSortKey>('name');
-  const [sortDir, setSortDir] = useState<SortOrder>('asc');
+  // «Новые МНО» — дефолт по дате создания, свежие первыми; обычный реестр — по названию.
+  const [sortKey, setSortKey] = useState<MnoSortKey>(isVolunteer ? 'received' : 'name');
+  const [sortDir, setSortDir] = useState<SortOrder>(isVolunteer ? 'desc' : 'asc');
   const [fRegion, setFRegion] = useState('');
   const [fSync, setFSync] = useState<Array<'fgis' | 'manual'>>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());

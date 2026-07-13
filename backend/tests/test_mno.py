@@ -1061,3 +1061,10 @@ def test_to_list_item_fgis_leaves_volunteer_fields_empty():
     assert item.volunteer_contact is None
     assert item.comment is None
     assert item.photo_urls == []
+
+
+def test_sort_columns_has_received_created_at():
+    """Ключ сортировки 'received' → Mno.created_at (дефолт «Новых МНО», свежие первыми)."""
+    from app.services.mno import _SORT_COLUMNS
+
+    assert _SORT_COLUMNS["received"] is Mno.created_at
