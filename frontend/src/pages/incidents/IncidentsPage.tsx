@@ -7,6 +7,7 @@ import type { IncidentFilters, SortKey, SortOrder } from '@/api/hooks/useInciden
 import { useIncidentPoints } from '@/api/hooks/useIncidentPoints';
 import { useFunnelCounts } from '@/api/hooks/useFunnelCounts';
 import { useRegions } from '@/api/hooks/useRegions';
+import { useCities } from '@/api/hooks/useCities';
 import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
 import { useBulkStatus, useBulkDelete } from '@/api/mutations/incidents';
 import { useCreateIncidentsReport } from '@/api/mutations/reports';
@@ -64,6 +65,7 @@ export function IncidentsPage() {
   const search = searchParams.get('search') ?? '';
   const sources = parseSources(searchParams.getAll('source'));
   const region = searchParams.get('region') ?? '';
+  const city = searchParams.get('city') ?? '';
   const incidentType = searchParams.get('incident_type') ?? '';
   // Диплинк из карточки МНО: /incidents?mno_id=<id> — показать обращения одного объекта ТКО.
   const mnoId = searchParams.get('mno_id') ?? '';
@@ -80,6 +82,7 @@ export function IncidentsPage() {
       search: search || undefined,
       source: sources.length ? sources : undefined,
       region: region || undefined,
+      city: city || undefined,
       incident_type: incidentType || undefined,
       mno_id: mnoId || undefined,
       volunteer_id: volunteerId || undefined,
@@ -89,7 +92,20 @@ export function IncidentsPage() {
       sort,
       order,
     }),
-    [search, sources, region, incidentType, mnoId, volunteerId, status, dateFrom, dateTo, sort, order]
+    [
+      search,
+      sources,
+      region,
+      city,
+      incidentType,
+      mnoId,
+      volunteerId,
+      status,
+      dateFrom,
+      dateTo,
+      sort,
+      order,
+    ]
   );
 
   // Стабильная ссылка на searchParams для use в колбэках без пересоздания.
@@ -135,6 +151,19 @@ export function IncidentsPage() {
       patchParams((p) => {
         if (v) p.set('region', v);
         else p.delete('region');
+        // Города зависят от региона: при смене региона выбранный город сбрасываем —
+        // иначе в фильтре повис бы город из другого региона и список опустел бы.
+        p.delete('city');
+      });
+    },
+    [patchParams]
+  );
+
+  const setCityParam = useCallback(
+    (v: string) => {
+      patchParams((p) => {
+        if (v) p.set('city', v);
+        else p.delete('city');
       });
     },
     [patchParams]
@@ -198,6 +227,7 @@ export function IncidentsPage() {
     patchParams((p) => {
       p.delete('source');
       p.delete('region');
+      p.delete('city');
       p.delete('incident_type');
       p.delete('status');
       p.delete('date_from');
@@ -225,6 +255,8 @@ export function IncidentsPage() {
   const incidentsQuery = useIncidents(filters);
   const funnelQuery = useFunnelCounts(filters);
   const regionsQuery = useRegions();
+  // Города зависят от выбранного региона (пусто → города по всем регионам).
+  const citiesQuery = useCities(region || undefined);
   const incidentTypesQuery = useIncidentTypes();
   // Карта код→подпись типа инцидента для колонки «Тип» в таблице (стабильная ссылка —
   // чтобы memo строк не сбрасывался). Инцидент хранит код, подпись резолвим из справочника.
@@ -338,6 +370,7 @@ export function IncidentsPage() {
   const filterCount =
     (sources.length ? 1 : 0) +
     (region ? 1 : 0) +
+    (city ? 1 : 0) +
     (incidentType ? 1 : 0) +
     (status ? 1 : 0) +
     (dateFrom || dateTo ? 1 : 0);
@@ -379,6 +412,7 @@ export function IncidentsPage() {
       source: filters.source,
       status: filters.status ? [filters.status] : undefined,
       region: filters.region,
+      city: filters.city,
       date_from: filters.date_from,
       date_to: filters.date_to,
       sort: filters.sort,
@@ -491,6 +525,9 @@ export function IncidentsPage() {
         region={region}
         regions={regionsQuery.data ?? []}
         onRegion={setRegionParam}
+        city={city}
+        cities={citiesQuery.data ?? []}
+        onCity={setCityParam}
         incidentType={incidentType}
         incidentTypes={incidentTypesQuery.data ?? []}
         onIncidentType={setIncidentTypeParam}

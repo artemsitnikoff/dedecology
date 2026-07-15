@@ -319,6 +319,72 @@ async def test_list_forwards_region(client):
     assert spy.call_args.kwargs["region"] == "Самарская область"
 
 
+# --- Фильтр по городу (одиночный, ТОЧНОЕ совпадение — паритет с регионом) ------
+
+
+def test_base_filters_city_exact_match_not_ilike():
+    """city → равенство Incident.city == значение (НЕ ilike), пред-статусный фильтр."""
+    filters = _base_filters(None, None, None, None, city="г. Кинель")
+    assert len(filters) == 1
+    clause = filters[0]
+    # Именно равенство, а не ilike/like.
+    assert clause.operator is eq
+    assert clause.right.value == "г. Кинель"
+    compiled = str(clause).lower()
+    assert "ilike" not in compiled and "like" not in compiled
+
+
+def test_base_filters_city_blank_no_filter():
+    """Пусто/пробелы/None → фильтр города НЕ добавляется."""
+    assert _base_filters(None, None, None, None, city=None) == []
+    assert _base_filters(None, None, None, None, city="") == []
+    assert _base_filters(None, None, None, None, city="   ") == []
+
+
+def test_base_filters_city_combines_with_region():
+    """city честится вместе с region (оба пред-статусные → оба в where)."""
+    filters = _base_filters(
+        None, None, None, None, region="Самарская область", city="г. Кинель"
+    )
+    assert len(filters) == 2
+
+
+def test_base_filters_city_combines_with_source():
+    """city честится вместе с source (оба пред-статусные → оба в where)."""
+    filters = _base_filters(None, ["max"], None, None, city="г. Кинель")
+    assert len(filters) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_city(client):
+    """GET /incidents?city=... пробрасывает city в сервис списка (сужение списка)."""
+    page = Paginated[IncidentListItem](
+        items=[_list_item()], total=1, page=1, page_size=100, pages=1
+    )
+    spy = AsyncMock(return_value=page)
+    with patch("app.api.v1.incidents.incident_service.list_incidents", new=spy):
+        resp = await client.get("/api/v1/incidents?city=г. Кинель")
+    assert resp.status_code == 200
+    assert spy.call_args.kwargs["city"] == "г. Кинель"
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_region_and_city_together(client):
+    """GET /incidents?region=…&city=… пробрасывает ОБА фильтра (город внутри региона)."""
+    page = Paginated[IncidentListItem](
+        items=[_list_item()], total=1, page=1, page_size=100, pages=1
+    )
+    spy = AsyncMock(return_value=page)
+    with patch("app.api.v1.incidents.incident_service.list_incidents", new=spy):
+        resp = await client.get(
+            "/api/v1/incidents?region=Самарская область&city=г. Кинель"
+        )
+    assert resp.status_code == 200
+    kw = spy.call_args.kwargs
+    assert kw["region"] == "Самарская область"
+    assert kw["city"] == "г. Кинель"
+
+
 # --- Фильтр по типу инцидента (одиночный, ТОЧНОЕ совпадение по коду) -----------
 
 
@@ -626,6 +692,51 @@ async def test_export_forwards_region(client):
 
 
 @pytest.mark.asyncio
+async def test_funnel_forwards_city(client):
+    """GET /incidents/funnel?city=... пробрасывает city (влияет на счётчики)."""
+    counts = FunnelCounts(all=2, new=1, found=1, none=0, exported=0)
+    spy = AsyncMock(return_value=counts)
+    with patch("app.api.v1.incidents.incident_service.funnel_counts", new=spy):
+        resp = await client.get("/api/v1/incidents/funnel?city=г. Кинель")
+    assert resp.status_code == 200
+    assert resp.json() == {"all": 2, "new": 1, "found": 1, "none": 0, "exported": 0}
+    assert spy.call_args.kwargs["city"] == "г. Кинель"
+
+
+@pytest.mark.asyncio
+async def test_funnel_counts_honors_city_filter():
+    """funnel_counts кладёт city в WHERE (счётчики честят город, но НЕ status)."""
+    session = AsyncMock()
+    result = MagicMock()
+    result.all.return_value = [("new", 1), ("found", 1)]
+    session.execute.return_value = result
+
+    counts = await incident_service.funnel_counts(session, city="г. Кинель")
+    assert counts.all == 2
+
+    stmt = session.execute.call_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "incidents.city = 'г. Кинель'" in compiled
+    # Воронка игнорирует статус — фильтра по нему в WHERE быть не должно.
+    assert "incidents.status IN" not in compiled
+
+
+@pytest.mark.asyncio
+async def test_export_forwards_city(client):
+    """GET /incidents/export?city=... пробрасывает city в выборку экспорта."""
+    spy = AsyncMock(return_value=[])
+    with patch(
+        "app.api.v1.incidents.incident_service.list_for_export", new=spy
+    ), patch(
+        "app.api.v1.incidents.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
+    ), patch("app.api.v1.incidents.build_xlsx", return_value=b"xlsx"):
+        resp = await client.get("/api/v1/incidents/export?city=г. Кинель")
+    assert resp.status_code == 200
+    assert spy.call_args.kwargs["city"] == "г. Кинель"
+
+
+@pytest.mark.asyncio
 async def test_regions_endpoint_returns_list(client):
     """GET /incidents/regions → JSON-массив строк (уникальные непустые регионы А→Я)."""
     regions = ["Алтайский край", "Самарская область"]
@@ -675,6 +786,129 @@ async def test_list_regions_query_shape():
     assert "IS NOT NULL" in compiled
 
 
+# --- /cities (дропдаун города, зависит от региона) -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_cities_endpoint_returns_list(client):
+    """GET /incidents/cities → JSON-массив строк (уникальные непустые города А→Я)."""
+    cities = ["г. Кинель", "г. Самара"]
+    with patch(
+        "app.api.v1.incidents.incident_service.list_cities",
+        new=AsyncMock(return_value=cities),
+    ):
+        resp = await client.get("/api/v1/incidents/cities")
+    assert resp.status_code == 200
+    assert resp.json() == cities
+
+
+@pytest.mark.asyncio
+async def test_cities_endpoint_forwards_region(client):
+    """GET /incidents/cities?region=... сужает список до городов этого региона."""
+    spy = AsyncMock(return_value=["г. Кинель"])
+    with patch("app.api.v1.incidents.incident_service.list_cities", new=spy):
+        resp = await client.get("/api/v1/incidents/cities?region=Самарская область")
+    assert resp.status_code == 200
+    assert resp.json() == ["г. Кинель"]
+    # region передаётся вторым позиционным аргументом сервиса.
+    assert spy.call_args.args[1] == "Самарская область"
+
+
+@pytest.mark.asyncio
+async def test_cities_endpoint_without_region_passes_none(client):
+    """Без region сервис зовётся с None → города всех регионов."""
+    spy = AsyncMock(return_value=["г. Кинель", "г. Самара"])
+    with patch("app.api.v1.incidents.incident_service.list_cities", new=spy):
+        resp = await client.get("/api/v1/incidents/cities")
+    assert resp.status_code == 200
+    assert spy.call_args.args[1] is None
+
+
+@pytest.mark.asyncio
+async def test_cities_route_not_shadowed_by_id(client):
+    """Литерал /cities объявлен ДО /{id}: его не перехватывает get_incident."""
+    spy = AsyncMock(return_value=["г. Кинель"])
+    with patch(
+        "app.api.v1.incidents.incident_service.list_cities", new=spy
+    ), patch(
+        "app.api.v1.incidents.incident_service.get_incident",
+        new=AsyncMock(side_effect=AssertionError("get_incident перехватил /cities")),
+    ):
+        resp = await client.get("/api/v1/incidents/cities")
+    assert resp.status_code == 200
+    assert resp.json() == ["г. Кинель"]
+    spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_cities_query_shape_all_regions():
+    """list_cities без региона: SELECT DISTINCT непустых городов, сортировка A→Я, БЕЗ фильтра региона."""
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = ["г. Кинель", "г. Самара"]
+    session.execute.return_value = result
+
+    cities = await incident_service.list_cities(session)
+    assert cities == ["г. Кинель", "г. Самара"]
+
+    stmt = session.execute.call_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    upper = compiled.upper()
+    assert "DISTINCT" in upper
+    assert "ORDER BY" in upper
+    assert "IS NOT NULL" in upper
+    # Регион не выбран → городá по всем регионам (фильтра региона в SQL нет).
+    assert "incidents.region" not in compiled
+
+
+@pytest.mark.asyncio
+async def test_list_cities_query_shape_scoped_to_region():
+    """list_cities(region=X): в WHERE добавляется ТОЧНОЕ совпадение по региону."""
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = ["г. Кинель"]
+    session.execute.return_value = result
+
+    cities = await incident_service.list_cities(session, "Самарская область")
+    assert cities == ["г. Кинель"]
+
+    stmt = session.execute.call_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "incidents.region = 'Самарская область'" in compiled
+
+
+@pytest.mark.asyncio
+async def test_list_cities_blank_region_not_scoped():
+    """Пустой/пробельный region → фильтр региона НЕ добавляется (города всех регионов)."""
+    for blank in ("", "   "):
+        session = AsyncMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = ["г. Кинель", "г. Самара"]
+        session.execute.return_value = result
+
+        cities = await incident_service.list_cities(session, blank)
+        assert cities == ["г. Кинель", "г. Самара"]
+
+        stmt = session.execute.call_args.args[0]
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "incidents.region" not in compiled
+
+
+@pytest.mark.asyncio
+async def test_list_cities_region_trimmed():
+    """Регион с пробелами по краям обрезается (паритет с фильтром списка)."""
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = ["г. Кинель"]
+    session.execute.return_value = result
+
+    await incident_service.list_cities(session, "  Самарская область  ")
+
+    stmt = session.execute.call_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "incidents.region = 'Самарская область'" in compiled
+
+
 # --- /points (карта) -----------------------------------------------------------
 
 
@@ -712,6 +946,35 @@ async def test_list_points_returns_points(client):
     assert kw["source"] == ["max"]
     assert kw["status"] == ["new"]
     assert kw["region"] == "Самарская область"
+
+
+@pytest.mark.asyncio
+async def test_points_forwards_city(client):
+    """GET /incidents/points?city=... пробрасывает city в выборку точек карты."""
+    spy = AsyncMock(
+        return_value=IncidentPointsResponse(points=[], total=0, capped=False)
+    )
+    with patch("app.api.v1.incidents.incident_service.list_points", new=spy):
+        resp = await client.get("/api/v1/incidents/points?city=г. Кинель")
+    assert resp.status_code == 200
+    assert spy.call_args.kwargs["city"] == "г. Кинель"
+
+
+@pytest.mark.asyncio
+async def test_list_points_honors_city_filter():
+    """list_points кладёт city в WHERE (карта сужается по городу)."""
+    session = AsyncMock()
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 0
+    rows_result = MagicMock()
+    rows_result.all.return_value = []
+    session.execute.side_effect = [count_result, rows_result]
+
+    await incident_service.list_points(session, city="г. Кинель")
+
+    count_stmt = session.execute.call_args_list[0].args[0]
+    compiled = str(count_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "incidents.city = 'г. Кинель'" in compiled
 
 
 @pytest.mark.asyncio

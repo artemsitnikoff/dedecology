@@ -17,6 +17,8 @@ export interface IncidentFilters {
   source?: Source[];
   /** Одиночный регион — точное совпадение по Incident.region. */
   region?: string;
+  /** Одиночный город — точное совпадение по Incident.city (зависит от region). */
+  city?: string;
   /** Одиночный тип инцидента — код (см. IncidentType); точное совпадение по Incident.incident_type. */
   incident_type?: string;
   /** UUID объекта ТКО (МНО) — показать только обращения по этому МНО (Incident.mno_id). */
@@ -45,6 +47,7 @@ export function buildIncidentParams(filters: IncidentFilters): URLSearchParams {
     for (const s of filters.source) params.append('source', s);
   }
   if (filters.region) params.set('region', filters.region);
+  if (filters.city) params.set('city', filters.city);
   if (filters.incident_type) params.set('incident_type', filters.incident_type);
   if (filters.mno_id) params.set('mno_id', filters.mno_id);
   if (filters.volunteer_id) params.set('volunteer_id', filters.volunteer_id);

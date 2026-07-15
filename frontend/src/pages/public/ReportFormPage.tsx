@@ -134,6 +134,10 @@ export default function ReportFormPage() {
   const [regionPlain, setRegionPlain] = useState('');
   const [cityPlain, setCityPlain] = useState('');
   const [photoTime, setPhotoTime] = useState(nowLocalDatetime);
+  // Верхняя граница пикера времени фотофиксации: будущее выбрать нельзя.
+  // Держим в state, а не константой на маунте — форма может быть открыта долго.
+  const [photoTimeMax, setPhotoTimeMax] = useState(nowLocalDatetime);
+  const [photoTimeError, setPhotoTimeError] = useState<string | null>(null);
   const [bins, setBins] = useState<Bins>('');
   const [photos, setPhotos] = useState<File[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -152,6 +156,14 @@ export default function ReportFormPage() {
   useEffect(() => {
     return () => previews.forEach((url) => URL.revokeObjectURL(url));
   }, [previews]);
+
+  // Держим границу «не позже, чем сейчас» свежей, пока форма открыта. Тик чаще
+  // минуты — значение в формате YYYY-MM-DDTHH:mm меняется раз в минуту, и React
+  // гасит одинаковую строку (Object.is) → лишних ререндеров нет.
+  useEffect(() => {
+    const id = setInterval(() => setPhotoTimeMax(nowLocalDatetime()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Выбор региона: при смене региона сбрасываем зависимые город/улицу.
   const handlePickRegion = (s: AddressSuggestion) => {
@@ -271,6 +283,18 @@ export default function ReportFormPage() {
       setSubmitError('Пожалуйста, укажите координаты (подставятся при выборе улицы из подсказок).');
       return;
     }
+    // Атрибут max ограничивает только пикер — руками/автозаполнением можно ввести
+    // что угодно. Сверяем со СВЕЖИМ временем (не с photoTimeMax — он мог отстать).
+    // Формат YYYY-MM-DDTHH:mm фиксированной ширины с ведущими нулями → сравнение
+    // строк лексикографически корректно, без парсинга дат и часовых поясов.
+    // Пустое время допустимо (photo_time необязателен) — его не проверяем.
+    if (photoTime && photoTime > nowLocalDatetime()) {
+      const msg = 'Время фотофиксации не может быть в будущем.';
+      setPhotoTimeError(msg);
+      setSubmitError(msg);
+      return;
+    }
+    setPhotoTimeError(null);
     if (!comment.trim()) {
       setSubmitError('Пожалуйста, заполните комментарий.');
       return;
@@ -433,15 +457,23 @@ export default function ReportFormPage() {
                 />
               </label>
 
-              {/* Время фотофиксации */}
+              {/* Время фотофиксации — не позже текущего момента (max + проверка при отправке) */}
               <label className="de-rf-field">
                 <span className="de-rf-label">Время фотофиксации</span>
                 <input
                   type="datetime-local"
                   className="de-rf-input"
                   value={photoTime}
-                  onChange={(e) => setPhotoTime(e.target.value)}
+                  max={photoTimeMax}
+                  // Подтягиваем границу точно к моменту открытия пикера — интервал
+                  // может отстать на несколько секунд.
+                  onFocus={() => setPhotoTimeMax(nowLocalDatetime())}
+                  onChange={(e) => {
+                    setPhotoTimeError(null);
+                    setPhotoTime(e.target.value);
+                  }}
                 />
+                {photoTimeError && <span className="de-rf-inline-err">{photoTimeError}</span>}
               </label>
 
               {/* Баки раздельного сбора */}

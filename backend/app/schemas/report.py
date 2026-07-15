@@ -24,7 +24,8 @@ class ReportCreateRequest(BaseModel):
     """Запрос на формирование отчёта по обращениям.
 
     Если ids непуст — отчёт по выбранным обращениям (как POST /incidents/export).
-    Иначе — по фильтру (как GET /incidents/export): search/source/status/region/период/сортировка.
+    Иначе — по фильтру (как GET /incidents/export): search/source/status/region/city/
+    период/сортировка.
     """
 
     # UUID (не str!): list_by_ids строит словарь по UUID-ключам и матчит эти id —
@@ -34,6 +35,7 @@ class ReportCreateRequest(BaseModel):
     source: list[str] | None = None
     status: list[str] | None = None
     region: str | None = None
+    city: str | None = None
     date_from: date | None = None
     date_to: date | None = None
     sort: str = "date"

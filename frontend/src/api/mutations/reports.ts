@@ -13,6 +13,7 @@ export interface CreateIncidentsReportBody {
   source?: Source[];
   status?: Status[];
   region?: string;
+  city?: string;
   date_from?: string;
   date_to?: string;
   sort?: string;

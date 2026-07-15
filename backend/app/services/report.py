@@ -57,6 +57,7 @@ async def create_incidents_report(
             date_from=_as_datetime(req.date_from),
             date_to=_as_datetime(req.date_to),
             region=req.region,
+            city=req.city,
             sort=req.sort,
             order=req.order,
         )

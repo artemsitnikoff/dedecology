@@ -75,6 +75,7 @@ async def list_incidents(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     region: str | None = Query(None),
+    city: str | None = Query(None),
     incident_type: str | None = Query(None),
     mno_id: str | None = Query(None),
     volunteer_id: str | None = Query(None),
@@ -87,6 +88,8 @@ async def list_incidents(
 ):
     """Список инцидентов с фильтрами/сортировкой/пагинацией.
 
+    region/city — одиночные фильтры, ТОЧНОЕ совпадение; честятся совместно (город
+    обычно выбирают внутри региона, но city работает и сам по себе).
     mno_id — фильтр «инциденты этого МНО» (клик по счётчику обращений в карточке МНО):
     ТОЧНОЕ совпадение по ссылке incidents.mno_id; невалидный UUID игнорируется.
     volunteer_id — фильтр «обращения этого волонтёра» (ТОЧНОЕ совпадение по UUID; невалидный игнор).
@@ -99,6 +102,7 @@ async def list_incidents(
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
         region=region,
+        city=city,
         incident_type=incident_type,
         mno_id=mno_id,
         volunteer_id=volunteer_id,
@@ -116,11 +120,12 @@ async def get_funnel(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     region: str | None = Query(None),
+    city: str | None = Query(None),
     volunteer_id: str | None = Query(None),
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Счётчики чипов воронки (honor search/source/period/region/volunteer_id, НЕ status)."""
+    """Счётчики чипов воронки (honor search/source/period/region/city/volunteer_id, НЕ status)."""
     return await incident_service.funnel_counts(
         session,
         search=search,
@@ -128,6 +133,7 @@ async def get_funnel(
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
         region=region,
+        city=city,
         volunteer_id=volunteer_id,
     )
 
@@ -141,6 +147,22 @@ async def list_regions(
     return await incident_service.list_regions(session)
 
 
+@router.get("/cities", response_model=list[str], tags=["Админский реестр"])
+async def list_cities(
+    region: str | None = Query(
+        None, description="Сузить до городов этого региона (пусто — города всех регионов)"
+    ),
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """DISTINCT непустые города (А→Я) — наполняет дропдаун фильтра города.
+
+    Список ЗАВИСИТ от выбранного региона: region задан → только его города; пусто → все.
+    Объявлен ДО /{incident_id} — иначе FastAPI трактует «cities» как UUID → 422.
+    """
+    return await incident_service.list_cities(session, region)
+
+
 @router.get("/points", response_model=IncidentPointsResponse, tags=["Админский реестр"])
 async def list_incident_points(
     search: str | None = Query(None),
@@ -149,6 +171,7 @@ async def list_incident_points(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     region: str | None = Query(None),
+    city: str | None = Query(None),
     bbox: str | None = Query(
         None, description="Видимая область карты «minLat,minLon,maxLat,maxLon» (битый — игнор)"
     ),
@@ -157,7 +180,7 @@ async def list_incident_points(
 ):
     """Лёгкие координаты инцидентов для карты (обрезка до лимита на КАДР).
 
-    Те же фильтры, что у списка (search/source/status/region/period), без sort/page,
+    Те же фильтры, что у списка (search/source/status/region/city/period), без sort/page,
     плюс bbox — видимая область: при зуме/панораме фронт перезапрашивает точки кадра.
     Объявлен ДО /{incident_id} — статический роут раньше параметрического, иначе
     FastAPI трактует «points» как UUID → 422.
@@ -170,6 +193,7 @@ async def list_incident_points(
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
         region=region,
+        city=city,
         bbox=bbox,
     )
 
@@ -183,6 +207,7 @@ async def export_incidents_get(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     region: str | None = Query(None),
+    city: str | None = Query(None),
     sort: str = Query("date"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     session: AsyncSession = Depends(get_db),
@@ -197,6 +222,7 @@ async def export_incidents_get(
         date_from=_as_datetime(date_from),
         date_to=_as_datetime(date_to),
         region=region,
+        city=city,
         sort=sort,
         order=order,
     )

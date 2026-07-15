@@ -79,6 +79,7 @@ def _base_filters(
     date_from: datetime | None,
     date_to: datetime | None,
     region: str | None = None,
+    city: str | None = None,
     incident_type: str | None = None,
     mno_id: str | None = None,
     volunteer_id: str | None = None,
@@ -94,6 +95,10 @@ def _base_filters(
     # Регион — одиночный, ТОЧНОЕ совпадение (равенство, не ilike). Пусто → не фильтруем.
     if region and region.strip():
         filters.append(Incident.region == region.strip())
+    # Город — одиночный, ТОЧНОЕ совпадение (зеркалит регион). Пусто → не фильтруем.
+    # Честится вместе с регионом: оба пред-статусные → оба в where.
+    if city and city.strip():
+        filters.append(Incident.city == city.strip())
     # Тип инцидента — одиночный, ТОЧНОЕ совпадение по коду. Пусто → не фильтруем.
     if incident_type and incident_type.strip():
         filters.append(Incident.incident_type == incident_type.strip())
@@ -132,6 +137,7 @@ async def list_incidents(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     region: str | None = None,
+    city: str | None = None,
     incident_type: str | None = None,
     mno_id: str | None = None,
     volunteer_id: str | None = None,
@@ -149,6 +155,7 @@ async def list_incidents(
         date_from=date_from,
         date_to=date_to,
         region=region,
+        city=city,
         incident_type=incident_type,
         mno_id=mno_id,
         volunteer_id=volunteer_id,
@@ -234,12 +241,23 @@ async def _query_incidents(
     limit: int | None,
     with_total: bool,
     region: str | None = None,
+    city: str | None = None,
     incident_type: str | None = None,
     mno_id: str | None = None,
     volunteer_id: str | None = None,
 ):
+    # Именованные аргументы (не позиционные): порядок параметров _base_filters
+    # расширяется (city вставлен за region) — по именам это безопасно.
     filters = _base_filters(
-        search, source, date_from, date_to, region, incident_type, mno_id, volunteer_id
+        search,
+        source,
+        date_from,
+        date_to,
+        region=region,
+        city=city,
+        incident_type=incident_type,
+        mno_id=mno_id,
+        volunteer_id=volunteer_id,
     )
     if status:
         filters.append(Incident.status.in_(status))
@@ -280,6 +298,7 @@ async def list_for_export(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     region: str | None = None,
+    city: str | None = None,
     sort: str = "date",
     order: str = "desc",
 ) -> list[Incident]:
@@ -292,6 +311,7 @@ async def list_for_export(
         date_from=date_from,
         date_to=date_to,
         region=region,
+        city=city,
         sort=sort,
         order=order,
         offset=None,
@@ -351,12 +371,19 @@ async def funnel_counts(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     region: str | None = None,
+    city: str | None = None,
     volunteer_id: str | None = None,
 ) -> FunnelCounts:
-    """Счётчики чипов воронки. Honor search/source/period/region/volunteer_id, НО игнорируют
+    """Счётчики чипов воронки. Honor search/source/period/region/city/volunteer_id, НО игнорируют
     status — каждый чип показывает свой потенциальный объём."""
     filters = _base_filters(
-        search, source, date_from, date_to, region, volunteer_id=volunteer_id
+        search,
+        source,
+        date_from,
+        date_to,
+        region=region,
+        city=city,
+        volunteer_id=volunteer_id,
     )
     where_clause = and_(*filters) if filters else None
 
@@ -386,6 +413,21 @@ async def list_regions(session: AsyncSession) -> list[str]:
     return list(result.scalars().all())
 
 
+async def list_cities(session: AsyncSession, region: str | None = None) -> list[str]:
+    """DISTINCT непустые города, отсортированные A→Я (наполняет дропдаун фильтра города).
+
+    Зеркалит list_regions, но список ЗАВИСИТ от выбранного региона: region непуст →
+    только города этого региона (ТОЧНОЕ совпадение, как в фильтре списка); пусто/пробелы/
+    None → города по всем регионам.
+    """
+    stmt = select(Incident.city).where(Incident.city.is_not(None), Incident.city != "")
+    if region and region.strip():
+        stmt = stmt.where(Incident.region == region.strip())
+    stmt = stmt.distinct().order_by(asc(Incident.city))
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 def _short_address(region: str, city: str, street: str) -> str:
     """Краткий адрес для подписи точки на карте: непустые город/улица через запятую.
 
@@ -405,6 +447,7 @@ async def list_points(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     region: str | None = None,
+    city: str | None = None,
     bbox: str | None = None,
 ) -> IncidentPointsResponse:
     """Лёгкие координаты инцидентов для карты: те же фильтры, что у списка (без sort/page).
@@ -416,7 +459,7 @@ async def list_points(
       - bbox не задан/битый → прежнее поведение: все инциденты по фильтрам с непустыми coords.
     В обоих случаях points — первые MAX_POINTS строк; capped=True — total превысил лимит.
     """
-    filters = _base_filters(search, source, date_from, date_to, region)
+    filters = _base_filters(search, source, date_from, date_to, region=region, city=city)
     if status:
         filters.append(Incident.status.in_(status))
     box = parse_bbox(bbox)

@@ -11,6 +11,11 @@ type Props = {
   /** Справочник регионов для дропдауна (А→Я). */
   regions: string[];
   onRegion: (region: string) => void;
+  /** Выбранный город (точное совпадение); '' — все города. */
+  city: string;
+  /** Справочник городов для дропдауна (А→Я); сужен выбранным регионом. */
+  cities: string[];
+  onCity: (city: string) => void;
   /** Выбранный тип инцидента — код; '' — все типы. */
   incidentType: string;
   /** Справочник типов инцидента для дропдауна (в порядке справочника). */
@@ -38,6 +43,9 @@ export function FilterBar({
   region,
   regions,
   onRegion,
+  city,
+  cities,
+  onCity,
   incidentType,
   incidentTypes,
   onIncidentType,
@@ -79,6 +87,20 @@ export function FilterBar({
           {regions.map((r) => (
             <option key={r} value={r}>
               {r}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="de-inc-filter-sep" />
+
+      <div className="de-inc-filter-group">
+        <span className="de-inc-filter-label">Город</span>
+        <select className="de-inc-select" value={city} onChange={(e) => onCity(e.target.value)}>
+          <option value="">Все города</option>
+          {cities.map((c) => (
+            <option key={c} value={c}>
+              {c}
             </option>
           ))}
         </select>

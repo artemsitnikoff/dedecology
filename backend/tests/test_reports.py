@@ -221,6 +221,33 @@ async def test_create_by_filters_writes_file_and_row(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_by_filters_forwards_city(tmp_path, monkeypatch):
+    """Фильтр по городу доходит из запроса отчёта до выборки (не выкинут молча)."""
+    monkeypatch.setattr(report_service.settings, "STORAGE_DIR", str(tmp_path))
+    session, _ = _session_for_create()
+    req = ReportCreateRequest(region="Самарская область", city="г. Кинель")
+
+    with patch(
+        "app.services.report.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.report.incident_service.list_for_export",
+        new=AsyncMock(return_value=[]),
+    ) as m_export, patch(
+        "app.services.report.build_utko_xlsx", return_value=b"xlsx"
+    ), patch(
+        "app.services.report.audit", new=AsyncMock()
+    ):
+        await report_service.create_incidents_report(
+            session, _user(), base_url="", req=req
+        )
+
+    kw = m_export.await_args.kwargs
+    assert kw["city"] == "г. Кинель"
+    assert kw["region"] == "Самарская область"
+
+
+@pytest.mark.asyncio
 async def test_create_by_ids_uses_list_by_ids_and_suffix(tmp_path, monkeypatch):
     """create по ids: list_by_ids + суффикс _выбранные в имени файла."""
     monkeypatch.setattr(report_service.settings, "STORAGE_DIR", str(tmp_path))
