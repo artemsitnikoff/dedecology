@@ -23,6 +23,7 @@ from ..schemas.report import ReportCreateRequest, ReportListItem
 from ..services import incident as incident_service
 from ..services import incident_type as incident_type_service
 from ..services import mno as mno_service
+from ..services import region as region_service
 from ..services.audit import audit
 from ..services.utko_export import build_utko_xlsx
 
@@ -67,7 +68,11 @@ async def create_incidents_report(
     # DaData-текста инцидента: резолвим mno_id → Mno.region_code → Region.name.
     mno_ids = [inc.mno_id for inc in rows if getattr(inc, "mno_id", None)]
     region_by_mno = await mno_service.region_names_by_mno(session, mno_ids)
-    content = build_utko_xlsx(rows, base_url, type_labels, region_by_mno)
+    # Инциденты БЕЗ МНО: тот же справочник, но сопоставлением по имени — иначе в файл
+    # уходил бы сырой DaData-текст («Санкт-Петербург» вместо «г. Санкт-Петербург» → УТКО
+    # отвергает строку).
+    region_index = await region_service.canonical_index(session)
+    content = build_utko_xlsx(rows, base_url, type_labels, region_by_mno, region_index)
 
     # Формирование отчёта = выгрузка: включённые в него обращения СРАЗУ переходят в
     # статус «Выгружен» (по требованию). Файл собран ВЫШЕ — в нём статусы на момент

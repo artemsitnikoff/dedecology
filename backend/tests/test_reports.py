@@ -187,6 +187,11 @@ async def test_create_by_filters_writes_file_and_row(tmp_path, monkeypatch):
         "app.services.report.incident_type_service.labels_map",
         new=AsyncMock(return_value={}),
     ), patch(
+        # Индекс справочника регионов (канон «Субъект РФ» для инцидентов без МНО) —
+        # ходит в БД, которой в тестах нет; поведение резолва проверяет test_utko_export.
+        "app.services.report.region_service.canonical_index",
+        new=AsyncMock(return_value={}),
+    ), patch(
         "app.services.report.incident_service.list_for_export",
         new=AsyncMock(return_value=fake_rows),
     ) as m_export, patch(
@@ -231,6 +236,11 @@ async def test_create_by_filters_forwards_city(tmp_path, monkeypatch):
         "app.services.report.incident_type_service.labels_map",
         new=AsyncMock(return_value={}),
     ), patch(
+        # Индекс справочника регионов (канон «Субъект РФ» для инцидентов без МНО) —
+        # ходит в БД, которой в тестах нет; поведение резолва проверяет test_utko_export.
+        "app.services.report.region_service.canonical_index",
+        new=AsyncMock(return_value={}),
+    ), patch(
         "app.services.report.incident_service.list_for_export",
         new=AsyncMock(return_value=[]),
     ) as m_export, patch(
@@ -248,6 +258,45 @@ async def test_create_by_filters_forwards_city(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_forwards_region_maps_to_builder(tmp_path, monkeypatch):
+    """Обе карты справочника регионов доходят до build_utko_xlsx (не теряются по пути).
+
+    region_by_mno — для инцидентов с МНО, region_index — канон «Субъект РФ» по имени для
+    инцидентов БЕЗ МНО. Без индекса в файл уходил бы сырой DaData-текст.
+    """
+    monkeypatch.setattr(report_service.settings, "STORAGE_DIR", str(tmp_path))
+    session, _ = _session_for_create()
+    mno_id = uuid4()
+    index = {"санкт-петербург": "г. Санкт-Петербург"}
+    by_mno = {mno_id: "Самарская область"}
+
+    with patch(
+        "app.services.report.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.report.region_service.canonical_index",
+        new=AsyncMock(return_value=index),
+    ), patch(
+        "app.services.report.mno_service.region_names_by_mno",
+        new=AsyncMock(return_value=by_mno),
+    ), patch(
+        "app.services.report.incident_service.list_for_export",
+        new=AsyncMock(return_value=[SimpleNamespace(status="new", mno_id=mno_id)]),
+    ), patch(
+        "app.services.report.build_utko_xlsx", return_value=b"xlsx"
+    ) as m_build, patch(
+        "app.services.report.audit", new=AsyncMock()
+    ):
+        await report_service.create_incidents_report(
+            session, _user(), base_url="", req=ReportCreateRequest()
+        )
+
+    args = m_build.call_args.args
+    assert by_mno in args  # {mno_id: Region.name}
+    assert index in args  # {ключ сопоставления: Region.name}
+
+
+@pytest.mark.asyncio
 async def test_create_by_ids_uses_list_by_ids_and_suffix(tmp_path, monkeypatch):
     """create по ids: list_by_ids + суффикс _выбранные в имени файла."""
     monkeypatch.setattr(report_service.settings, "STORAGE_DIR", str(tmp_path))
@@ -257,6 +306,11 @@ async def test_create_by_ids_uses_list_by_ids_and_suffix(tmp_path, monkeypatch):
     ids_row = SimpleNamespace(status="new")
     with patch(
         "app.services.report.incident_type_service.labels_map",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        # Индекс справочника регионов (канон «Субъект РФ» для инцидентов без МНО) —
+        # ходит в БД, которой в тестах нет; поведение резолва проверяет test_utko_export.
+        "app.services.report.region_service.canonical_index",
         new=AsyncMock(return_value={}),
     ), patch(
         "app.services.report.incident_service.list_by_ids",

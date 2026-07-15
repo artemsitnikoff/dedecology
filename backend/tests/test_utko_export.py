@@ -2,10 +2,14 @@
 
 from datetime import datetime, timezone
 from io import BytesIO
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from openpyxl import load_workbook
 
 from app.models import Incident
+from app.services import region as region_service
+from app.services.addr_norm import region_match_key
 from app.services.utko_export import build_utko_xlsx
 
 
@@ -111,6 +115,136 @@ def test_utko_subject_from_our_directory_by_mno():
     wb2 = load_workbook(BytesIO(build_utko_xlsx([inc], "", {"fire": "x"}, region_by_mno={})))
     row2 = [c.value for c in next(wb2.active.iter_rows(min_row=5))]
     assert row2[0] == "Самарская обл (DaData)"
+
+
+# --- «Субъект РФ» из справочника для инцидентов БЕЗ МНО ------------------------
+
+# 85 субъектов РОВНО как их отдаёт ФГИС (GET filters/regions) и как они записаны в листе
+# «Субъекты РФ» шаблона УТКО — символ в символ (обычный дефис в «… - Югра», «г. Москва»).
+# Именно эти имена лежат в нашей таблице regions (синхр. из ФГИС). Зафиксированы копией:
+# тесты офлайн, в сеть НЕ ходят. (В шаблоне есть ещё 5 — новые территории и Байконур:
+# ФГИС их не отдаёт, в справочнике их нет.)
+_FGIS_SUBJECTS = [
+    "Республика Адыгея", "Республика Башкортостан", "Республика Бурятия",
+    "Республика Алтай", "Республика Дагестан", "Республика Ингушетия",
+    "Кабардино-Балкарская Республика", "Республика Калмыкия",
+    "Карачаево-Черкесская Республика", "Республика Карелия", "Республика Коми",
+    "Республика Марий Эл", "Республика Мордовия", "Республика Саха (Якутия)",
+    "Республика Северная Осетия - Алания", "Республика Татарстан", "Республика Тыва",
+    "Удмуртская Республика", "Республика Хакасия", "Чеченская Республика",
+    "Чувашская Республика - Чувашия", "Алтайский край", "Краснодарский край",
+    "Красноярский край", "Приморский край", "Ставропольский край", "Хабаровский край",
+    "Амурская область", "Архангельская область", "Астраханская область",
+    "Белгородская область", "Брянская область", "Владимирская область",
+    "Волгоградская область", "Вологодская область", "Воронежская область",
+    "Ивановская область", "Иркутская область", "Калининградская область",
+    "Калужская область", "Камчатский край", "Кемеровская область - Кузбасс",
+    "Кировская область", "Костромская область", "Курганская область", "Курская область",
+    "Ленинградская область", "Липецкая область", "Магаданская область",
+    "Московская область", "Мурманская область", "Нижегородская область",
+    "Новгородская область", "Новосибирская область", "Омская область",
+    "Оренбургская область", "Орловская область", "Пензенская область", "Пермский край",
+    "Псковская область", "Ростовская область", "Рязанская область", "Самарская область",
+    "Саратовская область", "Сахалинская область", "Свердловская область",
+    "Смоленская область", "Тамбовская область", "Тверская область", "Томская область",
+    "Тульская область", "Тюменская область", "Ульяновская область",
+    "Челябинская область", "Забайкальский край", "Ярославская область", "г. Москва",
+    "г. Санкт-Петербург", "Еврейская автономная область", "Ненецкий автономный округ",
+    "Ханты-Мансийский автономный округ - Югра", "Чукотский автономный округ",
+    "Ямало-Ненецкий автономный округ", "Республика Крым", "г. Севастополь",
+]
+
+
+async def _canonical_index(names=_FGIS_SUBJECTS) -> dict[str, str]:
+    """Реальный region.canonical_index на поддельной сессии (БД в тестах нет).
+
+    Формула ключа в тесте НЕ дублируется — индекс строит production-код.
+    """
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=list(names))))
+    )
+    return await region_service.canonical_index(session)
+
+
+async def _subject_of(region: str, **kw) -> str:
+    """«Субъект РФ» (колонка 1) выгрузки инцидента с данным inc.region."""
+    inc = _incident(region=region, **kw)
+    index = await _canonical_index()
+    wb = load_workbook(
+        BytesIO(build_utko_xlsx([inc], "", {"fire": "x"}, region_index=index))
+    )
+    return next(wb.active.iter_rows(min_row=5))[0].value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # Главный кейс жалобы: normalize_region срезает ведущий «г.» → в inc.region лежит
+        # «Санкт-Петербург», а УТКО принимает только «г. Санкт-Петербург».
+        ("Санкт-Петербург", "г. Санкт-Петербург"),
+        ("Москва", "г. Москва"),
+        ("Севастополь", "г. Севастополь"),
+        # Сокращённые формы DaData.
+        ("Респ Татарстан", "Республика Татарстан"),
+        ("Мурманская обл", "Мурманская область"),
+        ("Еврейская Аобл", "Еврейская автономная область"),
+        # Длинное тире (DaData/AI) → канон справочника с обычным дефисом.
+        ("Ханты-Мансийский автономный округ — Югра", "Ханты-Мансийский автономный округ - Югра"),
+        ("Кемеровская область—Кузбасс", "Кемеровская область - Кузбасс"),
+        # Регистр и «ё».
+        ("САНКТ-ПЕТЕРБУРГ", "г. Санкт-Петербург"),
+        ("самарская область", "Самарская область"),
+    ],
+)
+async def test_utko_subject_resolved_from_directory_without_mno(raw, expected):
+    """Инцидент БЕЗ МНО: inc.region сопоставляется со справочником → каноническое имя."""
+    assert await _subject_of(raw) == expected
+
+
+@pytest.mark.asyncio
+async def test_utko_subject_mno_wins_over_incident_region_text():
+    """МНО из ФГИС авторитетнее текста inc.region: справочник по mno_id имеет приоритет."""
+    from uuid import uuid4
+
+    mid = uuid4()
+    inc = _incident(region="Москва", mno_id=mid)  # текст резолвился бы в «г. Москва»
+    index = await _canonical_index()
+    wb = load_workbook(
+        BytesIO(
+            build_utko_xlsx(
+                [inc], "", {"fire": "x"},
+                region_by_mno={mid: "Самарская область"},
+                region_index=index,
+            )
+        )
+    )
+    row = [c.value for c in next(wb.active.iter_rows(min_row=5))]
+    assert row[0] == "Самарская область"  # из МНО, а не из inc.region
+
+
+@pytest.mark.asyncio
+async def test_utko_subject_unknown_region_kept_as_is():
+    """Субъекта нет в справочнике → пишем текст как есть (данные не теряем)."""
+    assert await _subject_of("Нарния") == "Нарния"
+
+
+@pytest.mark.asyncio
+async def test_utko_subject_empty_region_does_not_crash():
+    """Пустой inc.region не роняет выгрузку и не подхватывает случайный канон."""
+    assert await _subject_of("") in (None, "")
+
+
+@pytest.mark.asyncio
+async def test_region_match_key_no_collisions_on_all_85_subjects():
+    """Ключ сопоставления различает все 85 субъектов и резолвит каждого в себя."""
+    index = await _canonical_index()
+    assert len(_FGIS_SUBJECTS) == 85
+    assert len(index) == 85  # ключи уникальны — ни один субъект не затёр другого
+    assert len({region_match_key(n) for n in _FGIS_SUBJECTS}) == 85
+    for name in _FGIS_SUBJECTS:
+        assert await _subject_of(name) == name
 
 
 def test_utko_subtype_label_for_no_access():

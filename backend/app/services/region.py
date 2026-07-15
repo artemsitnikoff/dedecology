@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.errors import ConflictError, NotFoundError
 from ..models import Incident, Mno, Region
 from ..schemas.region import RegionDetail, RegionListItem
+from .addr_norm import normalize_region, region_match_key
 from .audit import audit
 from .federal_districts import fed_code, fed_name
 
@@ -105,6 +106,21 @@ async def list_regions(
     inc_counts = await _incident_counts(session)
     items = [_to_list_item(r, mno_counts, inc_counts) for r in rows]
     return _sort_items(items, sort, order)
+
+
+async def canonical_index(session: AsyncSession) -> dict[str, str]:
+    """{ключ сопоставления → каноническое ``Region.name``} по всему справочнику.
+
+    Для УТКО-выгрузки: имя субъекта в инциденте — свободный текст DaData/AI, а УТКО
+    принимает ТОЛЬКО имена из справочника (он синхронизирован из ФГИС и уже содержит
+    правильные формы: «г. Санкт-Петербург», «Кемеровская область - Кузбасс»). Индекс
+    позволяет привести текст инцидента к канону, когда МНО у инцидента нет.
+
+    ``normalize_region`` применяется к именам справочника — и к искомому значению у
+    вызывающего; функция идемпотентна, поэтому обе стороны приводятся одинаково.
+    """
+    names = (await session.execute(select(Region.name))).scalars().all()
+    return {region_match_key(normalize_region(n)): n for n in names if n}
 
 
 async def get_region(session: AsyncSession, code: str) -> RegionDetail:
