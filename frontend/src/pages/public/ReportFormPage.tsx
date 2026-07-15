@@ -457,20 +457,47 @@ export default function ReportFormPage() {
                 />
               </label>
 
-              {/* Время фотофиксации — не позже текущего момента (max + проверка при отправке) */}
+              {/* Время фотофиксации — не позже текущего момента (кламп в onChange +
+                  max для календаря + проверка при отправке) */}
               <label className="de-rf-field">
                 <span className="de-rf-label">Время фотофиксации</span>
                 <input
                   type="datetime-local"
                   className="de-rf-input"
                   value={photoTime}
+                  // max гасит будущие ДАТЫ в календаре, но НЕ ограничивает спиннеры
+                  // часов/минут — их подрезаем сами в onChange (ниже).
                   max={photoTimeMax}
                   // Подтягиваем границу точно к моменту открытия пикера — интервал
                   // может отстать на несколько секунд.
                   onFocus={() => setPhotoTimeMax(nowLocalDatetime())}
                   onChange={(e) => {
+                    const next = e.target.value;
+                    // Пустое значение допустимо (photo_time необязателен) — не
+                    // клампим и ошибкой не помечаем.
+                    if (!next) {
+                      setPhotoTimeError(null);
+                      setPhotoTime('');
+                      return;
+                    }
+                    // Сверяем со СВЕЖИМ временем, а не с photoTimeMax: тот тикает раз
+                    // в 30 с и, отстав, подрезал бы только что наступившую легитимную
+                    // минуту. Сравниваем ВСЮ строку YYYY-MM-DDTHH:mm целиком (дата +
+                    // время): фиксированная ширина с ведущими нулями делает
+                    // лексикографический порядок равным хронологическому, без парсинга
+                    // дат и часовых поясов. Дата в сравнении обязательна — иначе
+                    // прошлая дата с поздним временем (вчера 23:52 при текущих 23:13)
+                    // ошибочно считалась бы будущим.
+                    const now = nowLocalDatetime();
+                    if (next > now) {
+                      // Будущее не удерживаем в поле вовсе: подрезаем до «сейчас» и
+                      // честно объясняем — иначе неподвижные минуты читаются как баг.
+                      setPhotoTime(now);
+                      setPhotoTimeError('Нельзя выбрать будущее — подставлено текущее время.');
+                      return;
+                    }
                     setPhotoTimeError(null);
-                    setPhotoTime(e.target.value);
+                    setPhotoTime(next);
                   }}
                 />
                 {photoTimeError && <span className="de-rf-inline-err">{photoTimeError}</span>}
