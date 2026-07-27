@@ -9,6 +9,7 @@
 import asyncio
 import logging
 import math
+import os
 import re
 import shutil
 import uuid
@@ -46,6 +47,18 @@ _FULL_QUALITY = 85
 _THUMB_MAX_SIDE = (400, 400)
 _THUMB_QUALITY = 80
 _WHITE = (255, 255, 255)
+
+# УТКО-копия фото (`{i}_utko.jpg`): ФГИС УТКО отвергает фото >500 КБ, поэтому под
+# выгрузку кодируем отдельную «тощую» копию с ГАРАНТИЕЙ ≤1280×720 И ≤500000 байт
+# (безопасный потолок < 500*1024). FULL `{i}.jpg` для админки — НЕ трогаем.
+_UTKO_MAX_SIDE = (1280, 720)
+_UTKO_MAX_BYTES = 500_000
+_UTKO_QUALITY_START = 85
+_UTKO_QUALITY_MIN = 35
+# Гарды завершения подбора размера УТКО-копии: предел итераций даунскейла и нижний
+# порог стороны (даже высокоэнтропийный шум уложится в бюджет задолго до них).
+_UTKO_MAX_DOWNSCALE_STEPS = 8
+_UTKO_MIN_SIDE = 320
 
 # --- Карта выбора МНО в Макс-боте: самостоятельная сшивка тайлов OpenStreetMap ---
 # Отказались от Yandex Static Maps (ключ не прогревался). Рисуем карту сами из
@@ -560,6 +573,93 @@ def _save_variant(img: Image.Image, dest: Path, max_side, quality: int) -> None:
     variant.save(dest, "JPEG", quality=quality, optimize=True)
 
 
+def _atomic_write(dest: Path, data: bytes) -> None:
+    """Атомарная запись байтов: во временный файл рядом + os.replace (rename).
+
+    Конкурентная ленивая генерация УТКО-копии и параллельные читатели НЕ увидят
+    полу-записанный jpg — rename атомарен в пределах одной ФС. Временный файл при
+    сбое подчищается.
+    """
+    tmp = dest.with_name(f"{dest.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _save_bounded_variant(
+    img: Image.Image,
+    dest: Path,
+    max_side: tuple[int, int],
+    max_bytes: int,
+    q_start: int,
+    q_min: int,
+) -> None:
+    """Сохраняет JPEG-копию под ЖЁСТКИМ бюджетом размера файла ≤max_bytes.
+
+    Алгоритм ВСЕГДА завершается и ГАРАНТИРУЕТ результат ≤max_bytes:
+      1. variant = downscale img до max_side (thumbnail — аспект сохранён, апскейла нет);
+      2. кодируем JPEG optimize=True, снижая качество от q_start к q_min шагом ~10 —
+         первый буфер ≤max_bytes выигрывает и пишется атомарно;
+      3. если даже при q_min буфер > max_bytes — уменьшаем сторону variant на 0.85 и
+         повторяем подбор качества. ЖЁСТКИЙ предел итераций даунскейла
+         (_UTKO_MAX_DOWNSCALE_STEPS) и нижний порог стороны (_UTKO_MIN_SIDE)
+         гарантируют завершение; на пределе пишем наименьший полученный буфер.
+    """
+    variant = img.copy()
+    variant.thumbnail(max_side)  # только downscale, аспект сохранён
+
+    smallest: bytes | None = None
+    for _ in range(_UTKO_MAX_DOWNSCALE_STEPS + 1):
+        # Подбор качества сверху вниз при текущем размере стороны.
+        for q in range(q_start, q_min - 1, -10):
+            buf = BytesIO()
+            variant.save(buf, "JPEG", quality=q, optimize=True)
+            data = buf.getvalue()
+            # Держим последний (при монотонном снижении качества — наименьший) буфер
+            # как страховку, если бюджет не удастся взять даже на минимальном размере.
+            smallest = data
+            if len(data) <= max_bytes:
+                _atomic_write(dest, data)
+                return
+        # Бюджет не взят даже при q_min — уменьшаем сторону и повторяем подбор.
+        new_w = int(variant.width * 0.85)
+        new_h = int(variant.height * 0.85)
+        if new_w < _UTKO_MIN_SIDE and new_h < _UTKO_MIN_SIDE:
+            break  # дальше мельчить нельзя — выходим на запись страховочного буфера
+        variant = variant.resize((max(new_w, 1), max(new_h, 1)))
+
+    # Предел даунскейла достигнут (для реальных фото недостижимо: 320px q35 JPEG
+    # всегда < 500 КБ). Пишем наименьший полученный буфер. Пустой «jpeg» (b"") — это
+    # молчаливый фейк (правило №9), поэтому его НЕ пишем: smallest всегда валиден
+    # (внутренний цикл идёт ≥1 раз при q_start >= q_min); нарушенный инвариант — громкий сбой.
+    if smallest is None:
+        raise RuntimeError("УТКО-копия: не удалось закодировать ни одного варианта")
+    _atomic_write(dest, smallest)
+
+
+def make_utko_copy(full_jpg: Path, dest_utko: Path) -> None:
+    """Создаёт УТКО-копию `{i}_utko.jpg` из существующего FULL `{i}.jpg`.
+
+    ЕДИНЫЙ источник правды для ленивой генерации в эндпоинте фото и для бэкфилла
+    (app.backfill_utko_photos): открывает FULL через Pillow (+convert RGB) и пишет
+    ограниченную копию ≤1280×720 и ≤500000 байт (_save_bounded_variant, атомарно).
+    """
+    with Image.open(full_jpg) as img:
+        img.load()
+        rgb = img.convert("RGB")
+    _save_bounded_variant(
+        rgb,
+        dest_utko,
+        _UTKO_MAX_SIDE,
+        _UTKO_MAX_BYTES,
+        _UTKO_QUALITY_START,
+        _UTKO_QUALITY_MIN,
+    )
+
+
 async def _decode_uploads(photo_files: list) -> list[Image.Image]:
     """Валидирует и декодирует загруженные фото (без записи на диск).
 
@@ -582,14 +682,20 @@ async def _decode_uploads(photo_files: list) -> list[Image.Image]:
 
 
 def _store_photos(
-    dest_dir: Path, url_prefix: str, decoded: list[Image.Image]
+    dest_dir: Path,
+    url_prefix: str,
+    decoded: list[Image.Image],
+    make_utko: bool = True,
 ) -> tuple[list[str], int]:
     """Сохраняет уже декодированные фото в dest_dir → (photo_urls, count).
 
     Обобщённый конвейер записи (общий для инцидентов и волонтёрских МНО). Каждое
     фото пере-кодируется в JPEG: FULL `{i}.jpg` (просмотр) + THUMB `{i}_thumb.jpg`
-    (превью); url каждого фото = `{url_prefix}/{i}.jpg`. При сбое записи частично
-    созданный каталог удаляется (не оставляем мусор на диске).
+    (превью); url каждого фото = `{url_prefix}/{i}.jpg`. При make_utko=True сверх
+    того пишется УТКО-копия `{i}_utko.jpg` (≤1280×720 и ≤500000 байт) — она нужна
+    только фото инцидентов (идут в выгрузку УТКО); волонтёрские МНО в УТКО не идут,
+    поэтому вызывают с make_utko=False. При сбое записи частично созданный каталог
+    удаляется (не оставляем мусор на диске).
     """
     if not decoded:
         return [], 0
@@ -605,6 +711,15 @@ def _store_photos(
                 _THUMB_MAX_SIDE,
                 _THUMB_QUALITY,
             )
+            if make_utko:
+                _save_bounded_variant(
+                    img,
+                    dest_dir / f"{i}_utko.jpg",
+                    _UTKO_MAX_SIDE,
+                    _UTKO_MAX_BYTES,
+                    _UTKO_QUALITY_START,
+                    _UTKO_QUALITY_MIN,
+                )
             photo_urls.append(f"{url_prefix}/{i}.jpg")
     except Exception:
         shutil.rmtree(dest_dir, ignore_errors=True)
@@ -646,12 +761,14 @@ async def process_mno_photos(mno_id, photo_files: list) -> tuple[list[str], int]
     Зеркалит конвейер фото инцидентов: те же лимиты (тип/размер/≤3 шт.) и
     пере-кодирование в JPEG. Кладёт в {STORAGE_DIR}/mno/{mno_id}/, url каждого фото =
     /api/v1/intake/mno-photo/{mno_id}/{i}.jpg. Невалидное фото → ValidationError (400).
+    make_utko=False — волонтёрские МНО в выгрузку УТКО не идут, УТКО-копия им не нужна.
     """
     decoded = await _decode_uploads(photo_files)
     return _store_photos(
         _mno_dir() / str(mno_id),
         f"/api/v1/intake/mno-photo/{mno_id}",
         decoded,
+        make_utko=False,
     )
 
 

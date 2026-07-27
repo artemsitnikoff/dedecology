@@ -7,6 +7,7 @@
 недокументирован, разбираем толерантно.
 """
 
+import asyncio
 import hmac
 import logging
 import re
@@ -41,6 +42,13 @@ from ...services.incident_subtypes import INCIDENT_SUBTYPES
 
 logger = logging.getLogger(__name__)
 
+# Ограничитель параллельной ЛЕНИВОЙ генерации УТКО-копий на ПУБЛИЧНОМ роуте отдачи
+# фото: кодирование JPEG — CPU-работа в thread-pool, и без потолка шквал запросов к
+# ещё-не-сгенерированным копиям мог бы засадить пул (усиление нагрузки на неаутентиф.
+# роуте). Реальная нагрузка мала (копии создаются при загрузке и прогреваются
+# бэкфиллом), 4 одновременных кодирований достаточно.
+_UTKO_LAZY_SEM = asyncio.Semaphore(4)
+
 router = APIRouter()
 
 
@@ -62,9 +70,12 @@ def _require_intake_token(request: Request) -> None:
     ):
         raise ForbiddenError("Неверный токен приёма")
 
-# Имя файла фото: числовой индекс + опц. суффикс _thumb, только .jpg (анти-traversal).
-# Все фото пере-кодируются в JPEG при загрузке: FULL `{i}.jpg`, THUMB `{i}_thumb.jpg`.
-_PHOTO_FILENAME_RE = re.compile(r"^[0-9]+(_thumb)?\.jpg$")
+# Имя файла фото: числовой индекс + опц. суффикс _thumb/_utko, только .jpg (анти-traversal).
+# Все фото пере-кодируются в JPEG при загрузке: FULL `{i}.jpg`, THUMB `{i}_thumb.jpg`;
+# УТКО-копия `{i}_utko.jpg` (≤1280×720 и ≤500 КБ) — только у фото инцидентов (ленивая
+# генерация из FULL в get_photo). Для МНО-фото `_utko` не существует → общий regex просто
+# отдаст 404 на такой файл (ленивую генерацию туда НЕ добавляем).
+_PHOTO_FILENAME_RE = re.compile(r"^[0-9]+(_thumb|_utko)?\.jpg$")
 # Минимальная длина запроса для подсказок адреса.
 _SUGGEST_MIN_LEN = 3
 # Потолок count в подсказках (защита от перебора DaData).
@@ -536,9 +547,14 @@ async def mark_notified(
 async def get_photo(incident_id: str, filename: str):
     """ПУБЛИЧНО: отдаёт байты фото обращения. Жёсткий анти-traversal.
 
-    incident_id обязан быть UUID, filename — `^[0-9]+(_thumb)?\\.jpg$`
-    (FULL `{i}.jpg` или THUMB `{i}_thumb.jpg`), итоговый путь обязан остаться
-    внутри каталога incidents.
+    incident_id обязан быть UUID, filename — `^[0-9]+(_thumb|_utko)?\\.jpg$`
+    (FULL `{i}.jpg`, THUMB `{i}_thumb.jpg` или УТКО-копия `{i}_utko.jpg`), итоговый
+    путь обязан остаться внутри каталога incidents.
+
+    УТКО-копия `{i}_utko.jpg` (≤1280×720 и ≤500 КБ, для выгрузки в ФГИС УТКО) может
+    отсутствовать на диске у старых инцидентов — тогда лениво генерируем её из FULL
+    `{i}.jpg` того же каталога (make_utko_copy, вне event-loop через to_thread). Нет
+    ни FULL, ни УТКО-копии → 404.
     """
     try:
         uuid.UUID(incident_id)
@@ -551,6 +567,27 @@ async def get_photo(incident_id: str, filename: str):
     path = (base_dir / incident_id / filename).resolve()
     if base_dir not in path.parents:
         raise NotFoundError("Фото")
+
+    # УТКО-копии нет на диске — пробуем сгенерировать из FULL `{i}.jpg` (ленивый бэкфилл
+    # для старых инцидентов). Full-путь выводим заменой суффикса и ПЕРЕПРОВЕРЯЕМ его
+    # анти-traversal (внутри base_dir) — не доверяем деривату вслепую.
+    if filename.endswith("_utko.jpg") and not path.is_file():
+        full = (base_dir / incident_id / filename.replace("_utko.jpg", ".jpg")).resolve()
+        if base_dir in full.parents and full.is_file():
+            try:
+                # Семафор ограничивает параллельную CPU-нагрузку публичного роута;
+                # повторная проверка под ним схлопывает конкурентные промахи по одному
+                # ключу (сосед мог создать копию, пока мы ждали слот).
+                async with _UTKO_LAZY_SEM:
+                    if not path.is_file():
+                        await asyncio.to_thread(intake_service.make_utko_copy, full, path)
+            except Exception:
+                # Битый/усечённый FULL или сбой кодирования → НЕ 500: логируем и
+                # проваливаемся в 404 ниже (как в бэкфилле — сбой одного файла не фатален).
+                logger.warning(
+                    "get_photo: не удалось сгенерировать УТКО-копию %s", path, exc_info=True
+                )
+
     if not path.is_file():
         raise NotFoundError("Фото")
 
@@ -569,8 +606,10 @@ async def get_mno_photo(mno_id: str, filename: str):
     """ПУБЛИЧНО: отдаёт байты фото волонтёрского МНО. Жёсткий анти-traversal.
 
     Зеркалит get_photo (фото инцидентов), но каталог — {STORAGE_DIR}/mno/{mno_id}/.
-    mno_id обязан быть UUID, filename — `^[0-9]+(_thumb)?\\.jpg$` (FULL `{i}.jpg` или
-    THUMB `{i}_thumb.jpg`), итоговый путь обязан остаться внутри каталога mno.
+    mno_id обязан быть UUID, filename — общий regex `^[0-9]+(_thumb|_utko)?\\.jpg$`
+    (у МНО есть FULL `{i}.jpg` и THUMB `{i}_thumb.jpg`; УТКО-копий `{i}_utko.jpg` у МНО
+    НЕТ — ленивую генерацию сюда не добавляем, такой файл просто вернёт 404). Итоговый
+    путь обязан остаться внутри каталога mno.
     """
     try:
         uuid.UUID(mno_id)

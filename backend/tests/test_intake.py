@@ -3109,3 +3109,194 @@ async def test_max_map_upstream_error_502(client, monkeypatch):
         )
     assert resp.status_code == 502
     assert resp.json()["error"]["code"] == "MAP_UPSTREAM_ERROR"
+
+
+# --------------------------------------------------------------------------- #
+# УТКО-копия фото инцидента: `{i}_utko.jpg` (≤1280×720 и ≤500000 байт)         #
+# --------------------------------------------------------------------------- #
+
+import os as _os  # noqa: E402
+
+from app.services.intake import (  # noqa: E402
+    _decode_image,
+    _store_photos,
+    make_utko_copy,
+    process_mno_photos,
+    _UTKO_MAX_BYTES,
+    _UTKO_MAX_SIDE,
+)
+
+
+def _noise_jpeg_bytes(size=(3000, 2000)) -> bytes:
+    """Крупный ВЫСОКОЭНТРОПИЙНЫЙ JPEG (случайные пиксели) — плохо сжимается.
+
+    Именно такой сценарий заставляет _save_bounded_variant реально дробить размер:
+    full-копия шума заведомо >500 КБ, а УТКО-копия ОБЯЗАНА уложиться в бюджет.
+    """
+    w, h = size
+    img = Image.frombytes("RGB", (w, h), _os.urandom(w * h * 3))
+    buf = BytesIO()
+    img.save(buf, "JPEG", quality=95)
+    return buf.getvalue()
+
+
+def test_make_utko_copy_bounds_large_noise_image(tmp_path):
+    """Крупный высокоэнтропийный full → УТКО-копия ≤500000 байт И ≤1280×720."""
+    full = tmp_path / "0.jpg"
+    full.write_bytes(_noise_jpeg_bytes((3000, 2000)))
+    # full-копия шума заведомо крупная — иначе тест ничего не проверяет.
+    assert full.stat().st_size > _UTKO_MAX_BYTES
+
+    dest = tmp_path / "0_utko.jpg"
+    make_utko_copy(full, dest)
+
+    assert dest.is_file()
+    assert _os.path.getsize(dest) <= _UTKO_MAX_BYTES  # ЖЁСТКИЙ бюджет размера
+    with Image.open(dest) as img:
+        assert img.format == "JPEG"
+        w, h = img.size
+        assert w <= _UTKO_MAX_SIDE[0] and h <= _UTKO_MAX_SIDE[1]
+
+
+def test_make_utko_copy_small_image_not_upscaled(tmp_path):
+    """Маленький full (100×100) → копия валидна и НЕ апскейлится (аспект/размер сохранён)."""
+    full = tmp_path / "0.jpg"
+    src = Image.new("RGB", (100, 100), (0, 120, 0))
+    buf = BytesIO()
+    src.save(buf, "JPEG")
+    full.write_bytes(buf.getvalue())
+
+    dest = tmp_path / "0_utko.jpg"
+    make_utko_copy(full, dest)
+
+    assert dest.is_file()
+    assert _os.path.getsize(dest) <= _UTKO_MAX_BYTES
+    with Image.open(dest) as img:
+        assert img.format == "JPEG"
+        # thumbnail не апскейлит: сторона не выросла ни выше исходной, ни выше лимита.
+        assert img.size[0] <= 100 and img.size[1] <= 100
+        assert img.size[0] <= _UTKO_MAX_SIDE[0] and img.size[1] <= _UTKO_MAX_SIDE[1]
+
+
+def test_store_photos_make_utko_true_writes_utko_copy(tmp_path):
+    """_store_photos(make_utko=True) кладёт `{i}_utko.jpg` рядом с FULL/THUMB."""
+    dest_dir = tmp_path / "incidents" / "x"
+    decoded = [_decode_image(_jpeg_bytes(), "a.jpg"), _decode_image(_jpeg_bytes(), "b.jpg")]
+    urls, count = _store_photos(dest_dir, "/api/v1/intake/photo/x", decoded, make_utko=True)
+
+    assert count == 2
+    for i in range(2):
+        assert (dest_dir / f"{i}.jpg").is_file()
+        assert (dest_dir / f"{i}_thumb.jpg").is_file()
+        assert (dest_dir / f"{i}_utko.jpg").is_file()
+        assert _os.path.getsize(dest_dir / f"{i}_utko.jpg") <= _UTKO_MAX_BYTES
+        with Image.open(dest_dir / f"{i}_utko.jpg") as _im:  # реально ≤1280×720
+            assert _im.size[0] <= _UTKO_MAX_SIDE[0] and _im.size[1] <= _UTKO_MAX_SIDE[1]
+
+
+@pytest.mark.asyncio
+async def test_process_mno_photos_no_utko_copy(monkeypatch, tmp_path):
+    """Волонтёрские МНО в УТКО не идут: `{i}_utko.jpg` НЕ создаётся (make_utko=False)."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    mid = uuid4()
+    urls, count = await process_mno_photos(
+        mid, [_FakeUpload(_jpeg_bytes(), filename="p.png", content_type="image/png")]
+    )
+    assert count == 1
+    mno_dir = tmp_path / "mno" / str(mid)
+    assert (mno_dir / "0.jpg").is_file()
+    assert (mno_dir / "0_thumb.jpg").is_file()
+    assert not (mno_dir / "0_utko.jpg").exists()  # УТКО-копии у МНО нет
+
+
+# --- Эндпоинт get_photo: отдача/ленивая генерация УТКО-копии -------------------
+
+
+@pytest.mark.asyncio
+async def test_photo_serves_existing_utko(client, monkeypatch, tmp_path):
+    """GET `{i}_utko.jpg`: существующий файл отдаётся как есть (JPEG, nosniff)."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    iid = str(uuid4())
+    inc_dir = tmp_path / "incidents" / iid
+    inc_dir.mkdir(parents=True)
+    (inc_dir / "0.jpg").write_bytes(_jpeg_bytes())
+    make_utko_copy(inc_dir / "0.jpg", inc_dir / "0_utko.jpg")
+    before = (inc_dir / "0_utko.jpg").read_bytes()
+
+    resp = await client.get(f"/api/v1/intake/photo/{iid}/0_utko.jpg")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    # Существующий файл не пересобирался — байты те же.
+    assert (inc_dir / "0_utko.jpg").read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_photo_lazy_generates_utko_from_full(client, monkeypatch, tmp_path):
+    """GET `{i}_utko.jpg` при отсутствии копии, но наличии FULL → лениво генерит и отдаёт."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    iid = str(uuid4())
+    inc_dir = tmp_path / "incidents" / iid
+    inc_dir.mkdir(parents=True)
+    (inc_dir / "0.jpg").write_bytes(_jpeg_bytes())
+    assert not (inc_dir / "0_utko.jpg").exists()
+
+    resp = await client.get(f"/api/v1/intake/photo/{iid}/0_utko.jpg")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+    # Копия материализовалась на диске и укладывается в бюджет.
+    assert (inc_dir / "0_utko.jpg").is_file()
+    assert _os.path.getsize(inc_dir / "0_utko.jpg") <= _UTKO_MAX_BYTES
+    with Image.open(inc_dir / "0_utko.jpg") as _im:  # ленивый путь тоже даунскейлит ≤1280×720
+        assert _im.size[0] <= _UTKO_MAX_SIDE[0] and _im.size[1] <= _UTKO_MAX_SIDE[1]
+
+
+@pytest.mark.asyncio
+async def test_photo_utko_404_when_no_full(client, monkeypatch, tmp_path):
+    """GET `{i}_utko.jpg` без FULL и без копии → 404 (лениво генерить не из чего)."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    iid = str(uuid4())
+    (tmp_path / "incidents" / iid).mkdir(parents=True)
+
+    resp = await client.get(f"/api/v1/intake/photo/{iid}/0_utko.jpg")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
+    assert not (tmp_path / "incidents" / iid / "0_utko.jpg").exists()
+
+
+@pytest.mark.asyncio
+async def test_photo_utko_traversal_blocked(client, monkeypatch, tmp_path):
+    """Анти-traversal сохранён: `..%2f`-подобное имя не по паттерну → 404."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    iid = str(uuid4())
+    resp = await client.get(f"/api/v1/intake/photo/{iid}/..%2f..%2fsecret_utko.jpg")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_photo_lazy_gen_corrupt_full_returns_404(client, monkeypatch, tmp_path):
+    """Битый/усечённый FULL `{i}.jpg` → ленивая генерация НЕ падает 500: логируем и 404."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    iid = str(uuid4())
+    inc_dir = tmp_path / "incidents" / iid
+    inc_dir.mkdir(parents=True)
+    (inc_dir / "0.jpg").write_bytes(b"this is not a valid jpeg at all")  # битый FULL
+
+    resp = await client.get(f"/api/v1/intake/photo/{iid}/0_utko.jpg")
+    assert resp.status_code == 404  # НЕ 500
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
+    assert not (inc_dir / "0_utko.jpg").exists()  # пустую/фейковую копию не создаём
+
+
+@pytest.mark.asyncio
+async def test_mno_photo_utko_no_lazy_gen_404(client, monkeypatch, tmp_path):
+    """У МНО УТКО-копий нет: GET `{i}_utko.jpg` → 404 и НИЧЕГО не генерит (ленивый путь только у инцидентов)."""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    mid = str(uuid4())
+    mno_dir = tmp_path / "mno" / mid
+    mno_dir.mkdir(parents=True)
+    (mno_dir / "0.jpg").write_bytes(_jpeg_bytes())  # FULL есть, но лениво генерить нельзя
+
+    resp = await client.get(f"/api/v1/intake/mno-photo/{mid}/0_utko.jpg")
+    assert resp.status_code == 404
+    assert not (mno_dir / "0_utko.jpg").exists()  # get_mno_photo УТКО-копию не создаёт

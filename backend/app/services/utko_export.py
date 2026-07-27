@@ -8,6 +8,11 @@
 Реестровый № МНО · Дата и время фотофиксации · Адрес · Тип · Подтип · Описание · Ссылка
 на фото ×6 (просто текстовые полные URL). «Подтип» — подпись из services/incident_subtypes.
 
+Ссылки на фото ведут на УТКО-КОПИЮ `{i}_utko.jpg` (≤1280×720 и ≤500 КБ), а НЕ на FULL
+`{i}.jpg`: ФГИС УТКО отвергает фото >500 КБ, а full-копия админки бывает крупнее. URL
+берётся из inc.photo_urls (`.../photo/{id}/{i}.jpg`) вставкой суффикса `_utko` (эндпоинт
+get_photo лениво сгенерит копию из FULL, если её ещё нет на диске).
+
 «Субъект РФ» ВСЕГДА резолвится в имя из НАШЕГО справочника регионов (синхр. из ФГИС —
 там формы, которые УТКО принимает: «г. Санкт-Петербург», «Кемеровская область - Кузбасс»):
 сперва по МНО инцидента, иначе — сопоставлением текста inc.region со справочником
@@ -18,6 +23,7 @@
 выпадающие списки в выходном файле пропадают. Сам шаблон в репозитории их сохраняет.
 """
 
+import re
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
@@ -69,10 +75,25 @@ def _abs_url(u, base_url: str) -> str:
     return ""
 
 
+def _utko_variant_url(u: str) -> str:
+    """URL нашего фото инцидента → ссылка на УТКО-копию `{i}_utko.jpg`.
+
+    Вставляет суффикс `_utko` перед финальным `.jpg`, ТОЛЬКО если это наш URL фото
+    инцидента (путь `.../api/v1/intake/photo/{id}/{i}.jpg`, относительный или полный).
+    Прочие/внешние URL/плейсхолдеры не трогаем — вернём как есть.
+    """
+    if re.search(r"/api/v1/intake/photo/[^/]+/[0-9]+\.jpg$", u):
+        return u[: -len(".jpg")] + "_utko.jpg"
+    return u
+
+
 def _photo_urls(inc: Incident, base_url: str) -> list[str]:
-    """До _PHOTO_SLOTS полных URL фото; недостающие — пустые строки (ровно _PHOTO_SLOTS)."""
+    """До _PHOTO_SLOTS полных URL УТКО-копий фото; недостающие — пустые (ровно _PHOTO_SLOTS).
+
+    Ссылки ведут на УТКО-копию `{i}_utko.jpg` (≤500 КБ) — см. докстринг модуля.
+    """
     urls = [_abs_url(u, base_url) for u in (inc.photo_urls or [])]
-    urls = [u for u in urls if u][:_PHOTO_SLOTS]
+    urls = [_utko_variant_url(u) for u in urls if u][:_PHOTO_SLOTS]
     return urls + [""] * (_PHOTO_SLOTS - len(urls))
 
 

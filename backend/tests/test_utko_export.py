@@ -91,10 +91,33 @@ def test_utko_row_maps_fields_and_photo_urls():
     assert row[4] == "Возгорание в контейнере"    # Тип инцидента (по type_labels)
     assert row[5] in (None, "")                    # Подтип — пусто (поля нет)
     assert row[6] == "Возгорание в контейнере"    # Описание (comment)
-    # 6 столбцов «Ссылка на фото»: 2 полных URL + 4 пустых.
-    assert row[7] == "https://ecopulse.reo.ru/api/v1/intake/photo/abc/0.jpg"
-    assert row[8] == "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1.jpg"
+    # 6 столбцов «Ссылка на фото»: 2 URL УТКО-копий (≤500 КБ) + 4 пустых.
+    assert row[7] == "https://ecopulse.reo.ru/api/v1/intake/photo/abc/0_utko.jpg"
+    assert row[8] == "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1_utko.jpg"
     assert all(row[i] in (None, "") for i in range(9, 13))
+
+
+def test_utko_photo_urls_point_to_utko_copies():
+    """Ссылки на фото ведут на УТКО-копию `{i}_utko.jpg` (относительные и абсолютные)."""
+    inc = _incident(
+        photos=2,
+        photo_urls=[
+            "/api/v1/intake/photo/abc/0.jpg",  # относительный наш URL
+            "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1.jpg",  # абсолютный наш URL
+        ],
+    )
+    ws = _rows([inc], base_url="https://ecopulse.reo.ru")
+    row = [c.value for c in next(ws.iter_rows(min_row=5))]
+    assert row[7] == "https://ecopulse.reo.ru/api/v1/intake/photo/abc/0_utko.jpg"
+    assert row[8] == "https://ecopulse.reo.ru/api/v1/intake/photo/abc/1_utko.jpg"
+
+
+def test_utko_external_photo_urls_untouched():
+    """Внешние (не наши) URL фото НЕ получают суффикс _utko — идут как есть."""
+    inc = _incident(photos=1, photo_urls=["https://external.example/img/0.jpg"])
+    ws = _rows([inc], base_url="https://ecopulse.reo.ru")
+    row = [c.value for c in next(ws.iter_rows(min_row=5))]
+    assert row[7] == "https://external.example/img/0.jpg"  # чужой URL не трогаем
 
 
 def test_utko_subject_from_our_directory_by_mno():
