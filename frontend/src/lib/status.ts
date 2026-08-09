@@ -70,12 +70,12 @@ export const SOURCE: Record<Source, SourceMeta> = {
   },
   app: {
     label: 'Приложение',
-    bg: 'var(--ark-blue-100)',
-    fg: 'var(--ark-blue-600)',
+    bg: 'var(--de-teal-100)',
+    fg: 'var(--de-teal-600)',
   },
   telegram: {
     label: 'Telegram',
-    bg: 'var(--ark-green-100)',
-    fg: 'var(--ark-green-600)',
+    bg: 'var(--ark-blue-100)',
+    fg: 'var(--ark-blue-600)',
   },
 };
