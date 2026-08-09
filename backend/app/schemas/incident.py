@@ -6,7 +6,7 @@ from datetime import datetime
 from .base import ORMBase
 
 IncidentStatus = Literal["new", "found", "none", "exported"]
-IncidentSource = Literal["max", "form", "app"]
+IncidentSource = Literal["max", "form", "app", "telegram"]
 
 
 class IncidentListItem(ORMBase):
