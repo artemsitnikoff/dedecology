@@ -77,4 +77,16 @@
                 echo "maxbot not running — skip (поднять: --profile maxbot up -d --build maxbot)"
                fi
               fi
+              # telegrambot — отдельный сервис под профилем (аналог maxbot). Пересобрать+
+              # перезапустить, если менялись его файлы И он уже запущен (первый запуск — вручную).
+              if echo "$CHANGED" | grep -qE "^telegrambot/"; then
+               if [ -n "$(docker compose -f docker-compose.prod.yml --profile telegrambot ps -q telegrambot)" ]; then
+                echo "Rebuild + restart telegrambot"
+                docker compose -f docker-compose.prod.yml --profile telegrambot build telegrambot \
+                  && docker compose -f docker-compose.prod.yml --profile telegrambot up -d telegrambot \
+                  || echo "WARN: telegrambot rebuild failed"
+               else
+                echo "telegrambot not running — skip (поднять: --profile telegrambot up -d --build telegrambot)"
+               fi
+              fi
               echo "[$(date -Iseconds)] deployed: $REMOTE"
