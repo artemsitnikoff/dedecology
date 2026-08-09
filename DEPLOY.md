@@ -40,6 +40,9 @@ nano .env          # (или vim)
 - `CORS_ORIGINS=http://<SERVER_IP>:8888` — подставить реальный IP сервера.
 - `VITE_API_BASE_URL=/api/v1` — **оставить как есть** (относительный путь, проксируется nginx).
 - `SESSION_COOKIE_SECURE=False` — **оставить False** (заход по HTTP/IP). На HTTPS поменяем.
+- `MAX_BOT_TOKEN` / `TELEGRAM_BOT_TOKEN` — токены ботов (нужны ТОЛЬКО сервисам `maxbot` /
+  `telegrambot` под их профилями; опц. `MAX_GROUP_CHAT_ID` / `TELEGRAM_GROUP_CHAT_ID`). Telegram-бот —
+  см. **§12**. Если боты не нужны — оставить пустыми.
 
 ## 3. Поднять (БД → миграции → сид → всё)
 ```bash
@@ -131,6 +134,13 @@ docker compose -f docker-compose.prod.yml ps
 > ⚠️ Файл `.github/workflows/*` пушится только токеном со scope **`workflow`**. Если `git push`
 > отбил его (`refusing to allow ... workflow scope`) — обнови токен `gh auth refresh -s workflow`
 > и повтори push, либо добавь файл через веб-интерфейс GitHub (Add file → Create new file).
+
+> ⚠️ **Деплой падает `dial tcp <host>:22: i/o timeout`** (в логе Actions после `======END======`;
+> скрипт на сервере даже не начался) — раннер НЕ достучался по SSH. Частая причина: **сменился IP
+> сервера** → секрет `SSH_HOST` устарел. Обнови секрет: repo → **Settings → Secrets and variables →
+> Actions → `SSH_HOST`** (Update), или `gh secret set SSH_HOST --body "<NEW_IP>"` → перезапусти прогон
+> (Actions → **Re-run jobs**, или `gh run rerun <id>`). Другие причины: SSH-порт ≠ 22 без секрета
+> `SSH_PORT`; ufw/облачный firewall режет порт 22 с (динамических) IP GitHub-раннеров.
 
 ---
 
@@ -351,3 +361,27 @@ rclone ls s3:$S3_BUCKET/$S3_PREFIX/incidents | head    # появились об
 Переписать слой хранения на boto3/S3 SDK (upload при записи, отдача через presigned-URL вместо
 `FileResponse`, встраивание миниатюр из S3 в .xlsx). Это код-изменение (не инфра) — делаем отдельно,
 если FUSE-производительности не хватит. Тогда `S3_*` переменные начнёт читать сам бэкенд.
+
+---
+
+## 12. Telegram-бот (сервис `telegrambot`, профиль `telegrambot`)
+Бот приёма обращений в Telegram (аналог `maxbot`): в личке фото → кнопка «📍 Отправить геопозицию»
+(или адрес текстом) → выбор ближайшего МНО → тип → подтип → обращение (источник `telegram`); в группе —
+прямой приём фото+подписи. Сырой Telegram Bot API поверх httpx (long-poll), без вебхука/входящего порта.
+
+**Настроить один раз:**
+1. `.env`: `TELEGRAM_BOT_TOKEN=<токен от @BotFather>` (опц. `TELEGRAM_GROUP_CHAT_ID=` — id группы).
+2. Для приёма фото **в группах** — у @BotFather `/setprivacy` → **Disable** (иначе бот не видит
+   сообщения группы). Для лички не требуется.
+3. Источник `telegram` уже в схеме с миграции `0028` — на сервере она применяется деплоем/`alembic
+   upgrade head` (см. §7).
+4. **Первый запуск — ВРУЧНУЮ** (CI пересобирает сервис, только если он УЖЕ поднят):
+   ```bash
+   docker compose -f docker-compose.prod.yml --profile telegrambot up -d --build telegrambot
+   docker compose -f docker-compose.prod.yml logs -f telegrambot   # ждём "Telegram bot polling started"
+   ```
+   Дальше push в `main` с изменениями в `telegrambot/` CI пересобирает сам (§6.5).
+
+⚠️ **Один токен = один long-poll.** Нельзя запускать бота с ОДНИМ токеном одновременно на dev и prod —
+Telegram отдаёт `409 Conflict`, апдейты «прыгают». Для теста заведи ОТДЕЛЬНОГО бота у @BotFather. Бот
+при старте сам снимает вебхук (`delete_webhook`), так что переключение вебхук→polling делать не нужно.
