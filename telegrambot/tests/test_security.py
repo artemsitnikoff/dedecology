@@ -78,6 +78,29 @@ def test_token_redacting_filter_masks_token():
     assert "<TOKEN>" in rec.getMessage()
 
 
+def test_redactor_on_handler_masks_foreign_logger():
+    """Фильтр на ХЕНДЛЕРЕ маскирует токен в записи ЧУЖОГО логгера (httpx логирует URL с токеном)."""
+    import io
+
+    from telegrambot.main import _TokenRedactingFilter
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.addFilter(_TokenRedactingFilter("SECRETTOKEN"))
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.addHandler(handler)
+    httpx_logger.setLevel(logging.INFO)
+    try:
+        httpx_logger.info(
+            "HTTP Request: POST https://api.telegram.org/botSECRETTOKEN/getUpdates"
+        )
+    finally:
+        httpx_logger.removeHandler(handler)
+    out = stream.getvalue()
+    assert "SECRETTOKEN" not in out
+    assert "<TOKEN>" in out
+
+
 # --- INTAKE_TOKEN — SecretStr (не светится в repr) ---------------------------
 
 

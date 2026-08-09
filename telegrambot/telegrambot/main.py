@@ -28,12 +28,12 @@ logger = logging.getLogger("dedecology.telegrambot")
 class _TokenRedactingFilter(logging.Filter):
     """Маскирует токен бота в ТЕКСТЕ лог-записи (record.getMessage) — defense-in-depth.
 
-    Токен зашит в URL Telegram API (…/bot<token>/…); httpx может положить такой URL в
-    текст исключения, залогированного как `logger.warning("... %s", exc)`. ВАЖНО: фильтр
-    правит только message (record.msg/args), но НЕ трейсбек `logger.exception` (record.exc_text
-    формируется форматтером отдельно). Утечка через трейсбек закрыта В ИСТОЧНИКЕ: get_updates
-    санитизирует raise_for_status (чистая ошибка `from None`), поэтому токен-URL в трейсбек
-    _poll_loop не попадает. Этот фильтр — страховка для message-пути (напр. tgapi._call)."""
+    Вешается на КОРНЕВЫЕ ХЕНДЛЕРЫ (см. main): фильтр хендлера применяется ко ВСЕМ записям,
+    включая сторонние логгеры — httpx кладёт URL с токеном (…/bot<token>/…) в текст. Правит
+    только message (record.msg/args), но НЕ трейсбек `logger.exception` (record.exc_text
+    форматируется отдельно) — утечка через трейсбек закрыта В ИСТОЧНИКЕ (get_updates
+    санитизирует raise_for_status `from None`). Основной барьер для httpx-логов запросов —
+    setLevel(WARNING) в main (глушит per-request INFO-строки целиком)."""
 
     def __init__(self, secret: str) -> None:
         super().__init__()
@@ -87,8 +87,16 @@ async def _poll_loop(api: TelegramAPI) -> None:
 
 async def main() -> None:
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
-    # Страховка: маскируем токен, если он вдруг попадёт в текст лог-записи.
-    logger.addFilter(_TokenRedactingFilter(token))
+    # httpx на уровне INFO логирует КАЖДЫЙ запрос строкой "HTTP Request: POST
+    # https://api.telegram.org/bot<TOKEN>/..." → полный токен утёк бы в логи. Глушим до WARNING.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    # Страховка: маскируем токен в тексте ЛЮБОЙ лог-записи. Фильтр вешаем на КОРНЕВЫЕ ХЕНДЛЕРЫ
+    # (не на наш логгер): фильтр хендлера применяется ко ВСЕМ записям, включая сторонние логгеры;
+    # записи дочерних логгеров через фильтры родительского логгера НЕ проходят — только хендлера.
+    _redactor = _TokenRedactingFilter(token)
+    for _h in logging.getLogger().handlers:
+        _h.addFilter(_redactor)
     api = TelegramAPI(token)
 
     # Любой ранее установленный вебхук отбирает апдейты у long-polling (getUpdates 409). Снимаем.
