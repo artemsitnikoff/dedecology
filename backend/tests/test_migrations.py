@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0027():
-    """Цепочка ревизий консистентна: ровно один head, и это 0027 (0027→0026→…)."""
+def test_migration_chain_single_head_is_0028():
+    """Цепочка ревизий консистентна: ровно один head, и это 0028 (0028→0027→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0027"}
+    assert heads == {"0028"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -377,3 +377,41 @@ def test_0026_downgrade_reverts_backfill(monkeypatch):
     sql = fake_op.execute.call_args.args[0]
     assert "SET incident_subtype = NULL" in sql
     assert "incident_type = 'no_access'" in sql
+
+
+def test_0028_revision_identifiers():
+    m = _load("0028_incident_source_telegram.py")
+    assert m.revision == "0028"
+    assert m.down_revision == "0027"
+
+
+def test_0028_upgrade_allows_telegram_source(monkeypatch):
+    """upgrade(): пересоздаёт check_incident_source, добавляя 'telegram' в whitelist."""
+    m = _load("0028_incident_source_telegram.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    fake_op.drop_constraint.assert_called_once_with(
+        "check_incident_source", "incidents", type_="check"
+    )
+    fake_op.create_check_constraint.assert_called_once()
+    name, table, cond = fake_op.create_check_constraint.call_args.args
+    assert name == "check_incident_source"
+    assert table == "incidents"
+    assert "'telegram'" in cond and "'max'" in cond
+
+
+def test_0028_downgrade_restores_prev_whitelist(monkeypatch):
+    """downgrade(): убирает 'telegram', возвращая ('max','form','app')."""
+    m = _load("0028_incident_source_telegram.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    fake_op.create_check_constraint.assert_called_once()
+    _, _, cond = fake_op.create_check_constraint.call_args.args
+    assert "'telegram'" not in cond
+    assert "'app'" in cond

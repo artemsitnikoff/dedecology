@@ -8,7 +8,7 @@
  */
 
 /** Источник обращения. */
-export type Source = 'max' | 'form' | 'app';
+export type Source = 'max' | 'form' | 'app' | 'telegram';
 
 /** Статус обращения. */
 export type Status = 'new' | 'found' | 'none' | 'exported';

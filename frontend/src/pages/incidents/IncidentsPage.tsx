@@ -44,7 +44,9 @@ function parseStatus(value: string | null): Status | null {
     : null;
 }
 function parseSources(values: string[]): Source[] {
-  return values.filter((v): v is Source => v === 'max' || v === 'form' || v === 'app');
+  return values.filter(
+    (v): v is Source => v === 'max' || v === 'form' || v === 'app' || v === 'telegram'
+  );
 }
 
 /**

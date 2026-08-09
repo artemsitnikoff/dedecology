@@ -30,8 +30,8 @@ type Props = {
   onReset: () => void;
 };
 
-/** Порядок чипов источника: Макс, Форма, Приложение. */
-const SOURCE_KEYS: Source[] = ['max', 'form', 'app'];
+/** Порядок чипов источника: Макс, Форма, Приложение, Telegram. */
+const SOURCE_KEYS: Source[] = ['max', 'form', 'app', 'telegram'];
 
 /**
  * Панель фильтров: множественный выбор Источника + период (два native date input

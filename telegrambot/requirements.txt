@@ -1,0 +1,4 @@
+httpx>=0.25
+pydantic>=2
+pydantic-settings>=2
+aiofiles>=23

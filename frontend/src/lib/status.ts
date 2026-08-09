@@ -73,4 +73,9 @@ export const SOURCE: Record<Source, SourceMeta> = {
     bg: 'var(--ark-blue-100)',
     fg: 'var(--ark-blue-600)',
   },
+  telegram: {
+    label: 'Telegram',
+    bg: 'var(--ark-green-100)',
+    fg: 'var(--ark-green-600)',
+  },
 };

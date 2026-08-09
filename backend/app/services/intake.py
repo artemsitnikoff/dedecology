@@ -416,9 +416,13 @@ async def create_incident_from_max(
     photo_files: list,
     msg_url: str = "",
     photo_time=None,
+    source: str = "max",
     actor_user_id=None,
 ) -> Incident:
-    """Создаёт Incident (source='max') из сабмита Макс-бота.
+    """Создаёт Incident (source='max'|'telegram') из сабмита Макс-/Telegram-бота.
+
+    source задаёт канал приёма ('max' по умолчанию; 'telegram' — Telegram-бот шлёт тем
+    же приёмом, но помечается отдельно). Роутер уже сузил значение до whitelist.
 
     Адрес приходит свободным текстом. Разбор адреса:
       1. claude CLI (ai_parse_incident) извлекает регион/город/улицу/координаты/
@@ -476,7 +480,7 @@ async def create_incident_from_max(
     lat, lon = parse_latlon(coords)
 
     incident = Incident(
-        source="max",
+        source=source,
         status="new",
         fio=fio or "",
         region=region,
@@ -507,7 +511,7 @@ async def create_incident_from_max(
         action="intake_max",
         entity_type="incident",
         entity_id=incident.id,
-        after={"source": "max", "fio": fio, "msg": msg, "text": raw_text},
+        after={"source": source, "fio": fio, "msg": msg, "text": raw_text},
         actor_user_id=actor_user_id,
         actor_type="system",
     )
@@ -1058,6 +1062,64 @@ async def prepare_max_report(
     }
 
 
+async def prepare_max_report_by_coords(
+    session: AsyncSession,
+    *,
+    lat,
+    lon,
+    photo_time: str = "",
+) -> dict:
+    """Coords-first фаза приёма: ближайшие МНО по ТОЧНЫМ координатам. НИЧЕГО не пишет в БД.
+
+    Реализует контракт POST /intake/max/prepare-coords для Telegram-бота: пользователь
+    присылает геопозицию (точные lat/lon), поэтому AI-разбор адреса/resolve_address НЕ
+    нужны — сразу ищем ближайшие площадки (nearest_mno, тот же радиус/лимит, что и в
+    prepare_max_report). Регион/город/улица/комментарий остаются пустыми: регион у
+    обращения возьмётся из выбранного МНО (УТКО-выгрузка резолвит субъект по mno_id).
+
+    Возврат — dict по ТОМУ ЖЕ контракту, что prepare_max_report (ветка "ok"):
+    status="ok" + parsed (coords="<lat>, <lon>", остальные адресные поля пустые,
+    photo_time как передан) + point + до 5 кандидатов-МНО (рядом пусто → []).
+
+    Валидация: lat/lon обязаны приводиться к float и лежать в диапазонах
+    −90..90 / −180..180; мусор/выход за диапазон → ValidationError (400).
+    """
+    # Локальный импорт — обратный к services/mno.py (тот импортирует process_mno_photos
+    # отсюда); держим внутри функции, чтобы не создавать цикл на загрузке модуля.
+    from .mno import nearest_mno
+
+    # Строгая валидация координат: точку присылает клиент, мусор не должен молча
+    # проваливаться в пустой поиск — отбиваем 400 (стиль модуля: ValidationError).
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except (TypeError, ValueError):
+        raise ValidationError("Координаты должны быть числами (lat, lon)")
+    if not (math.isfinite(lat_f) and math.isfinite(lon_f)):
+        raise ValidationError("Координаты должны быть конечными числами")
+    if not (-90.0 <= lat_f <= 90.0) or not (-180.0 <= lon_f <= 180.0):
+        raise ValidationError(
+            "Координаты вне допустимого диапазона (широта −90..90, долгота −180..180)"
+        )
+
+    parsed = {
+        "region": "",
+        "city": "",
+        "street": "",
+        "coords": f"{lat_f}, {lon_f}",
+        "comment": "",
+        "photo_time": _clean_str(photo_time),
+    }
+
+    candidates = await nearest_mno(session, lat_f, lon_f, limit=5, max_km=30.0)
+    return {
+        "status": "ok",
+        "parsed": parsed,
+        "point": {"lat": lat_f, "lon": lon_f},
+        "candidates": candidates,
+    }
+
+
 async def create_incident_from_max_selected(
     session: AsyncSession,
     *,
@@ -1074,9 +1136,13 @@ async def create_incident_from_max_selected(
     photo_files: list,
     incident_type: str = "",
     incident_subtype: str = "",
+    source: str = "max",
     actor_user_id=None,
 ) -> Incident:
-    """Создаёт Incident(source='max') из УЖЕ разобранных полей + выбранного МНО.
+    """Создаёт Incident(source='max'|'telegram') из УЖЕ разобранных полей + выбранного МНО.
+
+    source задаёт канал приёма ('max' по умолчанию; 'telegram' — Telegram-бот).
+    Роутер уже сузил значение до whitelist {'max','telegram'}.
 
     Реализует контракт POST /intake/max/finalize (вторая фаза приёма: адрес разобран в
     prepare, здесь AI НЕ дёргаем повторно). Зеркалит create_incident_from_public_form,
@@ -1161,7 +1227,7 @@ async def create_incident_from_max_selected(
     lat, lon = parse_latlon(coords)
 
     incident = Incident(
-        source="max",
+        source=source,
         status="new",
         fio=fio or "",
         region=region,
@@ -1197,7 +1263,7 @@ async def create_incident_from_max_selected(
         entity_type="incident",
         entity_id=incident.id,
         after={
-            "source": "max",
+            "source": source,
             "fio": fio,
             "msg": msg,
             "mno_id": str(mno_id_value) if mno_id_value else None,

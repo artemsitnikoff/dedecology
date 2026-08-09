@@ -25,7 +25,9 @@ from app.services.intake import (
     create_incident_from_max_selected,
     create_incident_from_public_form,
     prepare_max_report,
+    prepare_max_report_by_coords,
 )
+from app.core.errors import ValidationError
 
 
 # --------------------------------------------------------------------------- #
@@ -3300,3 +3302,269 @@ async def test_mno_photo_utko_no_lazy_gen_404(client, monkeypatch, tmp_path):
     resp = await client.get(f"/api/v1/intake/mno-photo/{mid}/0_utko.jpg")
     assert resp.status_code == 404
     assert not (mno_dir / "0_utko.jpg").exists()  # get_mno_photo УТКО-копию не создаёт
+
+
+# --------------------------------------------------------------------------- #
+# Источник 'telegram': приём тем же Макс-контуром, но помечается отдельно      #
+# + coords-first prepare (POST /intake/max/prepare-coords)                     #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_max_selected_source_telegram(fake_session):
+    """Сервис finalize с source='telegram' пишет incidents.source='telegram'."""
+    fake_session.add = MagicMock()
+    incident = await create_incident_from_max_selected(
+        fake_session,
+        region="Самарская область",
+        city="г. Самара",
+        street="ул. Ленина, 1",
+        coords="53.2, 50.15",
+        comment="",
+        mno_id="",
+        msg_id="m-tg",
+        sender_name="Волонтёр",
+        msg_url="",
+        photo_time="",
+        photo_files=[],
+        source="telegram",
+    )
+    assert incident.source == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_max_push_source_telegram(fake_session):
+    """Сервис группового push с source='telegram' пишет incidents.source='telegram'."""
+    fake_session.add = MagicMock()
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch(
+        "app.services.intake.resolve_address",
+        new=AsyncMock(return_value=("Самарская область", "г. Самара", "ул. 1", "53.2, 50.1")),
+    ):
+        incident = await create_incident_from_max(
+            fake_session,
+            text="Самара, ул. 1",
+            msg_id="g-1",
+            sender_name="Группа",
+            photo_files=[],
+            source="telegram",
+        )
+    assert incident.source == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_max_finalize_route_forwards_source_telegram(client, monkeypatch):
+    """POST /max/finalize с Form source='telegram' → сервис вызван с source='telegram'."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    fake_inc = Incident(source="telegram", status="new")
+    fake_inc.id = uuid4()
+    fake_inc.quote = None
+    svc = AsyncMock(return_value=fake_inc)
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_max_selected", new=svc
+    ), patch(
+        "app.api.v1.intake.quotes_service.nature_quote",
+        new=AsyncMock(return_value="цитата"),
+    ):
+        resp = await client.post(
+            "/api/v1/intake/max/finalize",
+            headers={"X-Intake-Token": "secret-token"},
+            data={"sender_name": "Волонтёр", "coords": "53.2, 50.1", "source": "telegram"},
+        )
+    assert resp.status_code == 200
+    svc.assert_awaited_once()
+    assert svc.await_args.kwargs["source"] == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_max_push_route_forwards_source_telegram(client, monkeypatch):
+    """POST /max (группа) с Form source='telegram' → сервис вызван с source='telegram'."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    fake_inc = Incident(source="telegram", status="new")
+    fake_inc.id = uuid4()
+    fake_inc.quote = None
+    svc = AsyncMock(return_value=fake_inc)
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_max", new=svc
+    ), patch(
+        "app.api.v1.intake.quotes_service.nature_quote",
+        new=AsyncMock(return_value="цитата"),
+    ):
+        resp = await client.post(
+            "/api/v1/intake/max",
+            headers={"X-Intake-Token": "secret-token"},
+            data={"text": "Самара, ул. 1", "source": "telegram"},
+        )
+    assert resp.status_code == 200
+    svc.assert_awaited_once()
+    assert svc.await_args.kwargs["source"] == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_max_finalize_route_unknown_source_defaults_to_max(client, monkeypatch):
+    """Неизвестный source (Form) сужается до 'max' (whitelist на роутере)."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    fake_inc = Incident(source="max", status="new")
+    fake_inc.id = uuid4()
+    fake_inc.quote = None
+    svc = AsyncMock(return_value=fake_inc)
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_max_selected", new=svc
+    ), patch(
+        "app.api.v1.intake.quotes_service.nature_quote",
+        new=AsyncMock(return_value="q"),
+    ):
+        resp = await client.post(
+            "/api/v1/intake/max/finalize",
+            headers={"X-Intake-Token": "secret-token"},
+            data={"sender_name": "И", "source": "whatsapp"},
+        )
+    assert resp.status_code == 200
+    assert svc.await_args.kwargs["source"] == "max"
+
+
+@pytest.mark.asyncio
+async def test_max_push_route_missing_source_defaults_to_max(client, monkeypatch):
+    """Без Form-поля source приём остаётся 'max' (дефолт)."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    fake_inc = Incident(source="max", status="new")
+    fake_inc.id = uuid4()
+    fake_inc.quote = None
+    svc = AsyncMock(return_value=fake_inc)
+    with patch(
+        "app.api.v1.intake.intake_service.create_incident_from_max", new=svc
+    ), patch(
+        "app.api.v1.intake.quotes_service.nature_quote",
+        new=AsyncMock(return_value="q"),
+    ):
+        resp = await client.post(
+            "/api/v1/intake/max",
+            headers={"X-Intake-Token": "secret-token"},
+            data={"text": "x"},
+        )
+    assert resp.status_code == 200
+    assert svc.await_args.kwargs["source"] == "max"
+
+
+@pytest.mark.asyncio
+async def test_prepare_coords_returns_candidates_near_mno():
+    """prepare-coords: реальные МНО рядом → status ok, point, непустые candidates, пустой адрес."""
+    center_lat, center_lon = 55.75, 37.62
+    near = _mno_point(55.751, 37.621, name="near", reg="77-01-000001")
+    mid = _mno_point(55.76, 37.63, name="mid")
+    far_out = _mno_point(56.20, 38.50, name="far_out")  # >30 км — отброшен nearest_mno
+    session = _nearest_session([mid, far_out, near])
+
+    res = await prepare_max_report_by_coords(
+        session, lat=center_lat, lon=center_lon, photo_time="2026-04-26T08:05"
+    )
+
+    assert res["status"] == "ok"
+    assert res["point"] == {"lat": center_lat, "lon": center_lon}
+    # координаты собраны из входных lat/lon; адресные поля пустые (регион возьмётся из МНО)
+    assert res["parsed"]["coords"] == f"{center_lat}, {center_lon}"
+    assert res["parsed"]["region"] == ""
+    assert res["parsed"]["city"] == ""
+    assert res["parsed"]["street"] == ""
+    assert res["parsed"]["comment"] == ""
+    assert res["parsed"]["photo_time"] == "2026-04-26T08:05"
+    # кандидаты — реальный результат nearest_mno (сортировка + отсев далёких)
+    names = [c["name"] for c in res["candidates"]]
+    assert names == ["near", "mid"]
+    assert res["candidates"][0]["reg"] == "77-01-000001"
+
+
+@pytest.mark.asyncio
+async def test_prepare_coords_empty_when_no_mno_nearby():
+    """Рядом нет МНО → candidates=[], но status всё равно 'ok' (координаты валидны)."""
+    far = _mno_point(60.0, 40.0, name="far")
+    session = _nearest_session([far])
+    res = await prepare_max_report_by_coords(session, lat=55.75, lon=37.62)
+    assert res["status"] == "ok"
+    assert res["candidates"] == []
+    assert res["parsed"]["photo_time"] == ""
+
+
+@pytest.mark.asyncio
+async def test_prepare_coords_rejects_non_numeric(fake_session):
+    """Мусорные (не-числовые) координаты → ValidationError; nearest_mno не вызывается."""
+    with pytest.raises(ValidationError):
+        await prepare_max_report_by_coords(fake_session, lat="север", lon="10")
+    fake_session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prepare_coords_rejects_out_of_range(fake_session):
+    """Координаты вне диапазона (широта 91) → ValidationError; поиск не запускается."""
+    with pytest.raises(ValidationError):
+        await prepare_max_report_by_coords(fake_session, lat=91.0, lon=37.62)
+    with pytest.raises(ValidationError):
+        await prepare_max_report_by_coords(fake_session, lat=55.0, lon=181.0)
+    fake_session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prepare_coords_route_ok(client, monkeypatch):
+    """POST /max/prepare-coords (токен + JSON) → проксирует dict сервиса; lat/lon проброшены."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    prep = AsyncMock(
+        return_value={
+            "status": "ok",
+            "parsed": {
+                "region": "",
+                "city": "",
+                "street": "",
+                "coords": "55.75, 37.62",
+                "comment": "",
+                "photo_time": "",
+            },
+            "point": {"lat": 55.75, "lon": 37.62},
+            "candidates": [],
+        }
+    )
+    with patch(
+        "app.api.v1.intake.intake_service.prepare_max_report_by_coords", new=prep
+    ):
+        resp = await client.post(
+            "/api/v1/intake/max/prepare-coords",
+            headers={"X-Intake-Token": "secret-token"},
+            json={"lat": 55.75, "lon": 37.62, "photo_time": "2026-04-26T08:05"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    prep.assert_awaited_once()
+    assert prep.await_args.kwargs["lat"] == 55.75
+    assert prep.await_args.kwargs["lon"] == 37.62
+    assert prep.await_args.kwargs["photo_time"] == "2026-04-26T08:05"
+
+
+@pytest.mark.asyncio
+async def test_prepare_coords_route_wrong_token_403(client, monkeypatch):
+    """POST /max/prepare-coords без валидного токена → 403, сервис не вызывается."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    prep = AsyncMock()
+    with patch(
+        "app.api.v1.intake.intake_service.prepare_max_report_by_coords", new=prep
+    ):
+        resp = await client.post(
+            "/api/v1/intake/max/prepare-coords",
+            headers={"X-Intake-Token": "WRONG"},
+            json={"lat": 55.75, "lon": 37.62},
+        )
+    assert resp.status_code == 403
+    prep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prepare_coords_route_invalid_coords_400(client, monkeypatch):
+    """POST /max/prepare-coords с мусорными координатами → 400 VALIDATION_ERROR (сервис)."""
+    monkeypatch.setattr(settings, "YANDEX_INTAKE_TOKEN", "secret-token")
+    # Реальный сервис (не мокаем) — с fake_session из conftest; валидация отбьёт до БД.
+    resp = await client.post(
+        "/api/v1/intake/max/prepare-coords",
+        headers={"X-Intake-Token": "secret-token"},
+        json={"lat": "мусор", "lon": 10},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"

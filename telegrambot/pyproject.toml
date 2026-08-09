@@ -1,0 +1,22 @@
+[project]
+name = "dedecology-telegrambot"
+version = "0.1.0"
+description = "Telegram Bot API long-polling bot for ЭкоПульс — forwards reports to the backend intake API (raw httpx, no python-telegram-bot / maxapi)"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.25",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "aiofiles>=23",
+]
+
+[tool.setuptools.packages.find]
+include = ["telegrambot*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

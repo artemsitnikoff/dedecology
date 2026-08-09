@@ -100,6 +100,17 @@ services:
       INTAKE_TOKEN: ${YANDEX_INTAKE_TOKEN:-}
       MAX_GROUP_CHAT_ID: ${MAX_GROUP_CHAT_ID:-}
 
+  telegrambot:
+    build: ./telegrambot
+    profiles: ["telegrambot"]
+    depends_on:
+      - backend
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      INTAKE_URL: http://backend:8000/api/v1/intake/max
+      INTAKE_TOKEN: ${YANDEX_INTAKE_TOKEN:-}
+      TELEGRAM_GROUP_CHAT_ID: ${TELEGRAM_GROUP_CHAT_ID:-}
+
 volumes:
   dedecolog_pgdata:
   backend_storage:

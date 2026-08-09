@@ -88,7 +88,10 @@ class Incident(Base, TimestampMixin):
     quote: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
-        CheckConstraint("source IN ('max', 'form', 'app')", name="check_incident_source"),
+        CheckConstraint(
+            "source IN ('max', 'form', 'app', 'telegram')",
+            name="check_incident_source",
+        ),
         CheckConstraint(
             "status IN ('new', 'found', 'none', 'exported')",
             name="check_incident_status",

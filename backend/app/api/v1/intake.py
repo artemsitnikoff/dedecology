@@ -70,6 +70,17 @@ def _require_intake_token(request: Request) -> None:
     ):
         raise ForbiddenError("Неверный токен приёма")
 
+# Разрешённые каналы приёма из ботов (Макс/Telegram). Всё вне whitelist → 'max'
+# (толерантно: неизвестное значение не роняет приём, а мягко деградирует к дефолту).
+_INTAKE_SOURCES = frozenset({"max", "telegram"})
+
+
+def _intake_source(value: str) -> str:
+    """Нормализует Form-поле source к whitelist {'max','telegram'} (иначе → 'max')."""
+    v = (value or "").strip().lower()
+    return v if v in _INTAKE_SOURCES else "max"
+
+
 # Имя файла фото: числовой индекс + опц. суффикс _thumb/_utko, только .jpg (анти-traversal).
 # Все фото пере-кодируются в JPEG при загрузке: FULL `{i}.jpg`, THUMB `{i}_thumb.jpg`;
 # УТКО-копия `{i}_utko.jpg` (≤1280×720 и ≤500 КБ) — только у фото инцидентов (ленивая
@@ -333,14 +344,19 @@ async def max_intake(
     msg_url: str = Form(""),
     sender_name: str = Form(""),
     photo_time: str = Form(""),
+    source: str = Form("max"),
     photos: list[UploadFile] = File(default=[]),
 ):
-    """Приём обращения из Макс-бота (multipart/form-data) → Incident(source='max').
+    """Приём обращения из Макс-/Telegram-бота (multipart/form-data) → Incident.
 
-    Вызывается сервером Макс-бота server-to-server. Самозащита — общий секрет
+    Вызывается сервером бота server-to-server. Самозащита — общий секрет
     в заголовке X-Intake-Token (тот же гейт, что у /yandex): токен не задан на
     сервере → 503; не совпал → 403. Адрес из текста разбирается DaData Clean API
     (с эвристическим фолбэком). Возвращает {"ok": True, "incident_id": ...}.
+
+    source — канал приёма: whitelist {'max','telegram'}, неизвестное значение → 'max'
+    (Telegram-бот шлёт групповые фото+подпись тем же push-эндпоинтом, но помечает
+    обращение отдельным источником).
     """
     # Гейт по токену (общий секрет в заголовке) — зеркалит /yandex.
     _require_intake_token(request)
@@ -352,6 +368,7 @@ async def max_intake(
         msg_url=msg_url,
         sender_name=sender_name,
         photo_time=photo_time or None,
+        source=_intake_source(source),
         photo_files=photos,
     )
     await session.commit()
@@ -413,6 +430,37 @@ async def max_prepare(
     )
 
 
+@router.post("/max/prepare-coords", tags=["Приём вебхуков (server-to-server)"])
+async def max_prepare_coords(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """Coords-first фаза приёма (Telegram-бот): ближайшие МНО по ТОЧНЫМ координатам.
+
+    Гейт X-Intake-Token (как /max/prepare). Тело — JSON `{"lat": <float>, "lon": <float>,
+    "photo_time"?: "<опц. ISO>"}` (толерантный разбор конверта; сами lat/lon валидируются
+    в сервисе). В отличие от /max/prepare AI НЕ дёргается — пользователь прислал геопозицию.
+
+    Возвращает тот же контракт, что /max/prepare (ветка "ok"): {"status":"ok","parsed":
+    {...coords="<lat>, <lon>", остальные адресные поля пустые...},"point":{...},
+    "candidates":[...]} (рядом пусто → candidates=[], status всё равно "ok"). Мусорные/
+    вне-диапазона координаты → 400 VALIDATION_ERROR (сервис).
+    """
+    _require_intake_token(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    return await intake_service.prepare_max_report_by_coords(
+        session,
+        lat=body.get("lat"),
+        lon=body.get("lon"),
+        photo_time=body.get("photo_time") or "",
+    )
+
+
 @router.post("/max/finalize", tags=["Приём вебхуков (server-to-server)"])
 async def max_finalize(
     request: Request,
@@ -429,12 +477,14 @@ async def max_finalize(
     mno_id: str = Form(""),
     incident_type: str = Form(""),
     incident_subtype: str = Form(""),
+    source: str = Form("max"),
     photos: list[UploadFile] = File(default=[]),
 ):
-    """Вторая фаза приёма из Макс-бота: создаёт Incident(source='max') из разобранных
+    """Вторая фаза приёма из Макс-/Telegram-бота: создаёт Incident из разобранных
     полей + выбранного МНО (multipart/form-data). AI НЕ дёргаем повторно.
 
     Гейт X-Intake-Token. mno_id пуст = «Нет в списке» (обращение без привязки к площадке).
+    source — канал приёма: whitelist {'max','telegram'}, неизвестное значение → 'max'.
     Возвращает {"ok": true, "incident_id": ..., "quote": ...}; цитата — 2-м коммитом на
     incident.quote (как в /max).
     """
@@ -454,6 +504,7 @@ async def max_finalize(
         photo_files=photos,
         incident_type=incident_type,
         incident_subtype=incident_subtype,
+        source=_intake_source(source),
     )
     await session.commit()
     # Цитата теперь БЫСТРАЯ — случайная строка из таблицы quotes (claude CLI убран),
