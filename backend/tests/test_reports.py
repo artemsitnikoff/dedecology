@@ -192,6 +192,14 @@ async def test_create_by_filters_writes_file_and_row(tmp_path, monkeypatch):
         "app.services.report.region_service.canonical_index",
         new=AsyncMock(return_value={}),
     ), patch(
+        # Карты КОДОВ региона (пояс для пересчёта времени в UTC) — тоже ходят в БД;
+        # поведение резолва пояса проверяет test_utko_export.
+        "app.services.report.region_service.code_index",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.report.mno_service.region_codes_by_mno",
+        new=AsyncMock(return_value={}),
+    ), patch(
         "app.services.report.incident_service.list_for_export",
         new=AsyncMock(return_value=fake_rows),
     ) as m_export, patch(
@@ -241,6 +249,12 @@ async def test_create_by_filters_forwards_city(tmp_path, monkeypatch):
         "app.services.report.region_service.canonical_index",
         new=AsyncMock(return_value={}),
     ), patch(
+        "app.services.report.region_service.code_index",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.report.mno_service.region_codes_by_mno",
+        new=AsyncMock(return_value={}),
+    ), patch(
         "app.services.report.incident_service.list_for_export",
         new=AsyncMock(return_value=[]),
     ) as m_export, patch(
@@ -280,6 +294,12 @@ async def test_create_forwards_region_maps_to_builder(tmp_path, monkeypatch):
         "app.services.report.mno_service.region_names_by_mno",
         new=AsyncMock(return_value=by_mno),
     ), patch(
+        "app.services.report.region_service.code_index",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.report.mno_service.region_codes_by_mno",
+        new=AsyncMock(return_value={}),
+    ), patch(
         "app.services.report.incident_service.list_for_export",
         new=AsyncMock(return_value=[SimpleNamespace(status="new", mno_id=mno_id)]),
     ), patch(
@@ -311,6 +331,12 @@ async def test_create_by_ids_uses_list_by_ids_and_suffix(tmp_path, monkeypatch):
         # Индекс справочника регионов (канон «Субъект РФ» для инцидентов без МНО) —
         # ходит в БД, которой в тестах нет; поведение резолва проверяет test_utko_export.
         "app.services.report.region_service.canonical_index",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.report.region_service.code_index",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.report.mno_service.region_codes_by_mno",
         new=AsyncMock(return_value={}),
     ), patch(
         "app.services.report.incident_service.list_by_ids",

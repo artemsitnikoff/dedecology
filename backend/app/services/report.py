@@ -72,7 +72,19 @@ async def create_incidents_report(
     # уходил бы сырой DaData-текст («Санкт-Петербург» вместо «г. Санкт-Петербург» → УТКО
     # отвергает строку).
     region_index = await region_service.canonical_index(session)
-    content = build_utko_xlsx(rows, base_url, type_labels, region_by_mno, region_index)
+    # Те же две карты, но КОДАМИ субъекта (не именами) — для пересчёта времени фотофиксации
+    # в UTC по поясу региона инцидента (services/region_tz); зеркалят region_by_mno/region_index.
+    region_code_by_mno = await mno_service.region_codes_by_mno(session, mno_ids)
+    region_code_index = await region_service.code_index(session)
+    content = build_utko_xlsx(
+        rows,
+        base_url,
+        type_labels,
+        region_by_mno,
+        region_index,
+        region_code_by_mno,
+        region_code_index,
+    )
 
     # Формирование отчёта = выгрузка: включённые в него обращения СРАЗУ переходят в
     # статус «Выгружен» (по требованию). Файл собран ВЫШЕ — в нём статусы на момент

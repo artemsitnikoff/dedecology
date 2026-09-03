@@ -9,6 +9,7 @@ import { useIncidentTypes } from '@/api/hooks/useIncidentTypes';
 import { useIncidentSubtypes } from '@/api/hooks/useIncidentSubtypes';
 import { useSetStatus } from '@/api/mutations/incidents';
 import type { Incident, Status } from '@/api/aliases';
+import { LEGACY_INCIDENT_TYPE_LABELS } from '@/api/aliases';
 
 type Props = {
   /** id открываемого инцидента — по нему делаем реальный GET /incidents/{id}. */
@@ -84,8 +85,13 @@ function DrawerContent({ d, onClose, onPhoto }: ContentProps) {
   const actions = TRANSITIONS[d.status];
 
   // Резолвим код типа в подпись по справочнику; нет типа / неизвестный код → «—».
+  // Историческая подпись (LEGACY_INCIDENT_TYPE_LABELS, напр. 'other'→«Иное») — фолбэк ПОД
+  // живым справочником, чтобы у старых обращений с выпиленным кодом не показывался code.
   const typeLabel =
-    (d.incident_type && incidentTypes.find((t) => t.code === d.incident_type)?.label) || '—';
+    (d.incident_type &&
+      (incidentTypes.find((t) => t.code === d.incident_type)?.label ||
+        LEGACY_INCIDENT_TYPE_LABELS[d.incident_type])) ||
+    '—';
   // Подпись подтипа (только у типа «Отсутствует доступ к МНО») — из справочника подтипов.
   const subtypeLabel =
     (d.incident_subtype &&

@@ -137,6 +137,20 @@ async def region_names_by_mno(session: AsyncSession, mno_ids: list) -> dict:
     return {mno_id: name for mno_id, name in result.all()}
 
 
+async def region_codes_by_mno(session: AsyncSession, mno_ids: list) -> dict:
+    """{mno_id: Mno.region_code} — код субъекта МНО (ЗЕРКАЛО region_names_by_mno, но код).
+
+    Для УТКО-выгрузки нужен пояс региона инцидента (services/region_tz резолвит смещение
+    UTC по коду субъекта), а пояс — по коду, не по имени. Здесь берём код напрямую из
+    самого МНО (Mno.region_code), без join к справочнику. МНО без region_code / пустой
+    набор → в словарь не попадают (фолбэк на текст inc.region у вызывающего)."""
+    if not mno_ids:
+        return {}
+    stmt = select(Mno.id, Mno.region_code).where(Mno.id.in_(mno_ids))
+    result = await session.execute(stmt)
+    return {mno_id: code for mno_id, code in result.all() if code}
+
+
 async def _incident_counts(session: AsyncSession, mno_ids: list) -> dict:
     """{mno_id: живой COUNT инцидентов} по ссылке incidents.mno_id, одним запросом.
 

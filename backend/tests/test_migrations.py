@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0028():
-    """Цепочка ревизий консистентна: ровно один head, и это 0028 (0028→0027→…)."""
+def test_migration_chain_single_head_is_0029():
+    """Цепочка ревизий консистентна: ровно один head, и это 0029 (0029→0028→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0028"}
+    assert heads == {"0029"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -415,3 +415,38 @@ def test_0028_downgrade_restores_prev_whitelist(monkeypatch):
     _, _, cond = fake_op.create_check_constraint.call_args.args
     assert "'telegram'" not in cond
     assert "'app'" in cond
+
+
+def test_0029_revision_identifiers():
+    m = _load("0029_remove_incident_type_other.py")
+    assert m.revision == "0029"
+    assert m.down_revision == "0028"
+
+
+def test_0029_upgrade_deletes_other_type(monkeypatch):
+    """upgrade(): DELETE строки 'other' из справочника incident_types."""
+    m = _load("0029_remove_incident_type_other.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    fake_op.execute.assert_called_once()
+    sql = fake_op.execute.call_args.args[0]
+    assert "DELETE FROM incident_types" in sql
+    assert "code = 'other'" in sql
+
+
+def test_0029_downgrade_restores_other_type(monkeypatch):
+    """downgrade(): возвращает строку «Иное» (INSERT code='other')."""
+    m = _load("0029_remove_incident_type_other.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    fake_op.execute.assert_called_once()
+    sql = fake_op.execute.call_args.args[0]
+    assert "INSERT INTO incident_types" in sql
+    assert "'other'" in sql
+    assert "'Иное'" in sql

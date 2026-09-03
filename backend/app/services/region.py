@@ -123,6 +123,25 @@ async def canonical_index(session: AsyncSession) -> dict[str, str]:
     return {region_match_key(normalize_region(n)): n for n in names if n}
 
 
+async def code_index(session: AsyncSession) -> dict[str, str]:
+    """{ключ сопоставления имени → ``Region.code``} — ЗЕРКАЛО canonical_index, но код.
+
+    Для УТКО-выгрузки: время фотофиксации отдаётся в UTC пересчётом по поясу региона
+    инцидента (services/region_tz резолвит смещение по КОДУ субъекта). У инцидента БЕЗ
+    МНО кода нет — только свободный текст inc.region, поэтому сопоставляем его тем же
+    ключом, что canonical_index, но отдаём Region.code (а не name).
+
+    ``normalize_region`` применяется к именам справочника — и к искомому значению у
+    вызывающего; функция идемпотентна, поэтому обе стороны приводятся одинаково.
+    """
+    rows = (await session.execute(select(Region.name, Region.code))).all()
+    return {
+        region_match_key(normalize_region(name)): code
+        for name, code in rows
+        if name and code
+    }
+
+
 async def get_region(session: AsyncSession, code: str) -> RegionDetail:
     """Карточка региона по коду субъекта."""
     result = await session.execute(select(Region).where(Region.code == code))

@@ -13,6 +13,7 @@ import { useBulkStatus, useBulkDelete } from '@/api/mutations/incidents';
 import { useCreateIncidentsReport } from '@/api/mutations/reports';
 import type { CreateIncidentsReportBody } from '@/api/mutations/reports';
 import type { ApiError, Source, Status } from '@/api/aliases';
+import { LEGACY_INCIDENT_TYPE_LABELS } from '@/api/aliases';
 import { YandexMap } from '@/components/YandexMap';
 import { Funnel } from './Funnel';
 import { FilterBar } from './FilterBar';
@@ -262,8 +263,11 @@ export function IncidentsPage() {
   const incidentTypesQuery = useIncidentTypes();
   // Карта код→подпись типа инцидента для колонки «Тип» в таблице (стабильная ссылка —
   // чтобы memo строк не сбрасывался). Инцидент хранит код, подпись резолвим из справочника.
+  // Историческая подпись (LEGACY_INCIDENT_TYPE_LABELS, напр. 'other'→«Иное») — фолбэк ПОД
+  // данными из API: у живых обращений с таким кодом подпись из БД-справочника всё равно
+  // приоритетнее, если код туда когда-нибудь вернётся.
   const typeLabels = useMemo(() => {
-    const m: Record<string, string> = {};
+    const m: Record<string, string> = { ...LEGACY_INCIDENT_TYPE_LABELS };
     for (const t of incidentTypesQuery.data ?? []) m[t.code] = t.label;
     return m;
   }, [incidentTypesQuery.data]);

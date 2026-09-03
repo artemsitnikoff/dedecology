@@ -86,7 +86,9 @@ def test_utko_row_maps_fields_and_photo_urls():
     row = [c.value for c in next(ws.iter_rows(min_row=5))]
     assert row[0] == "Самарская область"          # Субъект РФ
     assert row[1] == "63-04-001162"               # Реестровый номер МНО
-    assert row[2] == "26.04.2026 08:05"           # Дата и время фотофиксации
+    # Дата и время фотофиксации — в UTC. Карты кодов региона не переданы → пояс
+    # неизвестен → дефолт МСК (−3): настенное 08:05 − 3 = 05:05.
+    assert row[2] == "26.04.2026 05:05"
     assert row[3] == "г. Кинель, ул. Маяковского, 41"  # Адрес (город + улица)
     assert row[4] == "Возгорание в контейнере"    # Тип инцидента (по type_labels)
     assert row[5] in (None, "")                    # Подтип — пусто (поля нет)
@@ -291,3 +293,93 @@ def test_utko_skips_placeholder_photos():
     ws = _rows([inc], base_url="https://ecopulse.reo.ru")
     row = [c.value for c in next(ws.iter_rows(min_row=5))]
     assert all(row[i] in (None, "") for i in range(7, 13))  # плейсхолдер → все ссылки пусты
+
+
+# --- Время фотофиксации в UTC (пересчёт по поясу региона инцидента) -------------
+
+
+async def _code_index(pairs) -> dict:
+    """Реальный region.code_index на поддельной сессии (БД в тестах нет).
+
+    pairs — [(Region.name, Region.code)]; формула ключа НЕ дублируется, индекс строит
+    production-код (region.code_index).
+    """
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=list(pairs))
+    )
+    return await region_service.code_index(session)
+
+
+def _photo_dt(rows, **kw) -> str:
+    """Колонка «Дата и время фотофиксации» (индекс 2) первого инцидента выгрузки."""
+    wb = load_workbook(BytesIO(build_utko_xlsx(rows, "", {"fire": "x"}, **kw)))
+    return next(wb.active.iter_rows(min_row=5))[2].value
+
+
+@pytest.mark.asyncio
+async def test_utko_photo_time_utc_moscow_via_mno():
+    """Москва (код 77, UTC+3) через МНО: настенное 19:30 → UTC 16:30."""
+    from uuid import uuid4
+
+    mid = uuid4()
+    inc = _incident(
+        mno_id=mid,
+        photo_time=datetime(2026, 4, 26, 19, 30, tzinfo=timezone.utc),
+    )
+    assert _photo_dt([inc], region_code_by_mno={mid: "77"}) == "26.04.2026 16:30"
+
+
+@pytest.mark.asyncio
+async def test_utko_photo_time_utc_moscow_via_region_text():
+    """Москва по тексту inc.region (код 77, UTC+3): 19:30 → 16:30."""
+    inc = _incident(
+        region="Москва",
+        photo_time=datetime(2026, 4, 26, 19, 30, tzinfo=timezone.utc),
+    )
+    index = await _code_index([("г. Москва", "77"), ("Новосибирская область", "54")])
+    assert _photo_dt([inc], region_code_index=index) == "26.04.2026 16:30"
+
+
+@pytest.mark.asyncio
+async def test_utko_photo_time_utc_novosibirsk():
+    """Новосибирск (код 54, UTC+7): настенное 19:30 → UTC 12:30."""
+    inc = _incident(
+        region="Новосибирская область",
+        photo_time=datetime(2026, 4, 26, 19, 30, tzinfo=timezone.utc),
+    )
+    index = await _code_index([("г. Москва", "77"), ("Новосибирская область", "54")])
+    assert _photo_dt([inc], region_code_index=index) == "26.04.2026 12:30"
+
+
+def test_utko_photo_time_unknown_region_defaults_msk():
+    """Неизвестный регион (карт нет) → дефолт МСК (−3): 19:30 → 16:30."""
+    inc = _incident(
+        region="Нарния",
+        photo_time=datetime(2026, 4, 26, 19, 30, tzinfo=timezone.utc),
+    )
+    assert _photo_dt([inc]) == "26.04.2026 16:30"
+
+
+def test_utko_photo_time_rolls_over_midnight():
+    """Сдвиг через полночь: 01:00 при МСК (−3) → предыдущий день 22:00."""
+    inc = _incident(
+        region="Нарния",  # дефолт +3
+        photo_time=datetime(2026, 4, 26, 1, 0, tzinfo=timezone.utc),
+    )
+    assert _photo_dt([inc]) == "25.04.2026 22:00"
+
+
+def test_utko_photo_time_none_is_empty():
+    """photo_time None → пустая строка (не падаем)."""
+    inc = _incident(photo_time=None)
+    assert _photo_dt([inc]) in (None, "")
+
+
+def test_utko_type_other_falls_back_to_static_label():
+    """Исторический incident_type='other' при пустой БД-карте type_labels → «Иное»
+    (статик-фолбэк services/incident_types, тип убран из рантайм-справочника мигр. 0029)."""
+    inc = _incident(incident_type="other")
+    wb = load_workbook(BytesIO(build_utko_xlsx([inc], "", {})))  # type_labels пуст
+    row = [c.value for c in next(wb.active.iter_rows(min_row=5))]
+    assert row[4] == "Иное"
