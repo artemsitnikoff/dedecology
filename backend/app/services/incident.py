@@ -2,7 +2,7 @@
 
 import math
 import re
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import and_, asc, case, desc, func, or_, select, update
@@ -168,6 +168,15 @@ async def list_incidents(
     items, total = rows
     src_map = await _mno_source_map(session, [i.mno_id for i in items])
     vol_map = await _volunteer_info_map(session, [i.volunteer_id for i in items])
+    # Пояса для пересчёта photo_time в UTC: админка показывает время фотофиксации в UTC
+    # (как «Поступило»/received_at — серверный UTC, и как УТКО-выгрузка). photo_time хранится
+    # настенным местным (intake._photo_wallclock) → вычитаем пояс региона инцидента.
+    from .mno import region_codes_by_mno as _codes_by_mno
+    from .region import code_index as _code_index
+    from .region_tz import region_offset_for_incident as _offset_for
+
+    code_by_mno = await _codes_by_mno(session, [i.mno_id for i in items])
+    code_idx = await _code_index(session)
     pages = math.ceil(total / page_size) if total > 0 else 0
 
     def _to_item(i: Incident) -> IncidentListItem:
@@ -176,6 +185,8 @@ async def list_incidents(
         email, phone = vol_map.get(i.volunteer_id, (None, None))
         item.volunteer_login = email
         item.volunteer_contact = phone
+        if i.photo_time is not None:  # настенное местное → реальный UTC по поясу региона
+            item.photo_time = i.photo_time - timedelta(hours=_offset_for(i, code_by_mno, code_idx))
         return item
 
     return Paginated[IncidentListItem](
@@ -563,6 +574,26 @@ async def get_incident(session: AsyncSession, incident_id: UUID) -> Incident:
     if incident is None:
         raise NotFoundError("Инцидент")
     return incident
+
+
+async def photo_time_utc(session: AsyncSession, incident: Incident):
+    """photo_time инцидента, пересчитанное в реальный UTC по поясу его региона (None → None).
+
+    Админ-карточка показывает время фотофиксации в UTC (консистентно с «Поступило» —
+    received_at серверный UTC, и с УТКО-выгрузкой). photo_time хранится настенным местным
+    (intake._photo_wallclock) → вычитаем пояс региона. Возвращаем НОВОЕ значение — ORM-объект
+    НЕ мутируем (иначе на commit настенное перезапишется в БД)."""
+    if incident.photo_time is None:
+        return None
+    from .mno import region_codes_by_mno
+    from .region import code_index
+    from .region_tz import region_offset_for_incident
+
+    code_by_mno = await region_codes_by_mno(
+        session, [incident.mno_id] if incident.mno_id else []
+    )
+    offset = region_offset_for_incident(incident, code_by_mno, await code_index(session))
+    return incident.photo_time - timedelta(hours=offset)
 
 
 async def set_status(

@@ -48,6 +48,54 @@ def test_incident_list_item_accepts_all_sources():
         assert _list_item(source=src).source == src
 
 
+def test_region_offset_for_incident():
+    """Резолв пояса инцидента: по МНО, по тексту региона, дефолт для неизвестного."""
+    from types import SimpleNamespace
+
+    from app.services.addr_norm import normalize_region, region_match_key
+    from app.services.region_tz import region_offset_for_incident
+
+    mid = uuid4()
+    # 1) по МНО (Иркутская обл. код 38 → +8)
+    assert region_offset_for_incident(SimpleNamespace(mno_id=mid, region=""), {mid: "38"}, {}) == 8
+    # 2) по тексту региона (нет МНО) — ключ как в region.code_index
+    idx = {region_match_key(normalize_region("Иркутская область")): "38"}
+    assert region_offset_for_incident(SimpleNamespace(mno_id=None, region="Иркутская область"), {}, idx) == 8
+    # 3) неизвестный регион → МСК (+3)
+    assert region_offset_for_incident(SimpleNamespace(mno_id=None, region="Нарния"), {}, {}) == 3
+
+
+@pytest.mark.asyncio
+async def test_photo_time_utc_converts(monkeypatch):
+    """photo_time (настенное местное) → реальный UTC по поясу региона; None → None.
+
+    Регресс из бага: Иркутск (пояс +8) 15:14 в админке был позже «Поступило» (UTC); теперь
+    время фотофиксации отдаётся в UTC (15:14 − 8 = 07:14) и сходится с received_at."""
+    from types import SimpleNamespace
+
+    from app.services import incident as inc_svc
+
+    mid = uuid4()
+
+    async def _codes(session, ids):
+        return {mid: "38"}  # Иркутская обл. → +8
+
+    async def _idx(session):
+        return {}
+
+    monkeypatch.setattr("app.services.mno.region_codes_by_mno", _codes)
+    monkeypatch.setattr("app.services.region.code_index", _idx)
+
+    inc = SimpleNamespace(
+        photo_time=datetime(2026, 9, 2, 15, 14, tzinfo=timezone.utc), mno_id=mid, region=""
+    )
+    got = await inc_svc.photo_time_utc(None, inc)
+    assert got == datetime(2026, 9, 2, 7, 14, tzinfo=timezone.utc)  # 15:14 −8 = 07:14 UTC
+    # photo_time None → None (ORM не трогаем)
+    none_inc = SimpleNamespace(photo_time=None, mno_id=None, region="")
+    assert await inc_svc.photo_time_utc(None, none_inc) is None
+
+
 def _detail(**kw):
     base = dict(
         id=uuid4(),
@@ -158,6 +206,9 @@ async def test_get_incident_by_id(client):
     with patch(
         "app.api.v1.incidents.incident_service.get_incident",
         new=AsyncMock(return_value=detail),
+    ), patch(
+        "app.api.v1.incidents.incident_service.photo_time_utc",
+        new=AsyncMock(return_value=None),
     ):
         resp = await client.get(f"/api/v1/incidents/{detail.id}")
     assert resp.status_code == 200
@@ -174,6 +225,9 @@ async def test_patch_status(client):
     with patch(
         "app.api.v1.incidents.incident_service.set_status",
         new=AsyncMock(return_value=detail),
+    ), patch(
+        "app.api.v1.incidents.incident_service.photo_time_utc",
+        new=AsyncMock(return_value=None),
     ):
         resp = await client.patch(
             f"/api/v1/incidents/{detail.id}/status", json={"status": "exported"}
@@ -477,6 +531,9 @@ async def test_detail_carries_mno_id(client):
     with patch(
         "app.api.v1.incidents.incident_service.get_incident",
         new=AsyncMock(return_value=detail),
+    ), patch(
+        "app.api.v1.incidents.incident_service.photo_time_utc",
+        new=AsyncMock(return_value=None),
     ):
         resp = await client.get(f"/api/v1/incidents/{detail.id}")
     assert resp.status_code == 200
@@ -495,6 +552,9 @@ async def test_detail_carries_mno_source(client):
     ), patch(
         "app.api.v1.incidents.incident_service.get_mno_source",
         new=AsyncMock(return_value="volunteer"),
+    ), patch(
+        "app.api.v1.incidents.incident_service.photo_time_utc",
+        new=AsyncMock(return_value=None),
     ):
         resp = await client.get(f"/api/v1/incidents/{detail.id}")
     assert resp.status_code == 200
@@ -530,6 +590,9 @@ async def test_detail_carries_volunteer_login_and_contact(client):
     ), patch(
         "app.api.v1.incidents.incident_service.get_volunteer_info",
         new=AsyncMock(return_value=("vol@example.com", "+79990000000")),
+    ), patch(
+        "app.api.v1.incidents.incident_service.photo_time_utc",
+        new=AsyncMock(return_value=None),
     ):
         resp = await client.get(f"/api/v1/incidents/{detail.id}")
     assert resp.status_code == 200
@@ -587,6 +650,12 @@ async def test_list_incidents_carries_volunteer_login_and_contact():
     ), patch(
         "app.services.incident._volunteer_info_map",
         new=AsyncMock(return_value={vid: ("vol@example.com", "+79990000000")}),
+    ), patch(
+        "app.services.mno.region_codes_by_mno",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.services.region.code_index",
+        new=AsyncMock(return_value={}),
     ):
         page = await incident_service.list_incidents(session)
 

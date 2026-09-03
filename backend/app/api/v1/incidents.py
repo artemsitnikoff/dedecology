@@ -285,6 +285,8 @@ async def get_incident(
     """Карточка инцидента (включая bins)."""
     incident = await incident_service.get_incident(session, incident_id)
     detail = IncidentDetail.model_validate(incident)
+    # Время фотофиксации — в UTC по поясу региона (консистентно с «Поступило»/received_at и выгрузкой).
+    detail.photo_time = await incident_service.photo_time_utc(session, incident)
     detail.mno_source = await incident_service.get_mno_source(session, incident.mno_id)
     email, phone = await incident_service.get_volunteer_info(
         session, incident.volunteer_id
@@ -309,6 +311,8 @@ async def update_incident_status(
     )
     await session.commit()
     detail = IncidentDetail.model_validate(incident)
+    # Время фотофиксации — в UTC по поясу региона (консистентно с «Поступило»/received_at и выгрузкой).
+    detail.photo_time = await incident_service.photo_time_utc(session, incident)
     detail.mno_source = await incident_service.get_mno_source(session, incident.mno_id)
     email, phone = await incident_service.get_volunteer_info(
         session, incident.volunteer_id

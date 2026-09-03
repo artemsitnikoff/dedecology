@@ -59,3 +59,28 @@ def region_utc_offset(code: str | None) -> int:
     if not code:
         return _DEFAULT_OFFSET
     return REGION_TZ.get(_normalize(code), _DEFAULT_OFFSET)
+
+
+def region_offset_for_incident(
+    inc,
+    region_code_by_mno: dict | None,
+    region_code_index: dict | None,
+) -> int:
+    """Смещение UTC пояса РЕГИОНА инцидента (часы) — единый резолв для UTC-пересчёта времени.
+
+    Код субъекта резолвим тем же приоритетом, что «Субъект РФ» в выгрузке: сперва по МНО
+    (region_code_by_mno: mno_id → Mno.region_code), иначе по тексту inc.region через справочник
+    (region_code_index: region_match_key(normalize_region(name)) → Region.code), иначе None →
+    region_utc_offset вернёт дефолт МСК (+3). Используется и в УТКО-выгрузке (utko_export),
+    и в админ-сериализации инцидентов (services/incident): «Дата и время фотофиксации» идут
+    в реальном UTC, консистентно с «Поступило» (received_at — серверный UTC).
+    """
+    from .addr_norm import normalize_region, region_match_key  # leaf-util; локально — без риска цикла
+
+    code = None
+    if region_code_by_mno and getattr(inc, "mno_id", None):
+        code = region_code_by_mno.get(inc.mno_id)
+    if not code and region_code_index:
+        text = getattr(inc, "region", "") or ""
+        code = region_code_index.get(region_match_key(normalize_region(text)))
+    return region_utc_offset(code)
