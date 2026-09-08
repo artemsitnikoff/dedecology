@@ -20,6 +20,7 @@ import { FilterBar } from './FilterBar';
 import { IncidentsTable } from './IncidentsTable';
 import { DetailDrawer } from './DetailDrawer';
 import { Lightbox } from './Lightbox';
+import { Pagination } from './Pagination';
 import './Incidents.css';
 
 /** Допустимые ключи сортировки — для валидации значения из URL. */
@@ -79,6 +80,7 @@ export function IncidentsPage() {
   const dateTo = searchParams.get('date_to') ?? '';
   const sort = parseSort(searchParams.get('sort'));
   const order = parseOrder(searchParams.get('order'));
+  const page = Math.max(1, Number(searchParams.get('page')) || 1);
 
   const filters: IncidentFilters = useMemo(
     () => ({
@@ -94,6 +96,7 @@ export function IncidentsPage() {
       date_to: dateTo || undefined,
       sort,
       order,
+      page,
     }),
     [
       search,
@@ -108,19 +111,25 @@ export function IncidentsPage() {
       dateTo,
       sort,
       order,
+      page,
     ]
   );
 
-  // Стабильная ссылка на searchParams для use в колбэках без пересоздания.
-  const spRef = useRef(searchParams);
-  spRef.current = searchParams;
-
-  /** Точечно правит один query-параметр (set/append/delete) и пишет в URL. */
+  /** Точечно правит query-параметры (set/append/delete) и пишет в URL.
+   *  Функциональный апдейтер setSearchParams((prev) => …): несколько вызовов подряд в ОДНОМ
+   *  обработчике КОМПОЗИРУЮТСЯ (каждый видит результат предыдущего). Раньше брали заснапшоченный
+   *  searchParams через ref, и синхронная двойная правка (напр. очистка date_from И date_to
+   *  крестиком периода) теряла первую — второй вызов стартовал со старого состояния и затирал её. */
   const patchParams = useCallback(
     (mutate: (p: URLSearchParams) => void) => {
-      const next = new URLSearchParams(spRef.current);
-      mutate(next);
-      setSearchParams(next, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          mutate(next);
+          return next;
+        },
+        { replace: true }
+      );
     },
     [setSearchParams]
   );
@@ -130,6 +139,7 @@ export function IncidentsPage() {
       patchParams((p) => {
         if (v.trim()) p.set('search', v);
         else p.delete('search');
+        p.delete('page'); // смена фильтра → на первую страницу
       });
     },
     [patchParams]
@@ -144,6 +154,7 @@ export function IncidentsPage() {
           ? current.filter((s) => s !== src)
           : [...current, src];
         for (const s of nextSet) p.append('source', s);
+        p.delete('page'); // смена фильтра → на первую страницу
       });
     },
     [patchParams]
@@ -157,6 +168,7 @@ export function IncidentsPage() {
         // Города зависят от региона: при смене региона выбранный город сбрасываем —
         // иначе в фильтре повис бы город из другого региона и список опустел бы.
         p.delete('city');
+        p.delete('page'); // смена фильтра → на первую страницу
       });
     },
     [patchParams]
@@ -167,6 +179,7 @@ export function IncidentsPage() {
       patchParams((p) => {
         if (v) p.set('city', v);
         else p.delete('city');
+        p.delete('page'); // смена фильтра → на первую страницу
       });
     },
     [patchParams]
@@ -188,6 +201,7 @@ export function IncidentsPage() {
       patchParams((p) => {
         if (s) p.set('status', s);
         else p.delete('status');
+        p.delete('page'); // смена фильтра → на первую страницу
       });
     },
     [patchParams]
@@ -198,6 +212,7 @@ export function IncidentsPage() {
       patchParams((p) => {
         if (v) p.set('date_from', v);
         else p.delete('date_from');
+        p.delete('page'); // смена фильтра → на первую страницу
       });
     },
     [patchParams]
@@ -207,6 +222,7 @@ export function IncidentsPage() {
       patchParams((p) => {
         if (v) p.set('date_to', v);
         else p.delete('date_to');
+        p.delete('page'); // смена фильтра → на первую страницу
       });
     },
     [patchParams]
@@ -221,6 +237,7 @@ export function IncidentsPage() {
           curSort === key ? (curOrder === 'desc' ? 'asc' : 'desc') : 'desc';
         p.set('sort', key);
         p.set('order', nextOrder);
+        p.delete('page'); // смена сортировки → на первую страницу
       });
     },
     [patchParams]
@@ -235,8 +252,20 @@ export function IncidentsPage() {
       p.delete('status');
       p.delete('date_from');
       p.delete('date_to');
+      p.delete('page'); // сброс фильтров → на первую страницу
     });
   }, [patchParams]);
+
+  /** Смена страницы пагинации — остальные параметры (фильтры/сортировка) не трогаем. */
+  const setPage = useCallback(
+    (n: number) => {
+      patchParams((p) => {
+        if (n > 1) p.set('page', String(n));
+        else p.delete('page');
+      });
+    },
+    [patchParams]
+  );
 
   /** Снять привязку к объекту ТКО (баннер) — убрать mno_id из URL, страница на 1. */
   const clearMnoFilter = useCallback(() => {
@@ -385,7 +414,7 @@ export function IncidentsPage() {
 
   const grandTotal = grandTotalQuery.data?.all ?? total;
   const counterText = isFiltered
-    ? `Показано ${total} из ${grandTotal}`
+    ? `Показано ${rows.length} из ${total}${grandTotal !== total ? ` (всего ${grandTotal})` : ''}`
     : `${grandTotal} обращений · обновлено сегодня`;
 
   // Карточка тянет деталь сама (useIncident по detailId). Лайтбокс берёт фото
@@ -670,6 +699,13 @@ export function IncidentsPage() {
                 </button>
               )}
             </div>
+          )}
+          {incidentsQuery.data && incidentsQuery.data.pages > 1 && (
+            <Pagination
+              page={incidentsQuery.data.page}
+              pages={incidentsQuery.data.pages}
+              onChange={setPage}
+            />
           )}
         </div>
       )}

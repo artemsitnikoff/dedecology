@@ -906,6 +906,70 @@
   cursor: pointer;
 }
 
+/* ---------- Пагинатор ---------- */
+/* Живёт ВНУТРИ прокручиваемой .de-inc-content, под таблицей (не подвал-панель,
+   как у .de-rep-pager) — центрированная строка контролов с достаточным
+   вертикальным отступом. */
+.de-inc-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4) var(--space-4);
+}
+.de-inc-pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.de-inc-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  cursor: pointer;
+}
+.de-inc-pager-btn:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+.de-inc-pager-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.de-inc-pager-num {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+.de-inc-pager-num:hover:not(.active) {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+.de-inc-pager-num.active {
+  background: var(--de-brand);
+  border-color: var(--de-brand);
+  color: var(--ark-white);
+  font-weight: 600;
+}
+.de-inc-pager-gap {
+  min-width: 18px;
+  text-align: center;
+  color: var(--fg-3);
+  font-size: var(--fs-13);
+}
+
 /* ---------- Состояния загрузки / ошибки ---------- */
 .de-inc-state {
   display: flex;
