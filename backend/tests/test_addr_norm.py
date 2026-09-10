@@ -182,6 +182,70 @@ async def test_resolve_address_normalizes_respublika_ai_only():
 
 
 @pytest.mark.asyncio
+async def test_resolve_address_no_ai_geocodes_via_free_suggest():
+    """БЕЗ AI (ai_parse_incident → None) шаблонный адрес ВСЁ РАВНО геокодится бесплатными
+    Подсказками, а не уходит в эвристику с пустыми coords. Регресс: на проде без «нейронки»
+    бот отвечал «Не удалось определить адрес» — координаты в фолбэке не добывались (звался только
+    платный Clean = 403), теперь сперва бесплатный geocode_address."""
+    from app.services import intake
+
+    geocoded = {
+        "region": "Тюменская обл",
+        "city": "г Тюмень",
+        "street": "ул Новосёлов, 92",
+        "coords": "57.15, 65.53",
+        "geo_lat": "57.15",
+        "geo_lon": "65.53",
+    }
+    geo_mock = AsyncMock(return_value=geocoded)
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)  # AI выключен
+    ), patch("app.services.intake.geocode_address", new=geo_mock), patch(
+        "app.services.intake.clean_address", new=AsyncMock(return_value=None)
+    ):
+        region, city, street, coords = await intake.resolve_address(
+            "Тюменская область, г.Тюмень, ул.Новоселов, 92. Время 19:22"
+        )
+
+    assert coords == "57.15, 65.53"  # координаты добыты БЕЗ AI
+    assert region == "Тюменская область"  # нормализовано из «Тюменская обл»
+    # геокод вызван с адресом БЕЗ хвоста «Время 19:22»
+    geo_mock.assert_awaited_once()
+    query = geo_mock.await_args.args[0]
+    assert "Время" not in query and "19:22" not in query
+    assert query.endswith("92")
+
+
+@pytest.mark.asyncio
+async def test_resolve_address_no_ai_no_dadata_falls_to_heuristic():
+    """БЕЗ AI и без DaData (geocode+clean → None) → эвристика, coords пустые, без падений."""
+    from app.services import intake
+
+    with patch(
+        "app.services.intake.ai_parse_incident", new=AsyncMock(return_value=None)
+    ), patch(
+        "app.services.intake.geocode_address", new=AsyncMock(return_value=None)
+    ), patch("app.services.intake.clean_address", new=AsyncMock(return_value=None)):
+        region, city, street, coords = await intake.resolve_address(
+            "Тюменская область, г.Тюмень, ул.Новоселов, 92. Время 19:22"
+        )
+    assert coords == ""
+    assert region  # эвристика хоть что-то положила в регион (не упала)
+
+
+def test_strip_time_suffix():
+    """Отсечение хвостового «Время ЧЧ:ММ» / «ЧЧ:ММ»; дом и адрес сохраняются; нет времени → как есть."""
+    from app.services.intake import _strip_time_suffix
+
+    assert (
+        _strip_time_suffix("Тюменская область, г.Тюмень, ул.Новоселов, 92. Время 19:22")
+        == "Тюменская область, г.Тюмень, ул.Новоселов, 92"
+    )
+    assert _strip_time_suffix("Самара, Победы 10, 9.05") == "Самара, Победы 10"
+    assert _strip_time_suffix("Казань, Баумана 1") == "Казань, Баумана 1"
+
+
+@pytest.mark.asyncio
 async def test_create_incident_from_form_normalizes_region(fake_session):
     """full_address с сокращённым регионом → инцидент хранит полную форму региона."""
     from app.services.intake import create_incident_from_form

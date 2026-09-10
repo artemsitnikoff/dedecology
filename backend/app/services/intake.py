@@ -134,6 +134,18 @@ def _parse_address(full_address: str) -> tuple[str, str, str]:
     return "", "", full_address.strip()
 
 
+# Хвост «… Время ЧЧ:ММ» (или просто «… ЧЧ:ММ») в конце строки: по шаблону фотоотчёта время
+# идёт ПОСЛЕ адреса. Отсекаем его для геокода без AI, чтобы не шуметь запросом к Подсказкам.
+_ADDR_TIME_TAIL_RE = re.compile(
+    r"[.,;\s]*(?:врем\w*[\s:]*)?[0-2]?\d[:.][0-5]\d\s*$", re.IGNORECASE
+)
+
+
+def _strip_time_suffix(text: str) -> str:
+    """Убрать хвостовое «Время ЧЧ:ММ» / «ЧЧ:ММ» из адресной строки (для геокода без AI)."""
+    return _ADDR_TIME_TAIL_RE.sub("", _clean_str(text)).strip().rstrip(".,; ")
+
+
 def _parse_bins(value) -> bool | None:
     """да/yes/true/True → True; нет/no/false/False → False; иначе None."""
     if isinstance(value, bool):
@@ -374,21 +386,37 @@ async def resolve_address(
         resolved = False
 
     if not resolved:
-        # Фолбэк без AI: DaData Clean(text) → эвристика.
-        try:
-            cleaned = await clean_address(raw_text)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "[resolve_address] clean_address сбой: %s: %s", type(e).__name__, e
-            )
-            cleaned = None
+        # Фолбэк БЕЗ AI (или AI ничего не дал): сперва БЕСПЛАТНЫЙ геокод Подсказками по адресу
+        # (отсекаем хвостовое «Время ЧЧ:ММ» — по шаблону адрес идёт до времени), затем платный
+        # Clean(raw) как доп. фолбэк (на проде он 403). Так шаблонный адрес получает координаты и
+        # БЕЗ «нейронки» — раньше бесплатный геокод в этом пути НЕ вызывался (он был только на
+        # AI-пути), адрес молча уходил в эвристику с пустыми coords → parse_latlon(None) →
+        # need_address → «Не удалось определить адрес» в боте.
+        cleaned = None
+        addr_query = _strip_time_suffix(raw_text)
+        if addr_query:
+            try:
+                cleaned = await geocode_address(addr_query)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "[resolve_address] geocode(fallback) сбой: %s: %s", type(e).__name__, e
+                )
+                cleaned = None
+        if cleaned is None:
+            try:
+                cleaned = await clean_address(raw_text)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "[resolve_address] clean_address сбой: %s: %s", type(e).__name__, e
+                )
+                cleaned = None
         if cleaned:
             region = _clean_str(cleaned.get("region"))
             city = _clean_str(cleaned.get("city"))
             street = _clean_str(cleaned.get("street"))
             coords = _clean_str(cleaned.get("coords"))
-            path = "dadata-raw"
-            logger.info("[resolve_address] путь=dadata-raw")
+            path = "dadata-fallback"
+            logger.info("[resolve_address] путь=dadata-fallback (без AI)")
         else:
             region, city, street = _parse_address(raw_text)
             coords = ""
