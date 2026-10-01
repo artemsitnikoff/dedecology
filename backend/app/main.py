@@ -15,6 +15,8 @@ from .core.errors import (
     http_exception_handler,
     generic_exception_handler,
 )
+from .utko.errors import UtkoError, utko_error_handler
+from .utko.router import utko_router
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +125,12 @@ openapi_tags = [
         "мобильного API.",
     },
     {
+        "name": "УТКО-совместимое API",
+        "description": "Приём данных посещения МНО по контракту ФГИС УТКО (скелет ядра): "
+        "OAuth2 /connect/token, выдача/подтверждение событий посещения и приём событий "
+        "видеопотока. Пути КОРНЕВЫЕ (вне /api/v1), формат ошибок — УТКО, не общий конверт.",
+    },
+    {
         "name": "Служебное",
         "description": "Проверка живости сервиса.",
     },
@@ -161,7 +169,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Exception handlers — порядок важен: сначала конкретные, затем общие
+# Exception handlers — порядок важен: сначала конкретные, затем общие.
+# UtkoError — СВОЙ формат ответа (НЕ общий конверт {error:{...}}); по MRO ловится
+# раньше generic Exception-хэндлера, поэтому УТКО-эндпоинты отдают тела по доке ФГИС.
+app.add_exception_handler(UtkoError, utko_error_handler)
 app.add_exception_handler(AppError, app_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
@@ -170,6 +181,11 @@ app.add_exception_handler(Exception, generic_exception_handler)
 
 # API routes
 app.include_router(api_router, prefix="/api/v1")
+
+# УТКО-совместимое API — КОРНЕВЫЕ пути (/connect/token, /reo-mno-events/...), БЕЗ prefix.
+# Внешний клиент («нейронка») ходит к нам 1:1 по контракту ФГИС УТКО. Экспозиция этих
+# путей наружу через nginx — отдельный шаг деплоя.
+app.include_router(utko_router)
 
 
 @app.get("/health", tags=["Служебное"])

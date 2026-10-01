@@ -12,6 +12,15 @@ from .report import Report
 from .quote import Quote
 from .error_report import ErrorReport
 
+# УТКО-совместимое API (ядро приёма данных посещения МНО) — отдельный пакет app/utko,
+# но модели наследуют общий Base, поэтому регистрируем их в общей metadata здесь
+# (create_all/alembic autogenerate видят таблицы utko_* вместе с доменными).
+from ..utko.models import (
+    UtkoTruckVisitEvent,
+    UtkoTruckVisitConfirm,
+    UtkoVideoEvent,
+)
+
 __all__ = [
     "Base",
     "TimestampMixin",
@@ -28,4 +37,7 @@ __all__ = [
     "Report",
     "Quote",
     "ErrorReport",
+    "UtkoTruckVisitEvent",
+    "UtkoTruckVisitConfirm",
+    "UtkoVideoEvent",
 ]

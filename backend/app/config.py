@@ -83,6 +83,20 @@ class Settings(BaseSettings):
     # мобильного приложения (POST /intake/error-report). Можно переопределить env.
     SUPPORT_EMAIL: str = "ecopulse@reo.ru"
 
+    # --- УТКО-совместимое API (приём данных посещения МНО, ядро) ---------------
+    # Наш сервис умеет отвечать теми же методами, что публичный API ФГИС УТКО, чтобы
+    # внешний клиент («нейронка») ходил к нам 1:1 по контракту. Креды OAuth2-password
+    # (POST /connect/token). Пока какой-либо из четырёх не задан — токен НЕ выдаётся
+    # (эндпоинт честно отвечает 400): без реальных кред интеграция не поднимается.
+    UTKO_CLIENT_ID: str | None = None
+    UTKO_CLIENT_SECRET: str | None = None
+    UTKO_USERNAME: str | None = None
+    UTKO_PASSWORD: str | None = None
+    # Время жизни выдаваемого access-токена (сек). В ответе — поле expires_in.
+    UTKO_TOKEN_TTL_SECONDS: int = 3600
+    # Секрет подписи УТКО-токена (HS256). Пустой → используем общий JWT_SECRET.
+    UTKO_TOKEN_SECRET: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
