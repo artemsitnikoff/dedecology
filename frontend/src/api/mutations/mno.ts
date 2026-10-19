@@ -97,3 +97,22 @@ export function useSyncMnoOne() {
     },
   });
 }
+
+/**
+ * POST /mno/{id}/approve — публикация волонтёрского МНО (модерация эколога, только admin):
+ * ставит is_published=true, возвращает MnoDetail. Обновляем деталь из ответа и
+ * инвалидируем все ключи списка МНО (['mno', ...]) — строка/бейдж «Новых МНО» освежаются.
+ */
+export function useApproveMno() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post<MnoDetail>(`/mno/${id}/approve`);
+      return res.data;
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(['mno', 'detail', data.id], data);
+      qc.invalidateQueries({ queryKey: ['mno'] });
+    },
+  });
+}

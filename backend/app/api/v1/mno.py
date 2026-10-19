@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.permissions import require_admin
 from ...database import get_db
 from ...deps import get_current_actor, get_current_user
 from ...models import User, Volunteer
@@ -172,6 +173,24 @@ async def sync_one_mno(
 ):
     """ЗАГЛУШКА: синхронизирует одно МНО с ФГИС (без внешних запросов)."""
     mno = await mno_service.sync_one(session, mno_id, current_user.id)
+    await session.commit()
+    return mno
+
+
+@router.post("/{mno_id}/approve", response_model=MnoDetail, tags=["Карта и МНО"])
+async def approve_mno(
+    mno_id: UUID,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: None = Depends(require_admin),
+):
+    """Публикация (модерация) волонтёрского МНО: is_published=True (идемпотентно).
+
+    ТОЛЬКО admin (require_admin → не-админ 403). После одобрения площадка становится
+    видимой в общих списках и на картах. 404 — если МНО нет. Объявлен ДО GET /{mno_id}
+    (параметрические мутации с суффиксом — раньше голого /{mno_id}, как /{mno_id}/sync).
+    """
+    mno = await mno_service.approve_mno(session, mno_id, current_user.id)
     await session.commit()
     return mno
 

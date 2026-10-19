@@ -28,13 +28,13 @@ def _all_migrations():
     return [_load(p.name) for p in sorted(VERSIONS.glob("[0-9][0-9][0-9][0-9]_*.py"))]
 
 
-def test_migration_chain_single_head_is_0030():
-    """Цепочка ревизий консистентна: ровно один head, и это 0030 (0030→0029→…)."""
+def test_migration_chain_single_head_is_0031():
+    """Цепочка ревизий консистентна: ровно один head, и это 0031 (0031→0030→…)."""
     modules = _all_migrations()
     revs = {m.revision for m in modules}
     downs = {m.down_revision for m in modules if m.down_revision}
     heads = revs - downs
-    assert heads == {"0030"}
+    assert heads == {"0031"}
     # Каждая down_revision указывает на существующую ревизию (нет разрывов цепочки).
     assert downs <= revs
 
@@ -450,3 +450,37 @@ def test_0029_downgrade_restores_other_type(monkeypatch):
     assert "INSERT INTO incident_types" in sql
     assert "'other'" in sql
     assert "'Иное'" in sql
+
+
+def test_0031_revision_identifiers():
+    m = _load("0031_mno_is_published.py")
+    assert m.revision == "0031"
+    assert m.down_revision == "0030"
+
+
+def test_0031_upgrade_adds_is_published(monkeypatch):
+    """upgrade(): add_column mno.is_published Boolean NOT NULL server_default false."""
+    m = _load("0031_mno_is_published.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.upgrade()
+
+    fake_op.add_column.assert_called_once()
+    table, column = fake_op.add_column.call_args.args
+    assert table == "mno"
+    assert column.name == "is_published"
+    assert column.nullable is False
+    # server_default false — существующие МНО бэкфиллятся как неопубликованные.
+    assert "false" in str(column.server_default.arg).lower()
+
+
+def test_0031_downgrade_drops_is_published(monkeypatch):
+    """downgrade(): drop_column mno.is_published."""
+    m = _load("0031_mno_is_published.py")
+    fake_op = MagicMock()
+    monkeypatch.setattr(m, "op", fake_op)
+
+    m.downgrade()
+
+    fake_op.drop_column.assert_called_once_with("mno", "is_published")

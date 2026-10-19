@@ -195,6 +195,7 @@ def _to_list_item(
         fgis_id=m.fgis_id,
         synced=m.synced,
         sync_date=m.sync_date,
+        is_published=m.is_published,
         incidents=m.incidents if incidents is None else incidents,
         # received_at = момент создания (Mno.created_at); имя поля — под мобильное приложение.
         received_at=m.created_at,
@@ -425,14 +426,17 @@ async def list_points(
       - bbox не задан/битый → прежнее поведение: все МНО по фильтрам с непустыми coords.
     В обоих случаях points — первые MAX_POINTS строк; capped=True — total превысил лимит.
 
-    Волонтёрские МНО (source='volunteer') на карту НЕ идут, пока их не провалидировали:
-    если source в запросе не задан — скрываем их (Mno.source != 'volunteer'). Явный
-    source='volunteer' (раздел «Новые МНО») по-прежнему отдаёт именно волонтёрские.
+    Волонтёрские МНО (source='volunteer') на общую карту идут ТОЛЬКО после одобрения
+    модератором: если source в запросе не задан — показываем МНО, у которых
+    (source != 'volunteer') ЛИБО (is_published == True), т.е. неопубликованные
+    волонтёрские скрыты. Явный source='volunteer' (раздел «Новые МНО») по-прежнему
+    отдаёт ВСЕ волонтёрские (публикация там не фильтрует — это очередь модерации).
     """
     filters = _filters(search, region, synced, source=source)
-    # source не указан → прячем волонтёрские МНО (валидируются позже, в общую карту не попадают).
+    # source не указан → скрываем НЕопубликованные волонтёрские МНО (ждут одобрения);
+    # опубликованные (is_published) и все ФГИС/ручные остаются видны на общей карте.
     if not source:
-        filters.append(Mno.source != "volunteer")
+        filters.append(or_(Mno.source != "volunteer", Mno.is_published.is_(True)))
     box = parse_bbox(bbox)
     if box is not None:
         min_lat, min_lon, max_lat, max_lon = box
@@ -473,6 +477,11 @@ async def list_form_points(
     по фильтрам). Фильтр по числовым lat/lon (индекс ix_mno_lat_lon), как в
     list_points; total — COUNT по кадру; points — первые FORM_MAX_POINTS;
     capped=True — total превысил лимит (пользователю стоит приблизить карту).
+
+    Видимость как на общей карте (list_points, source не задан): НЕопубликованные
+    волонтёрские МНО на публичную форму НЕ попадают, пока эколог их не одобрил — иначе
+    немодерированная точка расползалась бы по чужим обращениям. Показываем МНО, у которых
+    (source != 'volunteer') ЛИБО (is_published == True).
     """
     box = parse_bbox(bbox)
     if box is None:
@@ -484,6 +493,8 @@ async def list_form_points(
         Mno.lat.is_not(None),
         Mno.lat.between(min_lat, max_lat),
         Mno.lon.between(min_lon, max_lon),
+        # Скрываем неопубликованные волонтёрские (ждут модерации) — как на общей карте.
+        or_(Mno.source != "volunteer", Mno.is_published.is_(True)),
     ]
     total = (
         await session.execute(select(func.count(Mno.id)).where(*filters))
@@ -537,6 +548,39 @@ async def get_mno(session: AsyncSession, mno_id: uuid.UUID) -> MnoDetail:
     return MnoDetail(**item.model_dump())
 
 
+async def approve_mno(
+    session: AsyncSession, mno_id: uuid.UUID, actor_user_id: uuid.UUID
+) -> MnoDetail:
+    """Публикация (модерация) волонтёрского МНО админом: is_published=True.
+
+    После одобрения площадка становится видимой в общих списках и на картах
+    (list_points/list_form_points при source не задан). ИДЕМПОТЕНТНО: уже
+    опубликованное МНО остаётся опубликованным (без ошибки). 404 — если МНО нет
+    (_get). Пишет системный аудит ('mno.approve') с actor_user_id одобрившего админа
+    (как fgis_sync_one). Возвращает обновлённую карточку MnoDetail (живой COUNT
+    обращений + волонтёрские поля). flush() здесь, commit() — в роутере.
+    """
+    mno = await _get(session, mno_id)
+    before = {"is_published": mno.is_published}
+    mno.is_published = True
+    await session.flush()
+    await audit(
+        session,
+        action="mno.approve",
+        entity_type="mno",
+        entity_id=mno.id,
+        before=before,
+        after={"is_published": True},
+        actor_user_id=actor_user_id,
+        actor_type="system",
+    )
+    region_names = await _region_names(session)
+    counts = await _incident_counts(session, [mno.id])
+    volunteers = await _volunteers_map(session, [mno.volunteer_id])
+    item = _to_list_item(mno, region_names, counts.get(mno.id, 0), volunteers)
+    return MnoDetail(**item.model_dump())
+
+
 async def create_mno(
     session: AsyncSession,
     data,
@@ -569,6 +613,10 @@ async def create_mno(
         fgis_id=None,
         synced=False,
         sync_date=None,
+        # Ставим явно (как synced): _to_list_item ниже читает атрибут ДО refresh —
+        # у транзиентного объекта server_default ещё не применён (иначе None → ошибка схемы).
+        # Волонтёрское (source='volunteer') стартует неопубликованным — ждёт одобрения.
+        is_published=False,
         incidents=0,
     )
     session.add(mno)
@@ -645,6 +693,10 @@ async def create_mno_from_volunteer(
         fgis_id=None,
         synced=False,
         sync_date=None,
+        # Волонтёрское МНО стартует НЕопубликованным: скрыто из общих списков/карт,
+        # пока эколог не одобрит его (POST /mno/{id}/approve). Ставим явно — _to_list_item
+        # ниже читает атрибут ДО refresh (server_default на транзиентном объекте ещё нет).
+        is_published=False,
         incidents=0,
     )
     session.add(mno)

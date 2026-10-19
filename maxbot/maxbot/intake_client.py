@@ -163,6 +163,55 @@ async def prepare_max(text: str, photo_time: str = "") -> dict:
     return payload
 
 
+async def prepare_coords(lat: float, lon: float, photo_time: str = "") -> dict:
+    """Coords-first разбор: ближайшие МНО по ТОЧНЫМ координатам (гео-кнопка MAX).
+
+    POST {api_base}/intake/max/prepare-coords (JSON, X-Intake-Token). AI/resolve_address
+    НЕ дёргаются — сразу nearest_mno. Возвращает dict по ТОМУ ЖЕ контракту, что
+    prepare_max (ветка "ok"): `{"status":"ok","parsed":{coords,region="",city="",
+    street="",comment="",photo_time},"point":{lat,lon},"candidates":[...]}`. Рядом
+    пусто → candidates=[], status всё равно "ok".
+
+    :param lat: Широта присланной геопозиции.
+    :param lon: Долгота присланной геопозиции.
+    :param photo_time: ISO "%Y-%m-%dT%H:%M" — время фотофиксации из подписи (опц.).
+    :raises IntakeError: сеть/таймаут/не-2xx/не-JSON — вызывающий отвечает мягко.
+    """
+    url = f"{settings.api_base}/intake/max/prepare-coords"
+    headers = {"X-Intake-Token": settings.INTAKE_TOKEN}
+    body: dict = {"lat": lat, "lon": lon}
+    if photo_time:
+        body["photo_time"] = photo_time
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(url, json=body, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.error("prepare_coords request failed url=%s: %s", url, exc)
+        raise IntakeError(f"Не удалось связаться с intake API: {exc}") from exc
+
+    if not resp.is_success:
+        body_preview = resp.text[:500]
+        logger.error("prepare_coords returned %s: %s", resp.status_code, body_preview)
+        raise IntakeError(
+            f"prepare-coords ответил {resp.status_code}",
+            details={"backend_status": resp.status_code, "body": body_preview},
+        )
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        logger.error("prepare_coords non-JSON: %s", resp.text[:500])
+        raise IntakeError("prepare-coords вернул не-JSON ответ") from exc
+
+    logger.info(
+        "prepare_coords status=%s candidates=%d",
+        payload.get("status") if isinstance(payload, dict) else "?",
+        len(payload.get("candidates") or []) if isinstance(payload, dict) else 0,
+    )
+    return payload
+
+
 async def finalize_max(
     *,
     region: str,

@@ -27,6 +27,11 @@ class MnoListItem(ORMBase):
     synced: bool
     sync_date: Optional[datetime] = None
     incidents: int
+    # Опубликовано модератором: волонтёрское МНО (source='volunteer') видно в общих
+    # списках/картах только после одобрения админом (POST /mno/{id}/approve). У ФГИС/
+    # ручных МНО на видимость не влияет. Дефолт False совпадает с server_default колонки —
+    # _to_list_item всегда подставляет реальный m.is_published.
+    is_published: bool = False
     # Момент создания записи МНО (фиксируется на бэке при вставке = Mno.created_at).
     # Отдаётся как `received_at` — мобильное приложение читает именно это имя; показывается
     # как «дата поступления» в разделе «Новые МНО». Optional — старые ответы.

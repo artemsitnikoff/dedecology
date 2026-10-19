@@ -837,23 +837,175 @@ async def test_regions_route_not_shadowed_by_id(client):
 
 @pytest.mark.asyncio
 async def test_list_regions_query_shape():
-    """list_regions строит SELECT DISTINCT с фильтром непустых и сортировкой A→Я."""
+    """list_regions: справочник (canonical_index) + DISTINCT непустых Incident.region.
+
+    Порядок запросов: сначала SELECT regions.name (canonical_index), затем
+    SELECT DISTINCT непустых incidents.region. Уникальные непересекающиеся регионы
+    остаются как есть (канон из справочника), итог отсортирован A→Я.
+    """
     session = AsyncMock()
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = [
+    index_res = MagicMock()  # справочник regions.name
+    index_res.scalars.return_value.all.return_value = [
         "Алтайский край",
         "Самарская область",
     ]
-    session.execute.return_value = result
+    distinct_res = MagicMock()  # distinct incidents.region
+    distinct_res.scalars.return_value.all.return_value = [
+        "Алтайский край",
+        "Самарская область",
+    ]
+    session.execute = AsyncMock(side_effect=[index_res, distinct_res])
 
     regions = await incident_service.list_regions(session)
     assert regions == ["Алтайский край", "Самарская область"]
 
-    stmt = session.execute.call_args.args[0]
-    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True})).upper()
+    # Второй запрос — DISTINCT непустых регионов инцидентов.
+    distinct_stmt = session.execute.call_args_list[1].args[0]
+    compiled = str(distinct_stmt.compile(compile_kwargs={"literal_binds": True})).upper()
     assert "DISTINCT" in compiled
-    assert "ORDER BY" in compiled
     assert "IS NOT NULL" in compiled
+
+
+@pytest.mark.asyncio
+async def test_list_regions_dedups_spellings_to_canonical():
+    """(а) Один субъект в разных написаниях (регистр/ё/тип/тире) → ОДИН пункт дропдауна.
+
+    Пять сырых написаний «самарская обл.»/«Самарская Область»/«САМАРСКАЯ ОБЛАСТЬ» +
+    «Респ Татарстан»/«республика татарстан» схлопываются в два канонических ярлыка из
+    справочника. Иначе дропдаун дробит субъект и каждый пункт ловит лишь часть обращений.
+    """
+    session = AsyncMock()
+    index_res = MagicMock()  # справочник regions.name (канон)
+    index_res.scalars.return_value.all.return_value = [
+        "Самарская область",
+        "Республика Татарстан",
+    ]
+    distinct_res = MagicMock()  # сырые написания incidents.region
+    distinct_res.scalars.return_value.all.return_value = [
+        "самарская обл.",
+        "Самарская Область",
+        "САМАРСКАЯ ОБЛАСТЬ",
+        "Респ Татарстан",
+        "республика татарстан",
+    ]
+    session.execute = AsyncMock(side_effect=[index_res, distinct_res])
+
+    regions = await incident_service.list_regions(session)
+    # 5 написаний → 2 канонических ярлыка (отсортированы: Р < С).
+    assert regions == ["Республика Татарстан", "Самарская область"]
+
+
+@pytest.mark.asyncio
+async def test_list_regions_dedups_without_reference():
+    """(а) Справочник пуст → дедуп по ключу всё равно работает (нормализация написания).
+
+    Без canonical_index ярлык берётся из normalize_region первого написания, но дубли по
+    ключу (регистр/тип субъекта) всё равно схлопываются в один пункт.
+    """
+    session = AsyncMock()
+    index_res = MagicMock()  # справочник пуст
+    index_res.scalars.return_value.all.return_value = []
+    distinct_res = MagicMock()
+    distinct_res.scalars.return_value.all.return_value = [
+        "самарская обл.",
+        "Самарская область",
+    ]
+    session.execute = AsyncMock(side_effect=[index_res, distinct_res])
+
+    regions = await incident_service.list_regions(session)
+    # Два написания → один пункт (normalize_region первого: «самарская обл.» → «самарская область»).
+    assert regions == ["самарская область"]
+
+
+# --- (б) Толерантный фильтр по региону (ключ сопоставления, все написания) ------
+
+
+@pytest.mark.asyncio
+async def test_resolve_region_variants_collects_all_spellings():
+    """_resolve_region_variants: все написания Incident.region с ключом искомого региона.
+
+    Канонический ярлык дропдауна «Самарская область» → ключ «самарская область» → собираем
+    ВСЕ написания этого субъекта в БД (регистр/тип/тире), чужой субъект отсекается.
+    """
+    session = AsyncMock()
+    res = MagicMock()
+    res.scalars.return_value.all.return_value = [
+        "Самарская область",
+        "самарская обл.",
+        "САМАРСКАЯ ОБЛАСТЬ",
+        "Иркутская область",
+    ]
+    session.execute = AsyncMock(return_value=res)
+
+    variants = await incident_service._resolve_region_variants(session, "Самарская область")
+    assert set(variants) == {"Самарская область", "самарская обл.", "САМАРСКАЯ ОБЛАСТЬ"}
+    assert "Иркутская область" not in variants
+
+
+@pytest.mark.asyncio
+async def test_resolve_region_variants_blank_returns_none_no_query():
+    """Пусто/пробелы/None → None без обращения к БД (фильтр региона не применяется)."""
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=AssertionError("БД не должна вызываться"))
+    assert await incident_service._resolve_region_variants(session, None) is None
+    assert await incident_service._resolve_region_variants(session, "") is None
+    assert await incident_service._resolve_region_variants(session, "   ") is None
+
+
+def test_base_filters_region_tolerant_in_when_variants():
+    """(б) region_variants непуст → Incident.region.in_(variants), а НЕ точное равенство.
+
+    Так выбор канонического ярлыка ловит инциденты со ВСЕМИ написаниями субъекта.
+    """
+    variants = ["Самарская область", "самарская обл.", "САМАРСКАЯ ОБЛАСТЬ"]
+    filters = _base_filters(
+        None, None, None, None, region="Самарская область", region_variants=variants
+    )
+    assert len(filters) == 1
+    compiled = str(filters[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "incidents.region IN" in compiled
+    for spelling in variants:
+        assert spelling in compiled
+    # Именно IN-набор, а не равенство одному значению.
+    assert "incidents.region = " not in compiled
+
+
+def test_base_filters_region_empty_variants_falls_back_to_exact():
+    """(б) region_variants пуст/None → фолбэк на точное равенство (прямые вызовы/тесты)."""
+    for variants in ([], None):
+        filters = _base_filters(
+            None, None, None, None, region="Самарская область", region_variants=variants
+        )
+        assert len(filters) == 1
+        clause = filters[0]
+        assert clause.operator is eq
+        assert clause.right.value == "Самарская область"
+
+
+@pytest.mark.asyncio
+async def test_list_cities_region_tolerant_in_clause():
+    """(б) list_cities(region=ярлык): города субъекта по IN всех написаний региона."""
+    session = AsyncMock()
+    variants_res = MagicMock()  # _distinct_regions внутри _resolve_region_variants
+    variants_res.scalars.return_value.all.return_value = [
+        "Самарская область",
+        "самарская обл.",
+        "САМАРСКАЯ ОБЛАСТЬ",
+        "Иркутская область",
+    ]
+    cities_res = MagicMock()
+    cities_res.scalars.return_value.all.return_value = ["г. Кинель", "г. Самара"]
+    session.execute = AsyncMock(side_effect=[variants_res, cities_res])
+
+    cities = await incident_service.list_cities(session, "Самарская область")
+    assert cities == ["г. Кинель", "г. Самара"]
+
+    cities_stmt = session.execute.call_args_list[1].args[0]
+    compiled = str(cities_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "incidents.region IN" in compiled
+    assert "самарская обл." in compiled
+    assert "САМАРСКАЯ ОБЛАСТЬ" in compiled
+    assert "Иркутская область" not in compiled
 
 
 # --- /cities (дропдаун города, зависит от региона) -----------------------------
@@ -933,7 +1085,11 @@ async def test_list_cities_query_shape_all_regions():
 
 @pytest.mark.asyncio
 async def test_list_cities_query_shape_scoped_to_region():
-    """list_cities(region=X): в WHERE добавляется ТОЧНОЕ совпадение по региону."""
+    """list_cities(region=X): в WHERE добавляется совпадение по региону.
+
+    Здесь distinct-регионы мока («г. Кинель») не совпадают по ключу с искомым субъектом →
+    вариантов нет → фолбэк на ТОЧНОЕ равенство Incident.region == region (путь без вариантов).
+    """
     session = AsyncMock()
     result = MagicMock()
     result.scalars.return_value.all.return_value = ["г. Кинель"]

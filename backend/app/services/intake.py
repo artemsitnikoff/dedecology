@@ -36,13 +36,13 @@ from .incident_type import code_exists
 
 logger = logging.getLogger(__name__)
 
-_MAX_PHOTOS = 6
-_MAX_PHOTO_BYTES = 10 * 1024 * 1024  # 10 MB (лимит исходного загружаемого файла)
+_MAX_PHOTOS = 10
+_MAX_PHOTO_BYTES = 20 * 1024 * 1024  # 20 MB (лимит исходного загружаемого файла)
 _PHOTO_CHUNK = 64 * 1024
 
 # Параметры серверного ресайза (фото пере-кодируются в JPEG при загрузке):
 # FULL — версия для просмотра, THUMB — превью для списков/карты.
-_FULL_MAX_SIDE = (1600, 1600)
+_FULL_MAX_SIDE = (2560, 2560)
 _FULL_QUALITY = 85
 _THUMB_MAX_SIDE = (400, 400)
 _THUMB_QUALITY = 80
@@ -311,13 +311,14 @@ async def resolve_address(
     Единая логика, переиспользуемая приёмом из Макс-бота и командой reprocess:
       1. AI (ai_parse_incident) извлекает регион/город/улицу/координаты;
       2. если AI дал адрес → склейка региона+города+улицы и геокод через
-         бесплатные Подсказки (geocode_address): её поля и координаты авторитетны;
-         Clean (clean_address) — платный фолбэк, если geocode не дал результата;
+         бесплатные Подсказки (geocode_address): её АДРЕСНЫЕ ПОЛЯ авторитетны, но
+         КООРДИНАТЫ берём из AI (если он их дал), геокод — лишь фолбэк координат;
+         Clean (clean_address) — платный фолбэк полей, если geocode не дал результата;
          если DaData недоступна совсем — берём поля AI как есть (+ координаты из AI);
       3. если AI ничего не дал → clean_address(raw); недоступна → эвристика
          _parse_address (coords пустые).
 
-    Приоритет координат: DaData Clean > координаты AI > "".
+    Приоритет координат: координаты AI > геокод DaData > "".
 
     `ai` можно передать готовым — create_incident_from_max парсит его один раз
     (тот же ai нужен и для photo_time) и отдаёт сюда, чтобы НЕ дёргать CLI
@@ -363,12 +364,15 @@ async def resolve_address(
             if cleaned is None:
                 cleaned = await clean_address(addr)
             if cleaned:
-                # DaData авторитетна: стандартизированные поля + геокод.
+                # DaData авторитетна для адресных ПОЛЕЙ (стандартизированные регион/
+                # город/улица). КООРДИНАТЫ — наоборот: приоритет у AI (промпт эмитит
+                # coords только при реальных числах координат в тексте → они точнее
+                # геокода адресной строки), геокод DaData — лишь фолбэк.
                 region = _clean_str(cleaned.get("region"))
                 city = _clean_str(cleaned.get("city"))
                 street = _clean_str(cleaned.get("street"))
-                coords = _clean_str(cleaned.get("coords")) or _clean_str(
-                    ai_dict.get("coords")
+                coords = _clean_str(ai_dict.get("coords")) or _clean_str(
+                    cleaned.get("coords")
                 )
                 path = "ai+dadata"
                 logger.info("[resolve_address] путь=ai+dadata")
@@ -455,14 +459,14 @@ async def create_incident_from_max(
     Адрес приходит свободным текстом. Разбор адреса:
       1. claude CLI (ai_parse_incident) извлекает регион/город/улицу/координаты/
          время из свободного текста;
-      2. если AI дал адрес — склеиваем его и стандартизируем через DaData Clean
-         (clean_address): координаты DaData авторитетны (геокодер); если DaData
-         недоступна — берём поля AI как есть (+ координаты из текста, если AI их
-         нашёл);
+      2. если AI дал адрес — склеиваем его и стандартизируем через DaData
+         (geocode/Clean): адресные поля DaData авторитетны, но координаты берём
+         из AI (если он их нашёл в тексте), геокод — лишь фолбэк координат; если
+         DaData недоступна — берём поля AI как есть (+ координаты из текста);
       3. если AI недоступен — текущий путь: clean_address(text) → эвристика
          _parse_address (coords пустые).
 
-    Приоритет координат: DaData Clean > координаты из AI > "".
+    Приоритет координат: координаты из AI > геокод DaData > "".
     Время фотофиксации: AI-время ЧЧ:ММ (сегодня@ЧЧ:ММ) переопределяет переданное;
     иначе разбираем photo_time из запроса. Любой сбой AI/DaData деградирует на
     фолбэк (log + fall through) и НИКОГДА не роняет приём. flush() здесь,
@@ -547,7 +551,7 @@ async def create_incident_from_max(
 
 
 async def _read_upload_bytes(upload) -> bytes:
-    """Считывает поток загрузки целиком чанками с контролем размера ≤10 МБ.
+    """Считывает поток загрузки целиком чанками с контролем размера ≤20 МБ.
 
     Превышение лимита / пустой файл → ValidationError. Возвращает сырые байты
     для последующей валидации и пере-кодирования через Pillow.
@@ -561,7 +565,7 @@ async def _read_upload_bytes(upload) -> bytes:
         total += len(chunk)
         if total > _MAX_PHOTO_BYTES:
             raise ValidationError(
-                "Файл фото превышает 10 МБ",
+                "Файл фото превышает 20 МБ",
                 details={"filename": getattr(upload, "filename", None)},
             )
         chunks.append(chunk)
@@ -695,8 +699,8 @@ def make_utko_copy(full_jpg: Path, dest_utko: Path) -> None:
 async def _decode_uploads(photo_files: list) -> list[Image.Image]:
     """Валидирует и декодирует загруженные фото (без записи на диск).
 
-    Фильтрует пустые поля, проверяет количество (≤3), читает байты с лимитом
-    10 МБ, декодирует через Pillow (авторитетная проверка формата — multipart
+    Фильтрует пустые поля, проверяет количество (≤10), читает байты с лимитом
+    20 МБ, декодирует через Pillow (авторитетная проверка формата — multipart
     Content-Type не в счёт). Невалидное/лишнее фото → ValidationError. Вызывается
     ДО создания инцидента, чтобы битый файл отбивался 400 без записи в БД.
     """

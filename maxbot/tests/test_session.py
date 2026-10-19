@@ -252,3 +252,25 @@ def test_find_awaiting_none_when_finalized():
     r.finalized = True
     store.put(r)
     assert store.find_awaiting(chat_key(1, 2), now=100.0) is None
+
+
+def test_find_awaiting_matches_location_phase():
+    """Гео-фаза (awaiting_location) тоже ловится find_awaiting, не только awaiting_address.
+
+    Охранник флоу гео-кнопки: после присланного фото обращение ждёт геопозицию
+    (awaiting_location=True), адрес ещё не ждёт — тап по гео-кнопке должен найти его."""
+    store = PendingStore()
+    now = 100.0
+    r = PendingReport(pending_id="loc", chat_id=1, user_id=2, created_at=now)
+    r.awaiting_location = True
+    r.awaiting_address = False
+    store.put(r)
+    assert store.find_awaiting(chat_key(1, 2), now=now) is r
+
+
+def test_find_awaiting_none_when_neither_flag():
+    # Ни геопозицию, ни адрес не ждём → find_awaiting не должен находить обращение.
+    store = PendingStore()
+    r = PendingReport(pending_id="x", chat_id=1, user_id=2, created_at=100.0)
+    store.put(r)
+    assert store.find_awaiting(chat_key(1, 2), now=100.0) is None

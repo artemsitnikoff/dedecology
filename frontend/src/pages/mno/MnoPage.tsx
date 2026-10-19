@@ -7,8 +7,9 @@ import { thumbUrl } from '@/lib/photo';
 import { useMno, useMnoDetail, useMnoPoints } from '@/api/hooks/mno';
 import type { MnoFilters, MnoSortKey, SortOrder } from '@/api/hooks/mno';
 import { useRegionsDirectory } from '@/api/hooks/regions';
-import { exportMno, useCreateMno, useSyncMno, useSyncMnoOne } from '@/api/mutations/mno';
+import { exportMno, useApproveMno, useCreateMno, useSyncMno, useSyncMnoOne } from '@/api/mutations/mno';
 import type { MnoCreate, MnoListItem, RegionListItem } from '@/api/aliases';
+import { useAuthStore } from '@/store/authStore';
 import { YandexMap } from '@/components/YandexMap';
 import './Mno.css';
 
@@ -242,6 +243,8 @@ const MnoRow = memo(function MnoRow({
  * основной реестр (ФГИС/ручные, БЕЗ волонтёрских). Один компонент, две страницы. */
 export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' } = {}) {
   const isVolunteer = sourceFilter === 'volunteer';
+  // Публикация волонтёрского МНО (модерация) доступна только администратору.
+  const isAdmin = useAuthStore((s) => s.user?.role) === 'admin';
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
@@ -353,6 +356,7 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
   const syncMno = useSyncMno();
   const syncMnoOne = useSyncMnoOne();
   const createMno = useCreateMno();
+  const approveMno = useApproveMno();
 
   const rows = listQuery.data?.items ?? [];
   const total = listQuery.data?.total ?? 0;
@@ -431,6 +435,13 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
     syncMnoOne.mutate(id, {
       onSuccess: () => showToast('МНО синхронизировано с ФГИС.'),
       onError: () => showToast('Не удалось синхронизировать МНО.'),
+    });
+
+  // Публикация волонтёрского МНО: POST /mno/{id}/approve → is_published=true (только admin).
+  const handleApprove = (id: string) =>
+    approveMno.mutate(id, {
+      onSuccess: () => showToast('МНО опубликовано.'),
+      onError: () => showToast('Не удалось опубликовать МНО.'),
     });
 
   const handleExport = () => {
@@ -722,6 +733,9 @@ export function MnoPage({ sourceFilter }: { sourceFilter?: 'volunteer' | 'fgis' 
           onSyncOne={handleSyncOne}
           syncOnePending={syncMnoOne.isPending}
           onOpenIncidents={openIncidentsForMno}
+          isAdmin={isAdmin}
+          onApprove={handleApprove}
+          approvePending={approveMno.isPending}
         />
       )}
 
@@ -764,8 +778,22 @@ type DrawerProps = {
   syncOnePending: boolean;
   /** Клик по счётчику обращений → список инцидентов этого МНО (/incidents?mno_id=id). */
   onOpenIncidents: (id: string) => void;
+  /** Текущий пользователь — администратор (кнопка публикации только для admin). */
+  isAdmin: boolean;
+  /** Опубликовать волонтёрское МНО (POST /mno/{id}/approve). */
+  onApprove: (id: string) => void;
+  approvePending: boolean;
 };
-function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: DrawerProps) {
+function MnoDrawer({
+  id,
+  onClose,
+  onSyncOne,
+  syncOnePending,
+  onOpenIncidents,
+  isAdmin,
+  onApprove,
+  approvePending,
+}: DrawerProps) {
   const { data, isLoading, isError } = useMnoDetail(id);
   // Фото есть только у волонтёрских МНО; у ФГИС/ручных photo_urls пустой → strip/лайтбокс не рендерятся.
   const photos = data?.photo_urls ?? [];
@@ -811,6 +839,19 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
                     {data.synced ? 'Синхронизировано с ФГИС' : 'Добавлено вручную'}
                   </span>
                 )}
+                {/* Статус публикации (модерация) — только у волонтёрских МНО. */}
+                {data.source === 'volunteer' &&
+                  (data.is_published ? (
+                    <span className="de-mno-pill fgis">
+                      <span className="de-mno-pill-dot" style={{ background: 'var(--ark-green-500)' }} />
+                      Опубликовано
+                    </span>
+                  ) : (
+                    <span className="de-mno-pill manual">
+                      <span className="de-mno-pill-dot" style={{ background: 'var(--ark-gray-500)' }} />
+                      Не опубликовано
+                    </span>
+                  ))}
                 <span className="de-mno-drawer-reg">№ {data.reg}</span>
               </div>
               <h2 className="de-mno-drawer-title">{data.name}</h2>
@@ -881,6 +922,18 @@ function MnoDrawer({ id, onClose, onSyncOne, syncOnePending, onOpenIncidents }: 
             </div>
 
             <div className="de-mno-drawer-actions">
+              {/* Публикация волонтёрского МНО (модерация эколога) — только admin и пока не опубликовано. */}
+              {data.source === 'volunteer' && !data.is_published && isAdmin && (
+                <button
+                  type="button"
+                  className="de-mno-sync-one"
+                  disabled={approvePending}
+                  onClick={() => onApprove(data.id)}
+                >
+                  <Icon name="check" size={15} />
+                  {approvePending ? 'Публикация…' : 'Опубликовать'}
+                </button>
+              )}
               {!data.synced && (
                 <button
                   type="button"

@@ -204,7 +204,12 @@ class PendingReport:
     # флаг-замок против ДВОЙНОГО создания при частых тапах («тыкаешь 5 раз»): ставится
     # до await finalize, снимается при ошибке (можно повторить) или заменяется finalized.
     processing: bool = False
-    # Ждём от пользователя адрес текстом (координаты не распознались из подписи).
+    # Ждём от пользователя геопозицию (кнопка «📍 Отправить геопозицию», MAX
+    # RequestGeoLocationButton) — гео-шаг после присланного фото, до координат/адреса.
+    # Отдельно от awaiting_address, чтобы отличать фазу гео-кнопки.
+    awaiting_location: bool = False
+    # Ждём от пользователя адрес текстом (координаты не распознались из подписи, либо
+    # текстовый фолбэк вместо гео-кнопки).
     awaiting_address: bool = False
     # Двухшаговый выбор: сначала МНО, затем тип инцидента. Между шагами держим выбранную
     # площадку (id+подпись) и справочник типов (для подписи выбранного типа в подтверждении).
@@ -250,10 +255,15 @@ class PendingStore:
 
     def find_awaiting(self, key: str, now: float | None = None) -> PendingReport | None:
         """Найти НЕ протухшее, не завершённое обращение этого чата, ожидающее
-        адрес. При нескольких — вернуть самое свежее (latest created_at)."""
+        геопозицию ИЛИ адрес. При нескольких — вернуть самое свежее (latest created_at).
+
+        Гео-шаг (кнопка «Отправить геопозицию») и текстовый фолбэк живут в одном
+        ожидании: пока обращение держит awaiting_location или awaiting_address, оно
+        принимает и location-, и текст-апдейт (адрес). Финализированные/чужие/
+        протухшие — пропускаются."""
         best: PendingReport | None = None
         for r in self._items.values():
-            if r.finalized or not r.awaiting_address:
+            if r.finalized or not (r.awaiting_location or r.awaiting_address):
                 continue
             if r.key != key:
                 continue

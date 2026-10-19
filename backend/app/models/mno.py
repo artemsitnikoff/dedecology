@@ -72,3 +72,11 @@ class Mno(Base, TimestampMixin):
     volunteer_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )
+    # Опубликовано модератором (миграция 0031). Волонтёрское МНО (source='volunteer')
+    # по умолчанию скрыто из общих списков/карт, пока админ не одобрит его
+    # (POST /mno/{id}/approve → is_published=True). ФГИС/ручные МНО (source != 'volunteer')
+    # видны независимо от флага. server_default false → все существующие строки
+    # бэкфиллятся как неопубликованные (на видимость ФГИС/ручных это не влияет).
+    is_published: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )

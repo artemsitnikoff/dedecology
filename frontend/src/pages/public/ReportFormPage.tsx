@@ -13,8 +13,8 @@ import './report-form.css';
 // без авторизации, без сайдбара (standalone). Дизайн адаптирован из публичного
 // опроса Глафиры: центрированная карточка на мягком фоне + бренд-шапка.
 
-const MAX_PHOTOS = 6;
-const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10 МБ
+const MAX_PHOTOS = 10;
+const MAX_PHOTO_BYTES = 20 * 1024 * 1024; // 20 МБ
 const ACCEPTED = /\.(jpe?g|png|webp)$/i;
 
 type Bins = '' | 'yes' | 'no';
@@ -128,6 +128,9 @@ export default function ReportFormPage() {
   // Рег-номер + UUID выбранного на карте МНО (необязательные) + флаг открытия модалки.
   const [mnoReg, setMnoReg] = useState('');
   const [mnoId, setMnoId] = useState('');
+  // Подпись выбранной площадки в чипе: рег-№ (ФГИС) ИЛИ название/адрес (новая волонтёрская
+  // площадка — реестрового № у неё нет). Отдельно от mnoReg, т.к. mnoReg уходит в форму.
+  const [mnoLabel, setMnoLabel] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   // Голые имена выбранного региона/города (без типа) — для фильтрации
   // следующего уровня в DaData (locations матчит "Самарская", а не "Самарская обл").
@@ -199,10 +202,13 @@ export default function ReportFormPage() {
     setCoords(m.coords);
     setMnoReg(m.reg);
     setMnoId(m.id);
+    // Подпись чипа: рег-№, иначе название, иначе адрес (у новой волонтёрской площадки рег-№ нет).
+    setMnoLabel(m.reg || m.name || m.address);
   }, []);
   const clearMno = () => {
     setMnoReg('');
     setMnoId('');
+    setMnoLabel('');
   };
 
   // Добавляет только что выбранные файлы к уже набранным (аддитивно), с общим
@@ -226,7 +232,7 @@ export default function ReportFormPage() {
       resetInput();
     };
     if (picked.some((f) => f.size > MAX_PHOTO_BYTES)) {
-      fail('Каждое фото должно быть не больше 10 МБ.');
+      fail('Каждое фото должно быть не больше 20 МБ.');
       return;
     }
     if (picked.some((f) => !ACCEPTED.test(f.name))) {
@@ -392,10 +398,10 @@ export default function ReportFormPage() {
                 <button type="button" className="de-rf-mno-btn" onClick={openPicker}>
                   <span aria-hidden>📍</span> Выбрать МНО на карте
                 </button>
-                {mnoReg && (
+                {mnoId && (
                   <div className="de-rf-mno-chip">
                     <span className="de-rf-mno-chip-txt">
-                      Выбрано МНО: <b className="de-rf-mono">{mnoReg}</b>
+                      Выбрано МНО: <b className="de-rf-mono">{mnoLabel}</b>
                     </span>
                     <button
                       type="button"
@@ -588,7 +594,7 @@ export default function ReportFormPage() {
 
               {/* Фото */}
               <div className="de-rf-field">
-                <span className="de-rf-label">Фото площадки (до 6, до 10 МБ)</span>
+                <span className="de-rf-label">Фото площадки (до 10, до 20 МБ)</span>
                 <input
                   type="file"
                   className="de-rf-file"
@@ -596,7 +602,7 @@ export default function ReportFormPage() {
                   multiple
                   onChange={(e) => handleFiles(e.target.files, e.target)}
                 />
-                <span className="de-rf-hint">Можно добавлять по одной, до 6</span>
+                <span className="de-rf-hint">Можно добавлять по одной, до 10</span>
                 {photoError && <span className="de-rf-inline-err">{photoError}</span>}
                 {previews.length > 0 && (
                   <div className="de-rf-thumbs">

@@ -35,8 +35,10 @@ from maxapi.types import (
     InputMediaBuffer,
     MessageCallback,
     MessageCreated,
+    RequestGeoLocationButton,
 )
 from maxapi.types.attachments.image import Image
+from maxapi.types.attachments.location import Location
 from maxapi.types.message import Message
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 
@@ -47,6 +49,7 @@ from .intake_client import (
     fetch_incident_types,
     fetch_map,
     finalize_max,
+    prepare_coords,
     prepare_max,
     push_incident,
 )
@@ -129,9 +132,17 @@ _REPLY_SOFT_ERROR = (
 )
 
 # --- тексты интерактивного флоу выбора МНО (только личка) ---
+# Подпись гео-кнопки (MAX RequestGeoLocationButton; работает только в личке).
+_GEO_BUTTON = "📍 Отправить геопозицию"
+_ASK_LOCATION = (
+    "Фото принято ✅\n\nОтправьте геопозицию площадки кнопкой «📍 Отправить "
+    "геопозицию» ниже — или пришлите адрес текстом (город, улица, дом)."
+)
+_LOC_ACCEPTED = "Геопозиция принята. Ищу ближайшие площадки…"
 _ASK_ADDRESS = (
-    "Не удалось определить адрес по описанию. Напишите, пожалуйста, адрес "
-    "площадки одним сообщением: город, улица, дом."
+    "Не удалось определить адрес по описанию. Отправьте геопозицию площадки "
+    "кнопкой «📍 Отправить геопозицию» ниже — или напишите адрес одним "
+    "сообщением: город, улица, дом."
 )
 _HDR_PICK = (
     "Нашёл ближайшие площадки накопления ТКО. Выберите, к какой относится "
@@ -186,6 +197,27 @@ def _all_images(msg: Message, limit: int = 6) -> list[Image]:
             if len(out) >= limit:
                 break
     return out
+
+
+def _extract_location(msg: Message) -> tuple[float, float] | None:
+    """(lat, lon) из первого LOCATION-вложения сообщения MAX; None — если нет/битое.
+
+    Приходит, когда пользователь нажал гео-кнопку (RequestGeoLocationButton) — MAX
+    присылает сообщение с Attachment типа LOCATION (latitude/longitude). Нечисловые/
+    отсутствующие координаты → None (обрабатывается как «нет геопозиции»)."""
+    if not msg.body or not msg.body.attachments:
+        return None
+    for att in msg.body.attachments:
+        if isinstance(att, Location) or getattr(att, "type", None) == AttachmentType.LOCATION:
+            lat = getattr(att, "latitude", None)
+            lon = getattr(att, "longitude", None)
+            if lat is None or lon is None:
+                return None
+            try:
+                return (float(lat), float(lon))
+            except (TypeError, ValueError):
+                return None
+    return None
 
 
 def _sender_display_name(sender) -> str:
@@ -369,6 +401,26 @@ def _build_keyboard(pending_id: str, candidates: list[dict]):
     return b.as_markup()
 
 
+def _build_location_keyboard():
+    """Инлайн-клавиатура с единственной кнопкой запроса геопозиции.
+
+    MAX RequestGeoLocationButton (quick=True → геопозиция без доп. подтверждения,
+    один тап отправляет текущие координаты устройства). Работает только в личке.
+    Кнопка — зеркало reply-кнопки request_location Telegram-бота, но в MAX гео-кнопка
+    инлайновая (как CallbackButton), поэтому идёт через InlineKeyboardBuilder."""
+    b = InlineKeyboardBuilder()
+    b.row(RequestGeoLocationButton(text=_GEO_BUTTON, quick=True))
+    # maxapi 0.9.4: билдер стартует с пустого ряда [[]] — отфильтровать пустые ряды.
+    b.payload = [r for r in b.payload if r]
+    return b.as_markup()
+
+
+async def _ask_location(msg: Message, text: str = _ASK_LOCATION) -> None:
+    """Попросить геопозицию (гео-кнопка) ИЛИ адрес текстом. Текстовый фолбэк
+    остаётся: пользователь может вместо тапа прислать адрес сообщением."""
+    await msg.answer(text=text, attachments=[_build_location_keyboard()])
+
+
 def _build_type_keyboard(pending_id: str, types: list[dict]):
     """Инлайн-клавиатура выбора типа инцидента (справочник incident_types) + «Пропустить».
 
@@ -521,7 +573,8 @@ async def _start_report(
     chat_id,
     user_id,
 ) -> None:
-    """DM: фото+текст → prepare → карта+кнопки (или просьба прислать адрес)."""
+    """DM: фото (+опц. подпись) → prepare → карта+кнопки; если адрес из подписи не
+    распознан (или подписи нет) → просим геопозицию (гео-кнопка) ИЛИ адрес текстом."""
     photo_time = _extract_photo_time(text)
     # Справочник типов инцидента тянем ПАРАЛЛЕЛЬНО с разбором адреса — чтобы на тапе по
     # площадке (шаг 1) он уже был готов и клавиатура типов открывалась мгновенно, без
@@ -530,8 +583,12 @@ async def _start_report(
     # Карту подтипов тянем тем же приёмом — чтобы шаг 3 (если тип с подтипами) открывался
     # мгновенно, без сетевого запроса в колбэке. Сбой → {} (шаг подтипа пропускается).
     subtypes_task = asyncio.create_task(fetch_incident_subtypes())
+    # Подпись к фото разбираем ТОЛЬКО если она есть: пустая подпись → сразу гео/адрес
+    # (не тратим AI-разбор на пустой текст). prep=None → подписи не было.
+    prep: dict | None = None
     try:
-        prep = await prepare_max(text, photo_time=photo_time)  # IntakeError → внешний soft-reply
+        if text:
+            prep = await prepare_max(text, photo_time=photo_time)  # IntakeError → внешний soft-reply
     except BaseException:
         types_task.cancel()
         subtypes_task.cancel()
@@ -544,6 +601,10 @@ async def _start_report(
         prefetched_subtypes = await subtypes_task
     except Exception:  # noqa: BLE001
         prefetched_subtypes = {}
+    # photo_time гарантированно в parsed (для _handle_location / _handle_address_reply /
+    # finalize) — бэкенд его обычно эхоит, но подстрахуемся setdefault на все ветки.
+    parsed = (prep.get("parsed") if prep else None) or {}
+    parsed.setdefault("photo_time", photo_time)
     report = PendingReport(
         pending_id=new_pending_id(),
         chat_id=chat_id,
@@ -552,22 +613,43 @@ async def _start_report(
         sender_name=sender_name,
         msg_url=msg_url,
         msg_id=msg_id,
-        parsed=(prep.get("parsed") or {}),
+        parsed=parsed,
         incident_types=prefetched_types,
         incident_subtypes=prefetched_subtypes,
     )
-    if prep.get("status") == "need_address":
-        report.awaiting_address = True
+    # Адрес из подписи распознан → сразу показываем выбор площадки (прежнее поведение).
+    if prep is not None and prep.get("status") == "ok":
+        report.candidates = prep.get("candidates") or []
         _STORE.put(report)
-        await msg.answer(text=_ASK_ADDRESS)
+        await _send_report_prompt(msg, report, _point_of(prep))
         return
-    report.candidates = prep.get("candidates") or []
+    # Подписи нет / адрес не распознан → ждём геопозицию (кнопка) ИЛИ адрес текстом.
+    report.awaiting_location = True
+    report.awaiting_address = True
     _STORE.put(report)
-    await _send_report_prompt(msg, report, _point_of(prep))
+    # Подпись была, но адрес не вышел → _ASK_ADDRESS; подписи не было → нейтральный _ASK_LOCATION.
+    await _ask_location(msg, _ASK_ADDRESS if text else _ASK_LOCATION)
+
+
+async def _handle_location(msg: Message, report: PendingReport, lat: float, lon: float) -> None:
+    """DM: пришла геопозиция (гео-кнопка) → prepare_coords → карта + выбор МНО.
+
+    Зеркало Telegram-бота: по ТОЧНЫМ координатам ищем ближайшие площадки (AI НЕ
+    дёргается), дальше — обычный диалог (выбор МНО → тип → finalize). Рядом пусто →
+    candidates=[] и предложение отправить без привязки."""
+    prep = await prepare_coords(lat, lon, report.parsed.get("photo_time", ""))
+    # Новый разбор поверх исходного, НЕ затирая непустые comment/photo_time из подписи.
+    report.parsed = merge_parsed(report.parsed, prep.get("parsed") or {})
+    report.candidates = prep.get("candidates") or []
+    report.awaiting_location = False
+    report.awaiting_address = False
+    _STORE.put(report)
+    await msg.answer(text=_LOC_ACCEPTED)
+    await _send_report_prompt(msg, report, _point_of(prep) or (lat, lon))
 
 
 async def _handle_address_reply(msg: Message, report: PendingReport, address: str) -> None:
-    """DM: пользователь прислал адрес текстом на просьбу уточнить.
+    """DM: пользователь прислал адрес текстом (вместо гео) на просьбу уточнить.
 
     ok → показать карту+кнопки; снова need_address → принять обращение по
     описанию БЕЗ привязки (чтобы не потерять фото/описание)."""
@@ -577,12 +659,14 @@ async def _handle_address_reply(msg: Message, report: PendingReport, address: st
 
     if prep.get("status") == "ok":
         report.candidates = prep.get("candidates") or []
+        report.awaiting_location = False
         report.awaiting_address = False
         _STORE.put(report)
         await _send_report_prompt(msg, report, _point_of(prep))
         return
 
     # Адрес снова не распознан → принимаем по описанию, без привязки к МНО.
+    report.awaiting_location = False
     report.awaiting_address = False
     try:
         result = await _finalize(report, mno_id="")
@@ -839,6 +923,19 @@ def build_router() -> Router:
             chat_id = getattr(getattr(msg, "recipient", None), "chat_id", None)
             user_id = getattr(getattr(msg, "sender", None), "user_id", None)
 
+            # 0) Геопозиция (тап гео-кнопки) → координаты ожидающего обращения.
+            location = _extract_location(msg)
+            if location is not None:
+                now = time.time()
+                _STORE.purge(now)
+                pending = _STORE.find_awaiting(chat_key(chat_id, user_id), now=now)
+                if pending is not None:
+                    await _handle_location(msg, pending, location[0], location[1])
+                else:
+                    # Геопозиция без ожидающего фото → показываем пример (сначала фото).
+                    await _send_example(msg)
+                return
+
             # 1) Ответ-адрес: текст без фото, а мы ждём адрес по этому чату.
             if not images and text:
                 now = time.time()
@@ -853,8 +950,9 @@ def build_router() -> Router:
                 await _send_example(msg)
                 return
 
-            # 3) Новое обращение = ФОТО + непустой текст (адрес/описание).
-            if images and text:
+            # 3) Новое обращение = ФОТО (подпись опциональна: есть адрес в подписи —
+            #    сразу выбор площадки; нет — попросим геопозицию/адрес в _start_report).
+            if images:
                 # Мгновенно подтверждаем приём фото ДО скачивания/разбора, а саму тяжёлую
                 # обработку уводим в ФОН — чтобы поллер не блокировался на несколько секунд.
                 await _ack_uploading(event, msg, chat_id)
@@ -878,8 +976,8 @@ def build_router() -> Router:
                 )
                 return
 
-            # Невалидно (нет фото / пустой текст) — молчим.
-            logger.info("ignored message mid=%s (нет фото или пустой текст)", mid)
+            # Невалидно (нет фото / нет геопозиции / пустой текст) — молчим.
+            logger.info("ignored message mid=%s (нет фото/геопозиции/текста)", mid)
 
         except AppError as exc:
             logger.warning(

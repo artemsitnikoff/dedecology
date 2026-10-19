@@ -6,7 +6,7 @@
  * проставит boundary.
  */
 import { api } from '@/api/client';
-import type { MnoPointsPublicResponse } from '@/api/aliases';
+import type { MnoDetail, MnoPointsPublicResponse } from '@/api/aliases';
 
 /** Одна подсказка адреса из DaData (GET /intake/suggest/address). */
 export interface AddressSuggestion {
@@ -72,6 +72,18 @@ export async function suggestAddress(
 /** POST /intake/form (multipart/form-data). Возвращает {ok, incident_id}. */
 export async function submitIntakeForm(form: FormData): Promise<IntakeFormResult> {
   const res = await api.post<IntakeFormResult>('/intake/form', form);
+  return res.data;
+}
+
+/**
+ * POST /intake/mno (multipart/form-data) — ПУБЛИЧНО: волонтёр добавляет МНО,
+ * которого нет на карте. Поля тела: name?, region_code?, city?, address (обяз),
+ * coords (обяз «lat, lon»), comment? (≤500), website (honeypot — всегда пусто),
+ * photos[] (0..10). Возвращает карточку созданного МНО (MnoDetail); её id кладём
+ * в mno_id обращения. Content-Type (boundary) проставляет axios сам.
+ */
+export async function submitVolunteerMno(form: FormData): Promise<MnoDetail> {
+  const res = await api.post<MnoDetail>('/intake/mno', form);
   return res.data;
 }
 

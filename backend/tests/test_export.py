@@ -17,7 +17,7 @@ _COMMENT_COL = 10  # «Комментарий»
 _PHOTO1_COL = 14  # «Фото 1»
 _PHOTO2_COL = 15  # «Фото 2»
 _PHOTO3_COL = 16  # «Фото 3»
-_MSG_LINK_COL = 20  # «Ссылка на сообщение» (после Фото 1..6)
+_MSG_LINK_COL = 24  # «Ссылка на сообщение» (после Фото 1..10)
 
 
 def _incident(**kw) -> Incident:
@@ -121,13 +121,19 @@ def test_export_photo_skip_placeholder():
 
 
 def test_export_has_photo_headers():
-    """Заголовки «Фото 1/2/3» на месте, перед «Ссылка на сообщение»."""
+    """Заголовки «Фото 1..10» на месте, перед «Ссылка на сообщение»."""
     wb = load_workbook(BytesIO(build_xlsx([])))
     ws = wb.active
     headers = [c.value for c in next(ws.iter_rows(max_row=1))]
     assert headers[_PHOTO1_COL] == "Фото 1"
     assert headers[_PHOTO2_COL] == "Фото 2"
     assert headers[_PHOTO3_COL] == "Фото 3"
+    # Полный набор из 10 слотов «Фото N» подряд, 0-based от _PHOTO1_COL.
+    assert [headers[_PHOTO1_COL + i] for i in range(10)] == [
+        f"Фото {i}" for i in range(1, 11)
+    ]
+    # «Ссылка на сообщение» идёт сразу ПОСЛЕ «Фото 10» (т.е. _PHOTO1_COL + 10).
+    assert headers[_PHOTO1_COL + 10] == "Ссылка на сообщение"
     assert headers[_MSG_LINK_COL] == "Ссылка на сообщение"
 
 

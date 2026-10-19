@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.sql.operators import eq
 
-from app.models import Mno
+from app.models import Mno, User
 from app.schemas.base import Paginated
 from app.core.errors import ValidationError
 from app.schemas.mno import (
@@ -565,6 +565,7 @@ def _orm_mno(**kw) -> Mno:
         fgis_id=None,
         synced=False,
         sync_date=None,
+        is_published=False,
         incidents=1,
     )
     base.update(kw)
@@ -1019,6 +1020,7 @@ def _mock_mno(**kw):
         fgis_id=None,
         synced=False,
         sync_date=None,
+        is_published=False,
         incidents=0,
         created_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
         comment=None,
@@ -1100,3 +1102,184 @@ async def test_list_points_explicit_volunteer_keeps_them():
 
     points_stmt = str(session.execute.call_args_list[-1].args[0])
     assert "source != " not in points_stmt
+
+
+# --- Модерация волонтёрских МНО: is_published + POST /mno/{id}/approve ----------
+
+
+def _non_admin() -> User:
+    """Пользователь роли 'user' (не админ) — для проверки 403 на модерации."""
+    u = User(
+        email="user@dedekolog.ru",
+        password_hash="x",
+        fio="Рядовой Пользователь",
+        role="user",
+        status="active",
+        is_active=True,
+        is_superadmin=False,
+    )
+    u.id = uuid4()
+    return u
+
+
+def test_schema_exposes_is_published():
+    """(в) MnoListItem и MnoDetail содержат is_published и сериализуют его."""
+    item = _item(is_published=True)
+    assert item.is_published is True
+    assert item.model_dump()["is_published"] is True
+
+    detail = _detail(is_published=False)
+    assert detail.is_published is False
+    assert "is_published" in detail.model_dump()
+
+
+def test_to_list_item_passes_is_published():
+    """_to_list_item пробрасывает флаг публикации в строку/карточку."""
+    assert _to_list_item(_orm_mno(is_published=True), {"63": "Самарская область"}).is_published is True
+    assert _to_list_item(_orm_mno(is_published=False), {"63": "Самарская область"}).is_published is False
+
+
+def _approve_session(mno, counts=None):
+    """Fake session для approve_mno: _get → mno, затем region_names, incident_counts.
+
+    volunteer_id у _orm_mno = None → _volunteers_map короткозамыкается без execute,
+    поэтому всего три execute: get / region_names / incident_counts."""
+    get_res = MagicMock()
+    get_res.scalar_one_or_none.return_value = mno
+    names_res = MagicMock()
+    names_res.all.return_value = [("63", "Самарская область")]
+    counts_res = MagicMock()
+    counts_res.all.return_value = counts or []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[get_res, names_res, counts_res])
+    session.add = MagicMock()
+    return session
+
+
+@pytest.mark.asyncio
+async def test_approve_mno_publishes_and_audits():
+    """(а) approve_mno: is_published→True, системный аудит 'mno.approve', карточка с флагом."""
+    mno = _orm_mno(source="volunteer", is_published=False)
+    session = _approve_session(mno)
+
+    detail = await mno_service.approve_mno(session, mno.id, uuid4())
+
+    assert mno.is_published is True
+    assert detail.is_published is True
+    assert detail.region_name == "Самарская область"
+    # Аудит записан (хелпер audit делает session.add записи audit_log).
+    assert session.add.called
+
+
+@pytest.mark.asyncio
+async def test_approve_mno_idempotent_when_already_published():
+    """(а) Повторный approve уже опубликованного МНО → остаётся True, без ошибки."""
+    mno = _orm_mno(source="volunteer", is_published=True)
+    session = _approve_session(mno)
+
+    detail = await mno_service.approve_mno(session, mno.id, uuid4())
+
+    assert mno.is_published is True
+    assert detail.is_published is True
+
+
+@pytest.mark.asyncio
+async def test_approve_mno_404_when_missing():
+    """Нет МНО → NotFoundError (404), ничего не публикуем."""
+    from app.core.errors import NotFoundError
+
+    get_res = MagicMock()
+    get_res.scalar_one_or_none.return_value = None
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[get_res])
+
+    with pytest.raises(NotFoundError):
+        await mno_service.approve_mno(session, uuid4(), uuid4())
+
+
+@pytest.mark.asyncio
+async def test_approve_mno_endpoint_publishes(client):
+    """POST /mno/{id}/approve (admin) → 200, карточка с is_published=True; сервис вызван."""
+    published = _detail(
+        source="volunteer", is_published=True, synced=False, fgis_id=None,
+        sync_date=None, incidents=0,
+    )
+    spy = AsyncMock(return_value=published)
+    with patch("app.api.v1.mno.mno_service.approve_mno", new=spy):
+        resp = await client.post(f"/api/v1/mno/{published.id}/approve")
+    assert resp.status_code == 200
+    assert resp.json()["is_published"] is True
+    spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_mno_forbidden_for_non_admin(client):
+    """(б) POST /mno/{id}/approve не-админом → 403 (реальный require_admin), сервис не вызван."""
+    from app.core.permissions import require_admin
+    from app.deps import get_current_user
+    from app.main import app
+
+    app.dependency_overrides.pop(require_admin, None)
+    app.dependency_overrides[get_current_user] = lambda: _non_admin()
+    with patch(
+        "app.api.v1.mno.mno_service.approve_mno",
+        new=AsyncMock(side_effect=AssertionError("approve_mno вызван в обход require_admin")),
+    ):
+        resp = await client.post(f"/api/v1/mno/{uuid4()}/approve")
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_approve_mno_not_shadowed_by_get_id(client):
+    """POST /mno/{id}/approve уходит в approve_mno, не в sync_one/get_mno."""
+    published = _detail(source="volunteer", is_published=True)
+    spy = AsyncMock(return_value=published)
+    with patch("app.api.v1.mno.mno_service.approve_mno", new=spy), patch(
+        "app.api.v1.mno.mno_service.sync_one",
+        new=AsyncMock(side_effect=AssertionError("sync_one перехватил /approve")),
+    ), patch(
+        "app.api.v1.mno.mno_service.get_mno",
+        new=AsyncMock(side_effect=AssertionError("get_mno перехватил /approve")),
+    ):
+        resp = await client.post(f"/api/v1/mno/{published.id}/approve")
+    assert resp.status_code == 200
+    spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_points_shows_published_volunteer_when_no_source():
+    """(а) source не задан → guard = (source != 'volunteer') OR is_published:
+    неопубликованные волонтёрские скрыты, опубликованные — видны на общей карте."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 0
+    points_res = MagicMock()
+    points_res.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    await mno_service.list_points(session)  # source=None
+
+    points_stmt = str(session.execute.call_args_list[-1].args[0])
+    assert "source != " in points_stmt     # волонтёрские всё ещё могут отсекаться,
+    assert "is_published" in points_stmt   # но опубликованные проходят через OR,
+    assert " OR " in points_stmt           # т.е. именно ИЛИ, а не жёсткое !=
+
+
+@pytest.mark.asyncio
+async def test_list_form_points_hides_unpublished_volunteer():
+    """Публичная форма: guard видимости (source != 'volunteer') OR is_published —
+    неопубликованные волонтёрские на карту формы не идут (и в COUNT, и в выборке)."""
+    count_res = MagicMock()
+    count_res.scalar_one.return_value = 0
+    points_res = MagicMock()
+    points_res.all.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_res, points_res])
+
+    await mno_service.list_form_points(session, bbox="53.0,50.0,54.0,51.0")
+
+    for call in session.execute.call_args_list:
+        sql = str(call.args[0])
+        assert "source != " in sql
+        assert "is_published" in sql

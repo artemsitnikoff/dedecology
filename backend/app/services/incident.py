@@ -17,6 +17,7 @@ from ..schemas.incident import (
     IncidentPoint,
     IncidentPointsResponse,
 )
+from .addr_norm import normalize_region, region_match_key
 from .audit import audit
 from .geo import parse_bbox
 
@@ -79,12 +80,18 @@ def _base_filters(
     date_from: datetime | None,
     date_to: datetime | None,
     region: str | None = None,
+    region_variants: list[str] | None = None,
     city: str | None = None,
     incident_type: str | None = None,
     mno_id: str | None = None,
     volunteer_id: str | None = None,
 ) -> list:
-    """Фильтры, общие для списка и воронки (без статуса)."""
+    """Фильтры, общие для списка и воронки (без статуса).
+
+    ``region_variants`` — заранее собранные (в async-коде через _resolve_region_variants)
+    написания ``Incident.region`` с тем же ключом сопоставления, что и у ``region``.
+    Сам _base_filters синхронный и к БД НЕ ходит; варианты резолвятся вызывающим.
+    """
     filters: list = []
     if search and search.strip():
         clause = _search_clause(search)
@@ -92,9 +99,17 @@ def _base_filters(
             filters.append(clause)
     if source:
         filters.append(Incident.source.in_(source))
-    # Регион — одиночный, ТОЧНОЕ совпадение (равенство, не ilike). Пусто → не фильтруем.
+    # Регион — одиночный, ТОЛЕРАНТНЫЙ матч по ключу сопоставления (регистр/ё/тире/тип
+    # субъекта схлопнуты). region_variants — все написания Incident.region с тем же ключом,
+    # что входящее значение: непуст → Incident.region.in_(variants) (ловит «Самарская обл.»/
+    # «самарская область»/«Самарская Область» одним выбором канонического ярлыка дропдауна).
+    # Варианты не резолвились (None) или пусты → фолбэк на точное равенство (прямые вызовы/
+    # тесты, где session недоступна). Пусто → не фильтруем.
     if region and region.strip():
-        filters.append(Incident.region == region.strip())
+        if region_variants:
+            filters.append(Incident.region.in_(region_variants))
+        else:
+            filters.append(Incident.region == region.strip())
     # Город — одиночный, ТОЧНОЕ совпадение (зеркалит регион). Пусто → не фильтруем.
     # Честится вместе с регионом: оба пред-статусные → оба в where.
     if city and city.strip():
@@ -126,6 +141,39 @@ def _base_filters(
             Incident.photo_time <= datetime.combine(date_to.date(), time.max, tzinfo=timezone.utc)
         )
     return filters
+
+
+async def _distinct_regions(session: AsyncSession) -> list[str]:
+    """Все непустые DISTINCT Incident.region (сырые написания, как лежат в БД)."""
+    result = await session.execute(
+        select(Incident.region)
+        .where(Incident.region.is_not(None), Incident.region != "")
+        .distinct()
+    )
+    return list(result.scalars().all())
+
+
+async def _resolve_region_variants(
+    session: AsyncSession, region: str | None
+) -> list[str] | None:
+    """Написания Incident.region, чей ключ сопоставления совпадает с ключом ``region``.
+
+    Толерантный фильтр по региону: входящее значение (канонический ярлык из дропдауна или
+    любое произвольное написание) приводим к ``region_match_key(normalize_region(...))`` и
+    собираем ВСЕ написания в БД с тем же ключом. Тогда один выбор ярлыка «Самарская область»
+    ловит и «самарская обл.», и «САМАРСКАЯ ОБЛАСТЬ». Пусто/None → None (фильтр региона не
+    применяется). Нет совпадений по ключу → [] (вызывающий фолбэкнет на точный матч).
+    """
+    if not region or not region.strip():
+        return None
+    target = region_match_key(normalize_region(region))
+    if not target:
+        return None
+    return [
+        raw
+        for raw in await _distinct_regions(session)
+        if region_match_key(normalize_region(raw)) == target
+    ]
 
 
 async def list_incidents(
@@ -259,12 +307,16 @@ async def _query_incidents(
 ):
     # Именованные аргументы (не позиционные): порядок параметров _base_filters
     # расширяется (city вставлен за region) — по именам это безопасно.
+    # Варианты региона резолвим ЗДЕСЬ (async, есть session) и прокидываем готовыми —
+    # _base_filters синхронный и к БД не ходит.
+    region_variants = await _resolve_region_variants(session, region)
     filters = _base_filters(
         search,
         source,
         date_from,
         date_to,
         region=region,
+        region_variants=region_variants,
         city=city,
         incident_type=incident_type,
         mno_id=mno_id,
@@ -387,12 +439,14 @@ async def funnel_counts(
 ) -> FunnelCounts:
     """Счётчики чипов воронки. Honor search/source/period/region/city/volunteer_id, НО игнорируют
     status — каждый чип показывает свой потенциальный объём."""
+    region_variants = await _resolve_region_variants(session, region)
     filters = _base_filters(
         search,
         source,
         date_from,
         date_to,
         region=region,
+        region_variants=region_variants,
         city=city,
         volunteer_id=volunteer_id,
     )
@@ -413,27 +467,45 @@ async def funnel_counts(
 
 
 async def list_regions(session: AsyncSession) -> list[str]:
-    """DISTINCT непустые регионы, отсортированные A→Я (наполняет дропдаун фильтра)."""
-    stmt = (
-        select(Incident.region)
-        .where(Incident.region.is_not(None), Incident.region != "")
-        .distinct()
-        .order_by(asc(Incident.region))
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    """Уникальные регионы для дропдауна фильтра — ДЕДУП по ключу сопоставления.
+
+    Сырые Incident.region могут содержать один субъект в разных написаниях (регистр, «ё»,
+    тип субъекта «обл.»/«область», тире), и без дедупа дропдаун дробит его на несколько
+    пунктов, каждый из которых ловит лишь часть обращений. Здесь distinct-регионы
+    группируются по ``region_match_key(normalize_region(raw))``, и на каждый ключ отдаётся
+    ОДИН ярлык:
+      • каноническое ``Region.name`` из справочника (canonical_index), если ключ совпал;
+      • иначе ``normalize_region(raw)`` (деградация, когда справочник пуст/субъекта нет в нём —
+        схлопывает хотя бы регистр/ё/тип/тире).
+    Итог — отсортированный уникальный список.
+    """
+    from .region import canonical_index
+
+    index = await canonical_index(session)
+    labels: dict[str, str] = {}
+    for raw in await _distinct_regions(session):
+        key = region_match_key(normalize_region(raw))
+        if not key or key in labels:
+            continue
+        labels[key] = index.get(key) or normalize_region(raw)
+    return sorted(set(labels.values()))
 
 
 async def list_cities(session: AsyncSession, region: str | None = None) -> list[str]:
     """DISTINCT непустые города, отсортированные A→Я (наполняет дропдаун фильтра города).
 
-    Зеркалит list_regions, но список ЗАВИСИТ от выбранного региона: region непуст →
-    только города этого региона (ТОЧНОЕ совпадение, как в фильтре списка); пусто/пробелы/
-    None → города по всем регионам.
+    Список ЗАВИСИТ от выбранного региона: region непуст → только города этого субъекта,
+    матчем ТОЛЕРАНТНЫМ по ключу (как фильтр списка): все написания Incident.region с тем же
+    ключом → Incident.region.in_(variants); вариантов нет → фолбэк на точное равенство.
+    Пусто/пробелы/None → города по всем регионам.
     """
     stmt = select(Incident.city).where(Incident.city.is_not(None), Incident.city != "")
     if region and region.strip():
-        stmt = stmt.where(Incident.region == region.strip())
+        variants = await _resolve_region_variants(session, region)
+        if variants:
+            stmt = stmt.where(Incident.region.in_(variants))
+        else:
+            stmt = stmt.where(Incident.region == region.strip())
     stmt = stmt.distinct().order_by(asc(Incident.city))
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -470,7 +542,16 @@ async def list_points(
       - bbox не задан/битый → прежнее поведение: все инциденты по фильтрам с непустыми coords.
     В обоих случаях points — первые MAX_POINTS строк; capped=True — total превысил лимит.
     """
-    filters = _base_filters(search, source, date_from, date_to, region=region, city=city)
+    region_variants = await _resolve_region_variants(session, region)
+    filters = _base_filters(
+        search,
+        source,
+        date_from,
+        date_to,
+        region=region,
+        region_variants=region_variants,
+        city=city,
+    )
     if status:
         filters.append(Incident.status.in_(status))
     box = parse_bbox(bbox)

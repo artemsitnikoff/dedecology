@@ -1,29 +1,39 @@
 /**
  * Форматтеры ru-локали для ЭкоПульс. Малые чистые функции.
- * Даты/время приходят с бэкенда ISO-строками (или null).
+ * Даты/время приходят с бэкенда ISO-строками (UTC) — вся админка показывает их в МСК.
  */
 
-/** Дата из ISO → «ДД.ММ.ГГГГ». Пустая строка для null/невалидного. */
+// Вся админка рендерит даты/время в поясе МСК (Europe/Moscow = UTC+3, без летнего времени).
+// Форматтеры создаём один раз на модуль и переиспользуем (Intl.DateTimeFormat дорог в конструкции).
+const MSK_DATE_FMT = new Intl.DateTimeFormat('ru-RU', {
+  timeZone: 'Europe/Moscow',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+});
+const MSK_TIME_FMT = new Intl.DateTimeFormat('ru-RU', {
+  timeZone: 'Europe/Moscow',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+/** Дата из ISO (UTC) → «ДД.ММ.ГГГГ» в МСК. Пустая строка для null/невалидного. */
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  // UTC-геттеры: рендерим настенные цифры из ISO без сдвига в локальную TZ браузера.
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const yyyy = String(d.getUTCFullYear());
-  return `${dd}.${mm}.${yyyy}`;
+  // МСК: сдвигаем UTC-момент в пояс Europe/Moscow (ru-RU даёт разделители-точки «ДД.ММ.ГГГГ»).
+  return MSK_DATE_FMT.format(d);
 }
 
-/** Время из ISO → «ЧЧ:ММ». Пустая строка для null/невалидного. */
+/** Время из ISO (UTC) → «ЧЧ:ММ» в МСК. Пустая строка для null/невалидного. */
 export function formatTime(iso: string | null | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  // UTC-геттеры: 09:14(UTC) рендерится «09:14» вне зависимости от TZ браузера.
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const min = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${hh}:${min}`;
+  // МСК: 09:14(UTC) рендерится «12:14» (UTC+3), полночь — «00:00» (24-часовой формат).
+  return MSK_TIME_FMT.format(d);
 }
 
 /** Полный адрес: «регион, город, улица» (пустые части отбрасываются). */
