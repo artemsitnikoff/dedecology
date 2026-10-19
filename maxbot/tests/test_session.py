@@ -7,6 +7,7 @@ merge_parsed и find_awaiting.
 from __future__ import annotations
 
 from maxbot.session import (
+    ADD_MNO,
     BUTTON_MAX,
     NO_MNO,
     PENDING_TTL,
@@ -21,8 +22,10 @@ from maxbot.session import (
     encode_subtype_payload,
     encode_type_payload,
     human_distance,
+    join_address,
     map_query,
     merge_parsed,
+    mno_label,
     new_pending_id,
 )
 
@@ -59,8 +62,24 @@ def test_decode_payload_rejects_garbage():
     assert decode_payload("x:y") is None  # не 3 части
     assert decode_payload("z:pid:0") is None  # чужой префикс
     assert decode_payload("m::0") is None  # пустой pid
-    assert decode_payload("m:pid:abc") is None  # idx не int и не 'x'
+    assert decode_payload("m:pid:abc") is None  # idx не int и не 'x'/'a'
     assert decode_payload("m:pid:-1") is None  # отрицательный индекс
+
+
+def test_payload_roundtrip_add_mno():
+    pid = new_pending_id()
+    payload = encode_payload(pid, ADD_MNO)
+    assert payload == f"m:{pid}:a"
+    assert decode_payload(payload) == (pid, ADD_MNO)
+
+
+def test_add_mno_distinct_from_no_mno():
+    # Разные спец-индексы: «➕ Добавить площадку» и «без привязки» не должны совпадать,
+    # иначе тап по одной кнопке вёл бы в чужую ветку.
+    assert ADD_MNO != NO_MNO
+    pid = new_pending_id()
+    assert decode_payload(encode_payload(pid, ADD_MNO)) == (pid, ADD_MNO)
+    assert decode_payload(encode_payload(pid, NO_MNO)) == (pid, NO_MNO)
 
 
 # --- type payload (шаг 2: выбор типа инцидента) ----------------------------
@@ -178,6 +197,29 @@ def test_merge_parsed_keeps_original_on_empty_override():
     assert out["region"] == "Московская область"  # непустой override победил
     assert out["comment"] == "Радар №7"  # пустой override НЕ затёр исходное
     assert out["coords"] == "55.7,37.6"
+
+
+# --- join_address / mno_label (создание площадки из бота) ------------------
+
+
+def test_join_address_joins_nonempty_parts():
+    assert join_address("Москва", "г. Москва", "ул. Ленина 1") == (
+        "Москва, г. Москва, ул. Ленина 1"
+    )
+
+
+def test_join_address_skips_empty_and_strips():
+    # Пустые/пробельные части пропускаются (как в notify/export).
+    assert join_address("Москва", "", "  ул. Ленина 1  ") == "Москва, ул. Ленина 1"
+    assert join_address("", "", "") == ""
+
+
+def test_mno_label_prefers_reg_then_name_then_address():
+    assert mno_label("78-06-002210", "МНО-1", "ул. Ленина 1") == "78-06-002210"
+    assert mno_label("", "МНО-1", "ул. Ленина 1") == "МНО-1"
+    # У созданной ботом волонтёрской площадки reg/name пусты → остаётся адрес.
+    assert mno_label("", "", "ул. Ленина 1") == "ул. Ленина 1"
+    assert mno_label(None, None, None) == ""  # type: ignore[arg-type]
 
 
 # --- chat_key -------------------------------------------------------------

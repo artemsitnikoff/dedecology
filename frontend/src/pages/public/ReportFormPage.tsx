@@ -116,7 +116,6 @@ export default function ReportFormPage() {
   const { data: subtypesMap = {} } = useIncidentSubtypes();
 
   // --- Поля формы ---
-  const [fio, setFio] = useState('');
   const [incidentType, setIncidentType] = useState('');
   // Подтип инцидента — обязателен, только когда у выбранного типа есть подтипы (no_access).
   const [incidentSubtype, setIncidentSubtype] = useState('');
@@ -256,10 +255,6 @@ export default function ReportFormPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
-    if (!fio.trim()) {
-      setSubmitError('Пожалуйста, укажите заявителя.');
-      return;
-    }
     if (!mnoId.trim()) {
       setSubmitError('Пожалуйста, выберите МНО на карте.');
       return;
@@ -312,7 +307,6 @@ export default function ReportFormPage() {
         .filter(Boolean)
         .join(', ');
       const fd = new FormData();
-      fd.append('fio', fio.trim());
       fd.append('incident_type', incidentType);
       // Подтип шлём только если он релевантен типу (иначе бэк его обнулит) — не мусорим.
       if ((subtypesMap[incidentType]?.length ?? 0) > 0 && incidentSubtype) {
@@ -374,21 +368,6 @@ export default function ReportFormPage() {
             </div>
 
             <div className="de-rf-fields">
-              {/* Заявитель */}
-              <label className="de-rf-field">
-                <span className="de-rf-label">
-                  Заявитель <span className="de-rf-req">*</span>
-                </span>
-                <input
-                  type="text"
-                  className="de-rf-input"
-                  value={fio}
-                  onChange={(e) => setFio(e.target.value)}
-                  placeholder="Иванов Иван Иванович"
-                  autoComplete="name"
-                />
-              </label>
-
               {/* Выбор МНО на карте (перед регионом): подставляет регион+город+улицу+координаты+рег-номер.
                   Обязателен — форма не отправится, пока площадка не выбрана. */}
               <div className="de-rf-field">

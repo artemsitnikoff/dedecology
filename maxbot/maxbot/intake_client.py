@@ -288,6 +288,73 @@ async def finalize_max(
     return payload
 
 
+async def create_mno(
+    *,
+    address: str,
+    coords: str,
+    name: str = "",
+    comment: str = "",
+    photo_bytes_list: list[bytes],
+) -> dict:
+    """Создать волонтёрское МНО из бота: POST {api_base}/intake/mno (multipart).
+
+    ПУБЛИЧНЫЙ эндпоинт — гейта X-Intake-Token нет (токен НЕ шлём; авторство тут не
+    нужно — бот анонимен). Площадка создаётся source='volunteer', is_published=false
+    → уходит в модерацию («Новые МНО»); на общей карте появляется после одобрения
+    экологом. Возвращает разобранный JSON карточки (MnoDetail {id, reg, name, address…}).
+
+    :param address: Адрес площадки (ОБЯЗ. на бэке — пустой → 400; склейка регион/город/улица).
+    :param coords: «lat, lon» (ОБЯЗ. на бэке — пустой → 400).
+    :param name: Название (необяз. — бот не спрашивает, обычно пусто).
+    :param comment: Комментарий волонтёра (необяз., бэк обрежет до 500).
+    :param photo_bytes_list: Байты фото обращения (0..10 — те же, что ушли в обращение).
+    :raises IntakeError: сеть/таймаут/не-2xx (вкл. 400 на пустых address/coords)/не-JSON —
+        вызывающий (обработчик кнопки) отвечает мягко, обращение НЕ теряется.
+    """
+    url = f"{settings.api_base}/intake/mno"
+    # website — honeypot (у людей всегда пусто). region_code/city не передаём: имя/район
+    # у бота не собираем, бэк примет их пустыми (регион резолвится при модерации).
+    data = {
+        "address": address or "",
+        "coords": coords or "",
+        "name": name or "",
+        "comment": comment or "",
+        "website": "",
+    }
+    files = [
+        ("photos", (f"{i}.jpg", photo, "image/jpeg"))
+        for i, photo in enumerate(photo_bytes_list)
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(url, data=data, files=files or None)
+    except httpx.HTTPError as exc:
+        logger.error("create_mno request failed url=%s: %s", url, exc)
+        raise IntakeError(f"Не удалось связаться с intake API: {exc}") from exc
+
+    if not resp.is_success:
+        body_preview = resp.text[:500]
+        logger.error("create_mno returned %s: %s", resp.status_code, body_preview)
+        raise IntakeError(
+            f"create_mno ответил {resp.status_code}",
+            details={"backend_status": resp.status_code, "body": body_preview},
+        )
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        logger.error("create_mno non-JSON: %s", resp.text[:500])
+        raise IntakeError("create_mno вернул не-JSON ответ") from exc
+
+    logger.info(
+        "create_mno ok id=%s photos=%d",
+        payload.get("id") if isinstance(payload, dict) else "?",
+        len(photo_bytes_list),
+    )
+    return payload
+
+
 async def fetch_map(lat: float, lon: float, pts: str) -> bytes | None:
     """Скачать PNG-скрин карты (точка обращения + метки МНО) у backend.
 

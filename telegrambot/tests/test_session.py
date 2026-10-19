@@ -8,6 +8,7 @@ merge_parsed и find_awaiting (в т.ч. гео-ожидание awaiting_locati
 from __future__ import annotations
 
 from telegrambot.session import (
+    ADD_MNO,
     BUTTON_MAX,
     NO_MNO,
     PENDING_TTL,
@@ -42,6 +43,29 @@ def test_payload_roundtrip_no_mno():
     payload = encode_payload(pid, NO_MNO)
     assert payload == f"m:{pid}:x"
     assert decode_payload(payload) == (pid, NO_MNO)
+
+
+def test_payload_roundtrip_add_mno():
+    # «➕ Добавить площадку» — спец-sentinel ADD_MNO в том же m:-формате, рядом с NO_MNO.
+    pid = new_pending_id()
+    payload = encode_payload(pid, ADD_MNO)
+    assert payload == f"m:{pid}:a"
+    assert decode_payload(payload) == (pid, ADD_MNO)
+
+
+def test_add_mno_and_no_mno_distinct():
+    # ADD_MNO («a») и NO_MNO («x») не должны совпадать и не путаться при декоде.
+    assert ADD_MNO != NO_MNO
+    pid = new_pending_id()
+    assert decode_payload(encode_payload(pid, ADD_MNO)) == (pid, ADD_MNO)
+    assert decode_payload(encode_payload(pid, NO_MNO)) == (pid, NO_MNO)
+
+
+def test_add_mno_payload_isolated_from_type_and_subtype():
+    # Типовой/подтиповой декодеры НЕ принимают ADD_MNO-payload (разные префиксы).
+    p = encode_payload("abc123", ADD_MNO)
+    assert decode_type_payload(p) is None
+    assert decode_subtype_payload(p) is None
 
 
 def test_new_pending_id_has_no_colon():

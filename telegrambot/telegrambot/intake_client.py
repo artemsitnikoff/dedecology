@@ -297,6 +297,80 @@ async def finalize_max(
     return payload
 
 
+async def create_mno(
+    address: str,
+    coords: str,
+    name: str = "",
+    comment: str = "",
+    photos: list[bytes] | None = None,
+) -> dict | None:
+    """Создать новую (волонтёрскую) площадку из обращения — кнопка «➕ Добавить площадку».
+
+    POST {api_base}/intake/mno (multipart/form-data, ПУБЛИЧНЫЙ эндпоинт — гейта
+    X-Intake-Token НЕТ, как у публичной формы). website — honeypot, всегда ПУСТО.
+    Создаётся source='volunteer', is_published=false → площадка попадает в очередь
+    модерации («Новые МНО») и появится на общей карте после одобрения экологом.
+
+    В ОТЛИЧИЕ от push_incident/finalize_max — на ошибку НЕ поднимает IntakeError, а
+    возвращает None (вызывающий ADD_MNO-обработчик откатывает шаг и мягко сообщает,
+    не роняя диалог).
+
+    :param address: Адрес площадки (обязателен на бэке; пустой → 400 → вернём None).
+    :param coords: Строка «lat, lon» (обязательна на бэке; кнопка показывается только
+        при наличии координат обращения).
+    :param name: Название площадки (у бота его нет — обычно пусто).
+    :param comment: Комментарий (бэк обрезает до 500; пусто → NULL).
+    :param photos: Байты фото обращения (0..10; бэк валидирует тип/размер/количество).
+    :return: {"id": str, "label": str} при успехе либо None при любой ошибке/не-2xx.
+    """
+    url = f"{settings.api_base}/intake/mno"
+    address = (address or "").strip()
+    coords = (coords or "").strip()
+    data = {
+        "address": address,
+        "coords": coords,
+        "name": name or "",
+        "comment": comment or "",
+        "website": "",  # honeypot — у людей (и у нас) всегда пусто
+        "source": SOURCE,
+    }
+    files = [
+        ("photos", (f"{i}.jpg", photo, "image/jpeg"))
+        for i, photo in enumerate(photos or [])
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(url, data=data, files=files or None)
+    except httpx.HTTPError as exc:
+        logger.error("create_mno request failed url=%s: %s", url, exc)
+        return None
+
+    if not resp.is_success:
+        logger.error("create_mno returned %s: %s", resp.status_code, resp.text[:500])
+        return None
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        logger.error("create_mno non-JSON: %s", resp.text[:500])
+        return None
+    if not isinstance(payload, dict) or not payload.get("id"):
+        logger.error("create_mno: unexpected payload: %r", payload)
+        return None
+
+    mno_id = str(payload.get("id"))
+    # Подпись площадки: реестровый № (у волонтёрской пуст) → название → адрес (фолбэк,
+    # чтобы подтверждение «Площадка: …» не было пустым).
+    label = (
+        (payload.get("reg") or "").strip()
+        or (payload.get("name") or "").strip()
+        or address
+    )
+    logger.info("create_mno ok id=%s photos=%d", mno_id, len(photos or []))
+    return {"id": mno_id, "label": label}
+
+
 async def fetch_map(lat: float, lon: float, pts: str) -> bytes | None:
     """Скачать PNG-скрин карты (точка обращения + метки МНО) у backend.
 

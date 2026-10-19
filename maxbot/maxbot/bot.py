@@ -45,6 +45,7 @@ from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 from .config import settings
 from .errors import AppError, IntakeError
 from .intake_client import (
+    create_mno,
     fetch_incident_subtypes,
     fetch_incident_types,
     fetch_map,
@@ -54,6 +55,7 @@ from .intake_client import (
     push_incident,
 )
 from .session import (
+    ADD_MNO,
     NO_MNO,
     PendingReport,
     PendingStore,
@@ -66,8 +68,10 @@ from .session import (
     encode_subtype_payload,
     encode_type_payload,
     human_distance,
+    join_address,
     map_query,
     merge_parsed,
+    mno_label,
     new_pending_id,
 )
 
@@ -168,6 +172,13 @@ _CB_ALREADY = "Это обращение уже отправлено."
 _CB_PROCESSING = "Секунду, отправляю обращение…"
 _CB_BAD_CHOICE = "Не удалось распознать выбор. Пришлите фото заново."
 _CB_FINALIZE_FAIL = "Не удалось отправить обращение. Попробуйте ещё раз."
+# Сбой создания площадки по кнопке «➕ Добавить площадку» — клавиатура выбора остаётся,
+# пользователь может повторить или выбрать другой вариант.
+_CB_ADD_MNO_FAIL = (
+    "Не удалось добавить площадку. Попробуйте ещё раз или выберите другой вариант ниже."
+)
+# Заголовок кнопки создания новой площадки в клавиатуре выбора МНО.
+_ADD_MNO_BUTTON = "➕ Добавить площадку"
 
 
 def create_bot() -> Bot:
@@ -365,11 +376,13 @@ def _candidate_line(i: int, c: dict) -> str:
     return line
 
 
-def _build_keyboard(pending_id: str, candidates: list[dict]):
-    """Инлайн-клавиатура: по кнопке на кандидата + кнопка «без привязки».
+def _build_keyboard(pending_id: str, candidates: list[dict], can_add_mno: bool = False):
+    """Инлайн-клавиатура: по кнопке на кандидата + «➕ Добавить площадку» + «без привязки».
 
     idx в payload — 0-based индекс в candidates (в callback берём candidates[idx]);
     номер в подписи — 1-based. Пустой список → одна кнопка «Отправить без привязки».
+    `can_add_mno` — показать «➕ Добавить площадку» (создать новое МНО): только когда у
+    обращения есть координаты (их требует POST /intake/mno); на форке без координат — скрыта.
     """
     b = InlineKeyboardBuilder()
     for idx, c in enumerate(candidates):
@@ -378,6 +391,16 @@ def _build_keyboard(pending_id: str, candidates: list[dict]):
                 text=button_text(idx + 1, c.get("reg", ""), c.get("name", "")),
                 payload=encode_payload(pending_id, idx),
                 intent=Intent.DEFAULT,
+            )
+        )
+    # «➕ Добавить площадку» — между списком кандидатов и «без привязки». Только при наличии
+    # координат: создание МНО без них невозможно (бэк вернёт 400).
+    if can_add_mno:
+        b.row(
+            CallbackButton(
+                text=_ADD_MNO_BUTTON,
+                payload=encode_payload(pending_id, ADD_MNO),
+                intent=Intent.POSITIVE,
             )
         )
     if candidates:
@@ -508,7 +531,11 @@ async def _send_report_prompt(
     мгновенны: правка сообщения С КАРТИНКОЙ у Макса медленная/капризная — из-за неё кнопки
     «висели» по несколько секунд."""
     candidates = report.candidates
-    markup = _build_keyboard(report.pending_id, candidates)
+    # «➕ Добавить площадку» показываем только если у обращения есть координаты
+    # (их требует создание МНО). Берём из разобранных полей — это ровно то «lat, lon»,
+    # что уйдёт в POST /intake/mno. Нет координат (напр. форк без адреса) → кнопки нет.
+    can_add = bool((report.parsed.get("coords") or "").strip())
+    markup = _build_keyboard(report.pending_id, candidates, can_add_mno=can_add)
 
     if not candidates:
         # Кандидатов нет — карту не рисуем, только предложение отправить без привязки.
@@ -827,6 +854,9 @@ async def _do_finalize(
         parts.append(f"Площадка: <b>{html.escape(mno_label)}</b>")
     elif is_no_mno:
         parts.append("Отправлено без привязки к площадке.")
+    # Площадку создали из бота (кнопка «➕ Добавить площадку») → она уходит в модерацию.
+    if report.added_mno:
+        parts.append("🆕 Новая площадка появится на карте после проверки экологом.")
     type_label = _type_label(report.incident_types, incident_type)
     if type_label:
         parts.append(f"Тип: <b>{html.escape(type_label)}</b>")
@@ -840,6 +870,83 @@ async def _do_finalize(
         parts.append("")
         parts.append(html.escape(quote))
     await _answer_new(event, "\n".join(parts))
+
+
+async def _do_add_mno(event: MessageCallback, report: PendingReport, pid: str) -> None:
+    """Кнопка «➕ Добавить площадку»: создать волонтёрское МНО из собранных данных
+    (адрес+координаты+фото), затем продолжить ТОТ ЖЕ путь, что при выборе существующей
+    площадки (шаг типа инцидента → finalize). Имя/комментарий НЕ спрашиваем.
+
+    Замок report.processing ставит вызывающий (в колбэке) СИНХРОННО — сюда входим уже под
+    замком (анти-двойное создание при частых тапах). Клавиатуру выбора МНО НЕ удаляем до
+    успеха: при сбое create_mno пользователь остаётся с кнопками (может повторить/выбрать
+    другой вариант). Всё await-ом (уже фоновая задача _spawn) — поллер не блокируется."""
+    _spawn(_notify_callback(event, "Создаю площадку…"))
+    _bot = getattr(event, "bot", None)
+    _chat = getattr(
+        getattr(getattr(event, "message", None), "recipient", None), "chat_id", None
+    )
+    if _bot is not None and _chat is not None:
+        _spawn(_bot.send_action(_chat, SenderAction.SENDING_PHOTO))
+    # Прогресс: загрузка фото на бэк занимает несколько секунд — сразу сообщаем, что идёт.
+    await _answer_new(event, "⏳ Добавляю площадку…")
+
+    p = report.parsed
+    coords = (p.get("coords") or "").strip()
+    # Адрес — склейка регион/город/улица (как в notify/export). Для гео-обращения адресные
+    # поля пусты (prepare-coords их не заполняет) → фолбэк на строку координат, чтобы POST
+    # /intake/mno не упал на пустом address (бэк требует непустой).
+    address = join_address(p.get("region", ""), p.get("city", ""), p.get("street", "")) or coords
+    try:
+        created = await create_mno(
+            address=address,
+            coords=coords,
+            name="",  # имя не спрашиваем — создаём из собранных данных
+            comment=p.get("comment", ""),  # прочая инфа из разбора, если была
+            photo_bytes_list=report.photos,
+        )
+    except IntakeError:
+        # Создать не вышло (напр. 400 на пустых coords/address) — снимаем замок; клавиатура
+        # выбора осталась, пользователь может повторить или выбрать другой вариант.
+        report.processing = False
+        _STORE.put(report)
+        await _answer_new(event, _CB_ADD_MNO_FAIL)
+        return
+
+    new_id = str(created.get("id") or "") if isinstance(created, dict) else ""
+    if not new_id:
+        # Бэк не вернул id (не должно случаться при 2xx) — деградируем так же, как при ошибке.
+        report.processing = False
+        _STORE.put(report)
+        await _answer_new(event, _CB_ADD_MNO_FAIL)
+        return
+
+    report.chosen_mno_id = new_id
+    report.chosen_mno_label = mno_label(
+        created.get("reg"), created.get("name"), created.get("address")
+    ) or address
+    report.added_mno = True  # для финального текста (появится после проверки экологом)
+
+    # Площадка создана → клавиатуру выбора МНО и карту OSM убираем.
+    _spawn(_delete_callback_message(event))
+    if report.map_mid:
+        _spawn(_delete_message_by_mid(_bot, report.map_mid))
+        report.map_mid = None
+
+    # Дальше — ТОТ ЖЕ путь, что при выборе существующей площадки: выбор типа инцидента
+    # (если справочник доступен) либо сразу finalize (деградация).
+    types = report.incident_types or await fetch_incident_types()
+    if types:
+        report.incident_types = types
+        report.awaiting_type = True  # замок шага 1 (анти-дубль последующих тапов по МНО)
+        report.processing = False  # разблокируем — дальше идёт выбор типа (шаг 2)
+        _STORE.put(report)
+        await _answer_new(event, _HDR_TYPE, markup=_build_type_keyboard(pid, types))
+        return
+
+    # Справочник типов недоступен → finalize без типа. processing уже True (замок finalize).
+    _STORE.put(report)
+    await _do_finalize(event, report, new_id, "", "", report.chosen_mno_label, False)
 
 
 async def _process_new_report(
@@ -1097,6 +1204,14 @@ def build_router() -> Router:
                 await _notify_callback(event, _CB_PROCESSING)
                 return
             idx = mno_dec[1]
+            # «➕ Добавить площадку»: создаём новое МНО из собранных данных, затем — ТОТ ЖЕ
+            # путь (выбор типа → finalize). Замок processing ставим СИНХРОННО ДО фоновой
+            # задачи — повторный тап по кнопке ловится проверкой report.processing выше.
+            if idx == ADD_MNO:
+                report.processing = True
+                _STORE.put(report)
+                _spawn(_do_add_mno(event, report, pid))
+                return
             if idx == NO_MNO:
                 mno_id = ""
                 mno_label = ""

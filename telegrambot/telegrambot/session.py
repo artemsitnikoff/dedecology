@@ -30,6 +30,11 @@ PAYLOAD_PREFIX = "m"
 # Спец-индекс «без привязки к площадке» («Нет в списке» / «Отправить без привязки»).
 NO_MNO = "x"
 
+# Спец-индекс «➕ Добавить площадку»: создать новую (волонтёрскую) площадку из обращения
+# и привязать её к нему (кнопка показывается только при наличии координат). Отдельный
+# sentinel рядом с NO_MNO в том же payload-формате «m:{pid}:a».
+ADD_MNO = "a"
+
 # Префикс payload для кнопок выбора ТИПА инцидента (шаг 2 диалога): «t:{pid}:{code}»,
 # где code — код из справочника incident_types (пусто = «Пропустить»).
 PAYLOAD_PREFIX_TYPE = "t"
@@ -64,7 +69,7 @@ def encode_payload(pending_id: str, idx) -> str:
 
 def decode_payload(s: str) -> tuple[str, int | str] | None:
     """Разобрать payload кнопки. Вернуть (pending_id, idx) либо None, если
-    формат чужой/битый. idx — int (>=0) или строка `NO_MNO`."""
+    формат чужой/битый. idx — int (>=0) или строка `NO_MNO`/`ADD_MNO`."""
     if not s:
         return None
     parts = s.split(":")
@@ -75,6 +80,8 @@ def decode_payload(s: str) -> tuple[str, int | str] | None:
         return None
     if raw == NO_MNO:
         return pid, NO_MNO
+    if raw == ADD_MNO:
+        return pid, ADD_MNO
     try:
         idx = int(raw)
     except ValueError:
@@ -216,6 +223,9 @@ class PendingReport:
     # площадку (id+подпись) и справочник типов (для подписи выбранного типа в подтверждении).
     chosen_mno_id: str | None = None
     chosen_mno_label: str = ""
+    # Площадка была СОЗДАНА волонтёром из этого обращения (кнопка «➕ Добавить площадку»):
+    # в финальном подтверждении помечаем, что она появится на карте после проверки экологом.
+    added_mno: bool = False
     awaiting_type: bool = False
     incident_types: list = field(default_factory=list)
     # Шаг 3 (только для типа с подтипами, «Отсутствует доступ к МНО»): держим выбранный

@@ -29,6 +29,12 @@ PAYLOAD_PREFIX = "m"
 # Спец-индекс «без привязки к площадке» («Нет в списке» / «Отправить без привязки»).
 NO_MNO = "x"
 
+# Спец-индекс «➕ Добавить площадку» — создать новое волонтёрское МНО из собранных
+# данных (адрес+координаты+фото) и привязать к нему обращение. Показывается только
+# когда у обращения есть координаты (их требует POST /intake/mno). Отдельная буква,
+# чтобы не путать с NO_MNO и числовыми индексами кандидатов.
+ADD_MNO = "a"
+
 # Префикс payload для кнопок выбора ТИПА инцидента (шаг 2 диалога): «t:{pid}:{code}»,
 # где code — код из справочника incident_types (пусто = «Пропустить»).
 PAYLOAD_PREFIX_TYPE = "t"
@@ -63,7 +69,7 @@ def encode_payload(pending_id: str, idx) -> str:
 
 def decode_payload(s: str) -> tuple[str, int | str] | None:
     """Разобрать payload кнопки. Вернуть (pending_id, idx) либо None, если
-    формат чужой/битый. idx — int (>=0) или строка `NO_MNO`."""
+    формат чужой/битый. idx — int (>=0) или строка `NO_MNO`/`ADD_MNO`."""
     if not s:
         return None
     parts = s.split(":")
@@ -74,6 +80,8 @@ def decode_payload(s: str) -> tuple[str, int | str] | None:
         return None
     if raw == NO_MNO:
         return pid, NO_MNO
+    if raw == ADD_MNO:
+        return pid, ADD_MNO
     try:
         idx = int(raw)
     except ValueError:
@@ -172,6 +180,21 @@ def human_distance(distance_m) -> str:
     return f"{m / 1000:.1f} км"
 
 
+def join_address(region: str, city: str, street: str) -> str:
+    """Склейка «регион, город, улица» (пустые части пропускаются) — как в
+    notify._build_message / export.py. Используется для поля address при создании
+    волонтёрского МНО из бота (кнопка «➕ Добавить площадку»)."""
+    parts = [(region or "").strip(), (city or "").strip(), (street or "").strip()]
+    return ", ".join(p for p in parts if p)
+
+
+def mno_label(reg: str, name: str, address: str) -> str:
+    """Подпись площадки для подтверждения: реестровый № → название → адрес. У
+    только что созданной ботом волонтёрской площадки reg/name обычно пусты
+    (их не спрашиваем) → в подписи остаётся адрес."""
+    return (reg or "").strip() or (name or "").strip() or (address or "").strip()
+
+
 def merge_parsed(base: dict, override: dict) -> dict:
     """override поверх base, но ПУСТЫЕ значения override (None/"") не затирают
     base. Нужно при ответе-адресом: новый разбор даёт region/city/street, но не
@@ -215,6 +238,10 @@ class PendingReport:
     # площадку (id+подпись) и справочник типов (для подписи выбранного типа в подтверждении).
     chosen_mno_id: str | None = None
     chosen_mno_label: str = ""
+    # Площадка СОЗДАНА этим обращением (кнопка «➕ Добавить площадку»), а не выбрана из
+    # существующих. Нужно для финального сообщения («появится на карте после проверки
+    # экологом» — волонтёрское МНО уходит в модерацию, is_published=false).
+    added_mno: bool = False
     awaiting_type: bool = False
     incident_types: list = field(default_factory=list)
     # Шаг 3 (только для типа с подтипами, «Отсутствует доступ к МНО»): держим выбранный
